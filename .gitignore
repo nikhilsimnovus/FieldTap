@@ -1,0 +1,36 @@
+# Capture data - contains live network signalling and real subscriber identifiers.
+# See captures/README.md before ever removing these rules.
+*.pcap
+*.pcapng
+*.dlf
+*.qmdl
+*.hdf
+captures/**
+!captures/README.md
+!captures/.gitkeep
+
+# Wireshark text exports (large, and same identifier exposure as the pcaps)
+*_dissected.txt
+OnePlus_*.txt
+
+# Third-party / non-redistributable
+cots_nr_dissector*.lua
+*.luac
+
+# External dependencies - pinned, not vendored. See tools/README.md
+tools/qcsuper/
+tools/scat/
+
+# Secrets
+.env
+*.pem
+*.key
+credentials.json
+
+# OS / editor
+.DS_Store
+*.swp
+__pycache__/
+*.py[cod]
+.venv/
+venv/
