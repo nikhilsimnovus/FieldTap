@@ -212,6 +212,31 @@ def test_unauthorized_phone_is_reported_not_captured():
         devices.prepare(handset, set(), enable_diag=False)
 
 
+def test_an_emulator_is_recognised_and_not_retried_forever():
+    """Anyone with Android Studio open has an emulator on adb. It has no
+    Qualcomm modem, so it must be rejected once and permanently, not polled."""
+    props = {"model": "sdk_gphone64_x86_64", "hardware": "ranchu", "qemu": "1",
+             "characteristics": "emulator"}
+    assert devices.is_emulator(props)
+    assert devices.is_emulator({"hardware": "goldfish_x86"})
+    assert devices.is_emulator({"characteristics": "emulator,nosdcard"})
+    assert not devices.is_emulator({"model": "GM1913", "hardware": "qcom"})
+    assert not devices.is_emulator({})
+    handset = devices.Handset("emulator-5554", devices.AdbDevice("emulator-5554", "device"), None, props)
+    with pytest.raises(devices.NotReady) as caught:
+        devices.prepare(handset, set(), enable_diag=False)
+    assert caught.value.permanent is True
+    assert "emulator" in str(caught.value)
+
+
+def test_a_phone_still_waiting_for_its_port_is_retried():
+    """The opposite case: not ready now, but worth trying again."""
+    handset = devices.Handset("x", devices.AdbDevice("x", "unauthorized"), None)
+    with pytest.raises(devices.NotReady) as caught:
+        devices.prepare(handset, set(), enable_diag=False)
+    assert caught.value.permanent is False
+
+
 def test_handset_label_is_readable():
     h = devices.Handset("1a2b3c4d5e", devices.AdbDevice("1a2b3c4d5e", "device"), None, {"model": "GM1913"})
     assert h.label == "GM1913-3c4d5e"
@@ -234,6 +259,40 @@ def test_dumpsys_location_parsing_prefers_gps():
     assert fixes[0].provider == "gps"
     assert abs(fixes[0].lat - 12.9715987) < 1e-7 and abs(fixes[0].lon - 77.5945627) < 1e-7
     assert fixes[0].accuracy_m == 12.0 and fixes[0].altitude_m == 920.3 and fixes[0].speed_mps == 0.4
+
+
+# Verbatim from `adb shell dumpsys location` on an Android 15 emulator
+# (2026-09-09). Kept real rather than tidied: it carries the things a
+# hand-written sample would miss - a null entry, a trailing {Bundle[{...}]}
+# with brackets inside the location, and mslAlt/vAcc fields.
+REAL_ANDROID_15 = """
+      last location=Location[fused 39.364300,-74.422898 hAcc=100.0 et=+8h8m30s995ms alt=0.0 vAcc=100.0 mslAlt=35.34282307905309 mslAltAcc=100.00037]
+      last location=null
+      last location=Location[gps 39.364300,-74.422898 hAcc=5.0 et=+1h48m30s927ms alt=0.0 vAcc=0.5 mslAlt=35.34282307905309 mslAltAcc=0.5682429 vel=0.0 sAcc=0.5 bear=0.0 bAcc=30.0 {Bundle[{satellites=0, maxCn0=0, meanCn0=0}]}]
+"""
+
+
+def test_dumpsys_location_parses_real_android_15_output():
+    fixes = gps.parse_dumpsys_location(REAL_ANDROID_15)
+    assert len(fixes) == 2                      # the null entry is skipped, not crashed on
+    assert fixes[0].provider == "gps"           # gps outranks fused
+    assert abs(fixes[0].lat - 39.3643) < 1e-6
+    assert abs(fixes[0].lon + 74.422898) < 1e-6
+    assert fixes[0].accuracy_m == 5.0 and fixes[0].speed_mps == 0.0
+    assert fixes[1].provider == "fused" and fixes[1].accuracy_m == 100.0
+
+
+def test_total_packet_loss_is_a_failed_test_not_a_silent_pass():
+    """Real output from a phone with no route: statistics but no rtt line."""
+    output = """PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+--- 8.8.8.8 ping statistics ---
+3 packets transmitted, 0 received, 100% packet loss, time 2099ms
+"""
+    m = traffic.parse_ping(output)
+    assert m["sent"] == 3 and m["received"] == 0 and m["loss_pct"] == 100.0
+    assert "rtt_avg_ms" not in m                # must not invent a latency
+    runner = traffic.TrafficRunner(None, ["ping"], shell=lambda a, t: output)
+    assert runner.run_once()[0].ok is False
 
 
 def test_dumpsys_location_rejects_null_island_and_junk():

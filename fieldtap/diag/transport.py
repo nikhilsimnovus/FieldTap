@@ -372,6 +372,8 @@ def adb_getprops(serial: Optional[str] = None) -> dict:
         "ro.build.display.id": "android_build",
         "ro.build.version.release": "android_version",
         "ro.build.version.security_patch": "security_patch",
+        "ro.build.characteristics": "characteristics",
+        "ro.kernel.qemu": "qemu",
         "gsm.version.baseband": "baseband",
         "ro.baseband": "baseband_type",
         "ro.board.platform": "platform",

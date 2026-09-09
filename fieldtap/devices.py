@@ -25,7 +25,30 @@ from .diag import transport as tr
 
 
 class NotReady(Exception):
-    """The handset is visible but cannot be captured yet; retry later."""
+    """The handset is visible but cannot be captured.
+
+    `permanent` distinguishes "not yet" (waiting on a USB-debugging prompt,
+    a port that has not enumerated) from "not ever on this device" (an
+    emulator, which has no Qualcomm modem). The orchestrator retries the
+    first kind and stops pestering about the second.
+    """
+
+    def __init__(self, message: str, permanent: bool = False):
+        super().__init__(message)
+        self.permanent = permanent
+
+
+EMULATOR_HARDWARE = ("ranchu", "goldfish", "vbox86", "cutf")
+
+
+def is_emulator(props: dict) -> bool:
+    """An emulated Android has no baseband, no /dev/diag and nothing to tap."""
+    if props.get("qemu") == "1":
+        return True
+    if "emulator" in (props.get("characteristics") or "").lower():
+        return True
+    hardware = (props.get("hardware") or "").lower()
+    return any(hardware.startswith(h) for h in EMULATOR_HARDWARE)
 
 
 @dataclass
@@ -165,6 +188,11 @@ def prepare(handset: Handset, busy_ports: Set[str], log: Callable[[str], None] =
         raise NotReady("adb device is %s" % adb.state)
     if not handset.props:
         handset.props = tr.adb_getprops(adb.serial)
+    if is_emulator(handset.props):
+        raise NotReady("this is an Android emulator (%s), not a handset: it has no Qualcomm "
+                       "modem and no /dev/diag, so there is nothing to capture"
+                       % (handset.props.get("model") or handset.props.get("hardware") or "?"),
+                       permanent=True)
     before = {p.id for p in scan(include_adb=False)[0]}
     usb_state = handset.props.get("usb_state", "") or handset.props.get("usb_config", "")
     if enable_diag and "diag" not in usb_state:
@@ -175,7 +203,13 @@ def prepare(handset: Handset, busy_ports: Set[str], log: Callable[[str], None] =
             raise NotReady("could not enable diag over adb (is the phone rooted?): %s" % exc)
         log("phone reports usb state '%s'; waiting for the diag port to enumerate" % state)
     deadline = time.monotonic() + timeout
+    log("waiting up to %.0f s for a diag port to enumerate" % timeout)
+    announced = 0.0
     while True:
+        waited = timeout - (deadline - time.monotonic())
+        if waited - announced >= 10:
+            announced = waited
+            log("still waiting for a diag port (%.0f s of %.0f s)" % (waited, timeout))
         ports = [p for p in scan(include_adb=False)[0] if p.id not in busy_ports]
         by_serial = [p for p in ports if p.serial_number and _norm(p.serial_number) == _norm(adb.serial)]
         fresh = [p for p in ports if p.id not in before]
@@ -192,8 +226,12 @@ def prepare(handset: Handset, busy_ports: Set[str], log: Callable[[str], None] =
             log("diag port %s (%s)" % (chosen.id, chosen.description))
             return chosen.transport()
         if time.monotonic() >= deadline:
-            raise NotReady("no diag port appeared within %.0f s (Qualcomm USB driver installed? "
-                           "run `fieldtap devices` to see what Windows sees)" % timeout)
+            hint = ("the phone was not asked to expose diag (--no-enable-diag)"
+                    if not enable_diag else
+                    "the phone accepted the diag USB config but no port appeared: "
+                    "Qualcomm USB driver installed?")
+            raise NotReady("no diag port after %.0f s. %s Run `fieldtap devices` to see what "
+                           "Windows sees, and docs/DEVICE-SETUP.md for the driver" % (timeout, hint))
         time.sleep(poll)
 
 

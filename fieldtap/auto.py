@@ -106,8 +106,8 @@ class Worker(threading.Thread):
                     transport = devices.prepare(handset, self.busy_ports, self.log, enable_diag=opts.enable_diag)
                 except devices.NotReady as exc:
                     self.error = str(exc)
-                    self.state = "not-ready"
-                    self.log("not ready: %s" % exc)
+                    self.state = "unsuitable" if getattr(exc, "permanent", False) else "not-ready"
+                    self.log("%s: %s" % ("skipping" if exc.permanent else "not ready", exc))
                     return
             if handset.adb and not handset.props and tr.adb_path():
                 handset.props = tr.adb_getprops(handset.adb.serial)
@@ -319,8 +319,11 @@ def run(options: AutoOptions, log: Callable[[str], None] = lambda s: None,
                     retry_after[key] = now + options.retry_seconds
                     log("[%s] retrying in %.0f s" % (w.handset.label, options.retry_seconds))
                 else:
+                    # "unsuitable" lands here too: parked until it is unplugged,
+                    # so an emulator or a non-Qualcomm phone is reported once
+                    # rather than every retry_seconds forever.
                     finished[key] = w
-                    if options.once:
+                    if options.once and w.state == "done":
                         stop_event.set()
             if not active and not announced_waiting:
                 log("waiting for a handset (USB debugging on, or a Qualcomm diag port)...")
@@ -351,5 +354,5 @@ def summarize(workers: list) -> list:
             lines.append("%-28s done   %6d msgs  %s" % (w.handset.label, w.result.messages,
                                                         w.report_paths.get("report") or (w.session.dir if w.session else "")))
         else:
-            lines.append("%-28s %-6s %s" % (w.handset.label, w.state, w.error or ""))
+            lines.append("%-28s %-10s %s" % (w.handset.label, w.state, w.error or ""))
     return lines
