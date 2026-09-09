@@ -18,16 +18,34 @@ and RuSIM simulate a UE in the lab. FieldTap taps a real one in the field.
 
 ## Quick start
 
-    pip install -e ".[all]"            # pyserial + pyusb (or: pip install dist/*.whl)
-    fieldtap selftest                  # synthetic capture -> pcapng -> installed Wireshark
-    fieldtap devices                   # serial ports, USB diag interfaces, adb devices
-    fieldtap capture --port COM5 --name lab-test --live
-    fieldtap decode capture.qmdl       # replay a recording into pcapng
-    fieldtap flow capture.pcapng       # RRC/NAS ladder (text, mermaid or csv)
+    pip install -e ".[all]"
+    fieldtap setup --install-adb       # check Wireshark, adb, drivers; fetch what is missing
+    fieldtap demo                      # a simulated drive test end to end, no handset needed
+    fieldtap auto                      # then plug a phone in
 
-Each capture lands in `captures/<timestamp>_<name>/` with the raw `.qmdl`, the decoded
-`.pcapng`, a `cells.csv` and a `session.json` sidecar. `device/` holds the small root
-helper for the adb transport; it needs the Android NDK and is untested on hardware.
+`fieldtap auto` is the product: it watches USB, and for every handset that appears it
+enables the diag port, configures the log mask, captures, tags with GPS, optionally runs
+ping and download tests on the phone, and writes a report when the phone is unplugged.
+Several phones can be connected at once; each gets its own session and report. On
+Windows, `FieldTap-Auto.cmd` does the same thing by double-click.
+
+    fieldtap auto --profile all --traffic ping,download --live
+
+Each session lands in `captures/<timestamp>_<name>/`:
+
+| File | What it is |
+| --- | --- |
+| `capture.qmdl` | the raw diag stream, exactly as the modem sent it |
+| `capture.pcapng` | decoded RRC/NAS, opens in stock Wireshark |
+| `report.html` | the session report: KPIs, events, route map, call flow |
+| `summary.json` | the same numbers for machines |
+| `events.csv` | procedures and failures with 3GPP causes |
+| `kpi.csv` | RSRP/RSRQ/SINR timeline, GPS-tagged |
+| `track.csv`, `traffic.csv`, `cells.csv` | route, active tests, serving cells |
+
+Single-shot commands still exist: `capture`, `decode`, `info`, `flow`, `kpi`, `events`,
+`report`, `sessions`, `logcodes`, `selftest`. `device/` holds the root helper for the adb
+transport; it needs the Android NDK and is untested on hardware.
 
 ## Where the project actually stands
 
@@ -70,6 +88,8 @@ explains what changed and Roadmap task 0.1 is now more urgent, not less.
 | [`docs/LICENSING.md`](docs/LICENSING.md) | The GPL problem and the four ways out |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Target design and the decode pipeline |
 | [`docs/COMPETITIVE-LANDSCAPE.md`](docs/COMPETITIVE-LANDSCAPE.md) | XCAL-Mobile, NSG, QualiPoc and where FieldTap fits |
+| [`docs/DEVICE-SETUP.md`](docs/DEVICE-SETUP.md) | Getting a handset and this laptop ready |
+| [`docs/research/`](docs/research/) | Competitor analysis, Windows/diag mechanics, Qualcomm log layouts |
 | [`captures/README.md`](captures/README.md) | Capture handling policy and how to reproduce |
 | [`third_party/README.md`](third_party/README.md) | Vendored QCSuper: provenance, and what it changed about the licence |
 | [`tools/README.md`](tools/README.md) | External dependency setup |
