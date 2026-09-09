@@ -8,12 +8,13 @@ and RuSIM simulate a UE in the lab. FieldTap taps a real one in the field.
 
 > **Status: pre-alpha. A clean-room implementation exists; it has not yet been run
 > against a handset.**
-> The `fieldtap` package speaks diag itself (no QCSuper, no SCAT), decodes LTE and NR
-> RRC/NAS log records, and writes pcapng that stock Wireshark dissects. The unit tests
-> and `fieldtap selftest` pass against Wireshark 4.0, but the header layout tables are
-> verified only against a synthetic corpus. Read [`docs/ROADMAP.md`](docs/ROADMAP.md)
-> for what has to happen next, and [`docs/LICENSING.md`](docs/LICENSING.md) for the
-> decision that still gates the business model.
+> The `fieldtap` package speaks diag itself and imports nothing from QCSuper or SCAT.
+> It decodes LTE and NR RRC/NAS log records and writes pcapng that stock Wireshark
+> dissects. The unit tests and `fieldtap selftest` pass against Wireshark 4.0, but the
+> header layout tables are verified only against a synthetic corpus. Read
+> [`docs/ROADMAP.md`](docs/ROADMAP.md) for what has to happen next, and
+> [`docs/LICENSING.md`](docs/LICENSING.md) for the decision that still gates the
+> business model.
 
 ## Quick start
 

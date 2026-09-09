@@ -9,7 +9,9 @@ description = "Turn a Qualcomm Android handset into a real-UE network probe: dia
 readme = "README.md"
 requires-python = ">=3.9"
 # The licence model is an open decision (docs/LICENSING.md). Until it is made the
-# code is proprietary by default; nothing in this tree links to GPL code.
+# code is proprietary by default. The fieldtap package imports nothing from the
+# vendored QCSuper (GPLv3) under third_party/, and packages.find below keeps that
+# tree out of the wheel.
 license = {text = "Proprietary - see LICENSE"}
 authors = [{name = "Simnovus"}]
 dependencies = []
