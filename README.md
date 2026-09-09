@@ -6,10 +6,27 @@ Qualcomm diag port, decode it, and land it in Wireshark as clean GSMTAP.
 FieldTap is the real-network counterpart to the Simnovus simulator line. UESIM, ORUSIM
 and RuSIM simulate a UE in the lab. FieldTap taps a real one in the field.
 
-> **Status: pre-alpha. No shippable code yet.**
-> This repository currently contains planning and architecture documentation only.
-> Read [`docs/ROADMAP.md`](docs/ROADMAP.md) for what has to happen next, and
-> [`docs/LICENSING.md`](docs/LICENSING.md) for the decision that gates everything else.
+> **Status: pre-alpha. A clean-room implementation exists; it has not yet been run
+> against a handset.**
+> The `fieldtap` package speaks diag itself (no QCSuper, no SCAT), decodes LTE and NR
+> RRC/NAS log records, and writes pcapng that stock Wireshark dissects. The unit tests
+> and `fieldtap selftest` pass against Wireshark 4.0, but the header layout tables are
+> verified only against a synthetic corpus. Read [`docs/ROADMAP.md`](docs/ROADMAP.md)
+> for what has to happen next, and [`docs/LICENSING.md`](docs/LICENSING.md) for the
+> decision that still gates the business model.
+
+## Quick start
+
+    pip install -e ".[all]"            # pyserial + pyusb (or: pip install dist/*.whl)
+    fieldtap selftest                  # synthetic capture -> pcapng -> installed Wireshark
+    fieldtap devices                   # serial ports, USB diag interfaces, adb devices
+    fieldtap capture --port COM5 --name lab-test --live
+    fieldtap decode capture.qmdl       # replay a recording into pcapng
+    fieldtap flow capture.pcapng       # RRC/NAS ladder (text, mermaid or csv)
+
+Each capture lands in `captures/<timestamp>_<name>/` with the raw `.qmdl`, the decoded
+`.pcapng`, a `cells.csv` and a `session.json` sidecar. `device/` holds the small root
+helper for the adb transport; it needs the Android NDK and is untested on hardware.
 
 ## Where the project actually stands
 
@@ -26,9 +43,10 @@ Every component in that chain is third-party. Specifically:
 | `diag_nr_rrc_dissector.lua` | Ships **inside QCSuper** | Not original work. Covered by QCSuper's GPLv3. |
 | `cots_nr_dissector.lua` | Commercial trial, `makemytechnology.com` | **Expired, compiled bytecode, not redistributable.** Currently the only NR decode path — and it no longer runs. |
 
-The honest summary: FieldTap today is a workflow assembled from other people's tools,
-one of which has stopped working because its trial ran out. Turning it into a product
-means replacing the parts that are not ours. That is what the roadmap is about.
+The honest summary: until Sep 2026 FieldTap was a workflow assembled from other people's
+tools, one of which stopped working because its trial ran out. The `fieldtap` package
+replaces the capture and decode parts with our own code. What remains is proving that
+code on real handsets, which is what the roadmap is about.
 
 ## What is deliberately not in this repository
 
