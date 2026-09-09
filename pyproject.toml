@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fieldtap"
+version = "0.1.0"
+description = "Turn a Qualcomm Android handset into a real-UE network probe: diag capture, RRC/NAS decode, Wireshark-native output."
+readme = "README.md"
+requires-python = ">=3.9"
+# The licence model is an open decision (docs/LICENSING.md). Until it is made the
+# code is proprietary by default; nothing in this tree links to GPL code.
+license = {text = "Proprietary - see LICENSE"}
+authors = [{name = "Simnovus"}]
+dependencies = []
+
+[project.optional-dependencies]
+serial = ["pyserial>=3.5"]
+usb = ["pyusb>=1.2"]
+all = ["pyserial>=3.5", "pyusb>=1.2"]
+dev = ["pytest>=7", "pyserial>=3.5", "pyusb>=1.2"]
+
+[project.scripts]
+fieldtap = "fieldtap.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["fieldtap*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

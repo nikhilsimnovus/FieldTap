@@ -42,3 +42,8 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# Build output
+build/
+dist/
+*.egg-info/
