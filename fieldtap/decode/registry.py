@@ -64,7 +64,11 @@ LOG_CODES = {i.code: i for i in (
     _c(0xB17F, "LTE ML1 Serving Cell Meas and Eval", "lte", "meas"),
     _c(0xB180, "LTE ML1 Idle Neighbor Meas Results", "lte", "meas"),
     _c(0xB193, "LTE ML1 Serving Cell Measurement Result", "lte", "meas",
-       note="The classic RSRP/RSRQ/RSSI source; layout is version dependent and bit packed"),
+       note="The classic per-antenna RSRP/RSRQ/RSSI/SNR source. Container and subpacket "
+            "framing are documented (subpacket 0x19); the measurements are bit-packed across "
+            "32-bit words at version-specific offsets that no non-GPL source pins down, so no "
+            "parser here yet. Confirm offsets on a hardware capture first - see "
+            "docs/research/qualcomm-measurement-log-layouts.md"),
     _c(0xB195, "LTE ML1 Neighbor Measurements", "lte", "meas"),
     # --- NR RRC ---------------------------------------------------------------------
     _c(0xB821, "NR RRC OTA Packet", "nr", "rrc", "nr_rrc", "medium",
@@ -86,15 +90,30 @@ LOG_CODES = {i.code: i for i in (
        note="code/direction pairing not confirmed on hardware"),
     _c(0xB80D, "NR NAS MM5G Security Protected Outgoing Msg", "nr", "nas", "nas", "low", ("5gmm", "ul", "sec"),
        note="seen in the Jul 2024 QCAT export as an MM5G log; direction unconfirmed"),
-    _c(0xB80E, "NR NAS MM5G State", "nr", "other"),
+    _c(0xB80E, "NR NAS MM5G State", "nr", "other",
+       note="Number unconfirmed: two open decoders place the 5GMM state record at 0xB80C, "
+            "which this register assigns to a security-protected MM5G message. One of the two "
+            "is wrong - resolve on a hardware capture before trusting either"),
     _c(0xB80F, "NR NAS MM5G Service Request", "nr", "other"),
     _c(0xB814, "NR NAS SM5G State", "nr", "other"),
     # --- NR ML1: captured for the corpus, not decoded ----------------------------------------
     _c(0xB975, "NR ML1 Serving Cell Beam Management", "nr", "meas"),
-    _c(0xB97F, "NR ML1 Searcher Measurement Database Update Ext", "nr", "meas",
-       note="SS-RSRP/RSRQ/SINR per beam; layout is version dependent"),
-    _c(0xB887, "NR MAC PDSCH Info", "nr", "mac"),
-    _c(0xB88A, "NR MAC UL Physical Channel Schedule Report", "nr", "mac"),
+    _c(0xB97F, "NR ML1 Searcher Measurement DB Update Ext", "nr", "meas",
+       note="Per-carrier/cell/beam SS-RSRP/RSRQ; the NR counterpart to 0xB193 and the "
+            "strongest NR measurement candidate. Layout version dependent; confirm on hardware"),
+    # The four codes below were checked against two independent open decoders while writing
+    # docs/research/qualcomm-measurement-log-layouts.md and none of them matched. The name is
+    # kept because it is what the field asks for, but the number is suspect: enable both the
+    # code here and the one in the note during a hardware capture and keep whichever appears.
+    _c(0xB887, "NR MAC PDSCH Info", "nr", "mac",
+       note="Number unconfirmed: documented decoders put PDSCH stats at 0xB888"),
+    _c(0xB888, "NR MAC PDSCH Stats", "nr", "mac",
+       note="Where two open decoders place NR PDSCH decode stats (BLER, MCS)"),
+    _c(0xB88A, "NR MAC RACH Attempt", "nr", "mac",
+       note="Documented as RACH Attempt, not the UL schedule report; that is 0xB883"),
+    _c(0xB883, "NR MAC UL Physical Channel Schedule Report", "nr", "mac"),
+    _c(0xB872, "NR L2 UL Transport Block", "nr", "mac",
+       note="UL throughput source; 0xB8D8 was checked and is not this record"),
 )}
 
 
@@ -108,9 +127,15 @@ PROFILES = {
 }
 
 
+ALL_PROFILE = "all"   # every log item in every range the modem reports; resolved at capture time
+
+
 def profile_codes(name: str) -> list:
+    if name == ALL_PROFILE:
+        return []
     if name not in PROFILES:
-        raise KeyError("unknown log profile %r (choose from %s)" % (name, ", ".join(sorted(PROFILES))))
+        raise KeyError("unknown log profile %r (choose from %s)"
+                       % (name, ", ".join(sorted(list(PROFILES) + [ALL_PROFILE]))))
     return sorted(PROFILES[name])
 
 

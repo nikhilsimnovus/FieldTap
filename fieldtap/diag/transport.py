@@ -62,6 +62,9 @@ class PortInfo:
     vid: Optional[int]
     pid: Optional[int]
     likely_diag: bool
+    serial_number: Optional[str] = None   # USB serial of the (parent) device: usually the adb serial
+    location: Optional[str] = None        # bus/port path, stable while the phone stays plugged in
+    hwid: str = ""
 
 
 def list_serial_ports() -> list:
@@ -74,7 +77,9 @@ def list_serial_ports() -> list:
         desc = (p.description or "") + " " + (p.manufacturer or "") + " " + (p.product or "")
         likely = ("diag" in desc.lower()) or (p.vid == QUALCOMM_VID and "9091" in desc) \
             or ("901d" in desc.lower()) or ("9091" in desc.lower())
-        ports.append(PortInfo(p.device, desc.strip(), p.vid, p.pid, likely))
+        ports.append(PortInfo(p.device, desc.strip(), p.vid, p.pid, likely,
+                              getattr(p, "serial_number", None) or None,
+                              getattr(p, "location", None) or None, p.hwid or ""))
     return ports
 
 
@@ -105,19 +110,25 @@ class SerialTransport(Transport):
 
     def read(self, max_bytes: int = 65536, timeout: float = 0.5) -> bytes:
         deadline = time.monotonic() + timeout
-        while True:
-            waiting = self._ser.in_waiting
-            if waiting:
-                return self._ser.read(min(max_bytes, waiting))
-            if time.monotonic() >= deadline:
-                return b""
-            chunk = self._ser.read(1)
-            if chunk:
-                return chunk + self._ser.read(min(max_bytes - 1, self._ser.in_waiting))
+        try:
+            while True:
+                waiting = self._ser.in_waiting
+                if waiting:
+                    return self._ser.read(min(max_bytes, waiting))
+                if time.monotonic() >= deadline:
+                    return b""
+                chunk = self._ser.read(1)
+                if chunk:
+                    return chunk + self._ser.read(min(max_bytes - 1, self._ser.in_waiting))
+        except Exception as exc:   # pyserial raises SerialException / OSError when the port vanishes
+            raise TransportError("serial port %s lost: %s" % (self.port, exc)) from exc
 
     def write(self, data: bytes) -> None:
-        self._ser.write(data)
-        self._ser.flush()
+        try:
+            self._ser.write(data)
+            self._ser.flush()
+        except Exception as exc:
+            raise TransportError("serial port %s lost: %s" % (self.port, exc)) from exc
 
     def describe(self) -> dict:
         return {"transport": "serial", "port": self.port}
@@ -162,11 +173,17 @@ def list_usb_diag_devices() -> list:
     for dev in devices:
         try:
             for _cfg, intf, ep_in, ep_out in _iter_diag_interfaces(dev):
+                try:
+                    import usb.util
+                    serial = usb.util.get_string(dev, dev.iSerialNumber) if dev.iSerialNumber else None
+                except Exception:
+                    serial = None
                 found.append({
                     "vid": dev.idVendor, "pid": dev.idProduct,
                     "bus": dev.bus, "address": dev.address,
                     "interface": intf.bInterfaceNumber,
                     "ep_in": ep_in.bEndpointAddress, "ep_out": ep_out.bEndpointAddress,
+                    "serial": serial,
                 })
         except Exception:
             continue
@@ -299,7 +316,24 @@ ADB_DEFAULT_PORT = 45299
 
 
 def adb_path() -> Optional[str]:
-    return shutil.which("adb")
+    override = os.environ.get("FIELDTAP_ADB")
+    if override and os.path.isfile(override):
+        return override
+    found = shutil.which("adb")
+    if found:
+        return found
+    exe = "adb.exe" if os.name == "nt" else "adb"
+    repo_tools = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tools")
+    candidates = [
+        os.path.join(os.environ.get("FIELDTAP_TOOLS", repo_tools), "platform-tools", exe),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Android", "Sdk", "platform-tools", exe),
+        os.path.join(os.path.expanduser("~"), "platform-tools", exe),
+        os.path.join("C:\\", "platform-tools", exe),
+    ]
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    return None
 
 
 def adb(args: list, serial: Optional[str] = None, timeout: float = 30, check: bool = True) -> str:
@@ -390,7 +424,15 @@ def adb_su(cmd: str, serial: Optional[str] = None, timeout: float = 30) -> str:
     raise TransportError("root shell command failed: %s" % last)
 
 
-DIAG_USB_CONFIGS = ("diag,adb", "diag,serial_cdev,rmnet,adb", "diag,diag_mdm,adb")
+# Ordered most-specific first. The long OnePlus/OPPO composition is what current
+# OxygenOS/ColorOS builds expect; a shorter string is silently ignored on some of them.
+# See docs/DEVICE-SETUP.md and docs/research/windows-diag-and-device-control.md.
+DIAG_USB_CONFIGS = (
+    "diag,diag_mdm,qdss,qdss_mdm,serial_cdev,dpl,rmnet,adb",   # OnePlus / OPPO / Realme
+    "diag,serial_cdev,rmnet,adb",                              # common Qualcomm reference
+    "diag,diag_mdm,adb",
+    "diag,adb",
+)
 
 
 def adb_enable_diag_usb(serial: Optional[str] = None) -> str:
@@ -555,3 +597,93 @@ class LoopbackTransport(Transport):
 
     def push(self, data: bytes) -> None:
         self._inbox.extend(data)
+
+
+# --- Buffered reader: keeps the raw capture complete when decoding falls behind ---------------
+
+class BufferedTransport(Transport):
+    """Wrap any transport with a reader thread.
+
+    The thread does nothing but pull bytes off the device and queue them, so
+    the OS/USB buffers never overflow while Python is busy unframing and
+    decoding. With every log code enabled a modem can push several MB/s in
+    bursts; without this, a slow moment in the decoder shows up as CRC errors
+    and lost records in the .qmdl.
+    """
+    name = "buffered"
+
+    def __init__(self, inner: Transport, chunk_timeout: float = 0.2):
+        import threading
+        self.inner = inner
+        self.interactive = inner.interactive
+        self.name = inner.name
+        self._chunks: list = []
+        self._bytes = 0
+        self._lock = threading.Lock()
+        self._cv = threading.Condition(self._lock)
+        self._thread: Optional[threading.Thread] = None
+        self._stop = threading.Event()
+        self._error: Optional[BaseException] = None
+        self._chunk_timeout = chunk_timeout
+        self.high_water = 0
+
+    def open(self) -> None:
+        import threading
+        self.inner.open()
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._pump, name="fieldtap-reader", daemon=True)
+        self._thread.start()
+
+    def _pump(self) -> None:
+        while not self._stop.is_set():
+            try:
+                data = self.inner.read(timeout=self._chunk_timeout)
+            except BaseException as exc:      # EOFError, TransportError: hand it to the consumer
+                with self._cv:
+                    self._error = exc
+                    self._cv.notify_all()
+                return
+            if not data:
+                continue
+            with self._cv:
+                self._chunks.append(data)
+                self._bytes += len(data)
+                self.high_water = max(self.high_water, self._bytes)
+                self._cv.notify_all()
+
+    def read(self, max_bytes: int = 65536, timeout: float = 0.5) -> bytes:
+        with self._cv:
+            if not self._chunks and self._error is None:
+                self._cv.wait(timeout)
+            if self._chunks:
+                out = bytearray()
+                while self._chunks and len(out) + len(self._chunks[0]) <= max_bytes:
+                    out += self._chunks.pop(0)
+                if not out:                       # a single chunk larger than max_bytes
+                    chunk = self._chunks.pop(0)
+                    out += chunk[:max_bytes]
+                    if len(chunk) > max_bytes:
+                        self._chunks.insert(0, chunk[max_bytes:])
+                self._bytes -= len(out)
+                return bytes(out)
+            if self._error is not None:
+                raise self._error
+            return b""
+
+    def write(self, data: bytes) -> None:
+        self.inner.write(data)
+
+    def close(self) -> None:
+        self._stop.set()
+        self.inner.close()
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+            self._thread = None
+
+    @property
+    def queued(self) -> int:
+        with self._lock:
+            return self._bytes
+
+    def describe(self) -> dict:
+        return self.inner.describe()

@@ -56,7 +56,11 @@ def escape(data: bytes) -> bytes:
     return bytes(out)
 
 
-def unescape(data: bytes) -> bytes:
+_ESC_FLAG = bytes((ESCAPE, FLAG ^ ESCAPE_XOR))      # 7D 5E  ->  7E
+_ESC_ESC = bytes((ESCAPE, ESCAPE ^ ESCAPE_XOR))     # 7D 5D  ->  7D
+
+
+def _unescape_slow(data: bytes) -> bytes:
     out = bytearray()
     pending = False
     for byte in data:
@@ -70,6 +74,19 @@ def unescape(data: bytes) -> bytes:
     if pending:
         raise HdlcError("frame ends in the middle of an escape sequence")
     return bytes(out)
+
+
+def unescape(data: bytes) -> bytes:
+    """The only escape sequences a conforming sender emits are 7D 5E and
+    7D 5D, so when every escape byte belongs to one of those the work is two
+    bytes.replace calls at C speed (7D 5E first, so a 7D produced by the
+    second replacement is never re-read). Anything else takes the byte loop,
+    which also raises on a dangling escape."""
+    if ESCAPE not in data:
+        return bytes(data)
+    if data.count(ESCAPE) == data.count(_ESC_FLAG) + data.count(_ESC_ESC):
+        return data.replace(_ESC_FLAG, b"\x7e").replace(_ESC_ESC, b"\x7d")
+    return _unescape_slow(data)
 
 
 class HdlcError(ValueError):

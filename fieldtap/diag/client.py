@@ -178,6 +178,32 @@ class DiagClient:
                 result.failed += usable
         return result
 
+    def configure_all_logs(self) -> LogMaskResult:
+        """Enable every log item in every equipment-id range the modem reports.
+        This is the "capture everything" mode: the raw .qmdl then holds all the
+        modem is willing to emit, decoded or not."""
+        result = LogMaskResult()
+        self.disable_logs()
+        ranges = protocol.parse_log_config_response(self.request(protocol.build_log_config_get_ranges()))
+        if not ranges.ok:
+            raise DiagError("modem refused log id range query (status %d)" % ranges.status)
+        result.ranges = {i: v for i, v in enumerate(ranges.ranges)}
+        for equip, last_item in sorted(result.ranges.items()):
+            if last_item <= 0:
+                continue
+            codes = [(equip << 12) | item for item in range(last_item + 1)]
+            req = protocol.build_log_config_set_mask(equip, last_item, codes)
+            try:
+                resp = protocol.parse_log_config_response(self.request(req, timeout=5.0))
+            except DiagError:
+                result.failed += codes
+                continue
+            if resp.ok:
+                result.enabled += codes
+            else:
+                result.failed += codes
+        return result
+
     def stream(self, stop: Optional[Callable[[], bool]] = None, idle_timeout: float = 0.5,
                on_idle: Optional[Callable[[], None]] = None) -> Iterator[LogRecord]:
         """Yield log records until the transport ends or `stop()` returns True."""
