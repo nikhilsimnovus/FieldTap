@@ -36,8 +36,12 @@ means replacing the parts that are not ours. That is what the roadmap is about.
   real subscriber and cell identifiers. See [`captures/README.md`](captures/README.md).
 * **The expired commercial dissector.** Redistributing licensed third-party bytecode is a
   violation regardless of repo visibility.
-* **Vendored QCSuper / SCAT.** These are pinned external dependencies, not part of this
-  tree. See [`tools/README.md`](tools/README.md).
+* **SCAT.** Pinned as an external dependency, not vendored. See [`tools/README.md`](tools/README.md).
+
+QCSuper **is** vendored, at [`third_party/qcsuper/`](third_party/) — unmodified, GPLv3,
+commit `f5f1501`. That means this repository now contains GPLv3 source, which is lawful
+but has consequences for the licence model; [`third_party/README.md`](third_party/README.md)
+explains what changed and Roadmap task 0.1 is now more urgent, not less.
 
 ## Documentation
 
@@ -48,4 +52,5 @@ means replacing the parts that are not ours. That is what the roadmap is about.
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Target design and the decode pipeline |
 | [`docs/COMPETITIVE-LANDSCAPE.md`](docs/COMPETITIVE-LANDSCAPE.md) | XCAL-Mobile, NSG, QualiPoc and where FieldTap fits |
 | [`captures/README.md`](captures/README.md) | Capture handling policy and how to reproduce |
+| [`third_party/README.md`](third_party/README.md) | Vendored QCSuper: provenance, and what it changed about the licence |
 | [`tools/README.md`](tools/README.md) | External dependency setup |

@@ -20,8 +20,13 @@ OnePlus_*.txt
 cots_nr_dissector*.lua
 *.luac
 
-# External dependencies - pinned, not vendored. See tools/README.md
-tools/qcsuper/
+# Vendored third-party source (GPLv3) lives in third_party/ and IS tracked.
+# The exception below is scoped to third_party ONLY - it must never weaken the
+# capture rules above. Upstream sample pcaps are public data from QCSuper's own
+# repository, not field captures.
+!third_party/**/*.pcap
+
+# SCAT is not vendored - pinned externally. See tools/README.md
 tools/scat/
 
 # Secrets

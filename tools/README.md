@@ -1,27 +1,17 @@
 # External dependencies
 
-These are **pinned, not vendored**. Nothing here is committed — see `.gitignore`.
+Dependencies listed here are **pinned, not vendored** — nothing in this directory is
+committed. QCSuper was moved out of this arrangement and vendored into `third_party/`;
+SCAT remains external.
 
-Vendoring GPL code into this tree would entangle the repository's licence with QCSuper's
-and SCAT's before the licence decision in [`../docs/LICENSING.md`](../docs/LICENSING.md)
-has been made. Keeping them external keeps that decision open.
+## QCSuper — now vendored, not external
 
-## QCSuper — the current capture backend
+QCSuper is **no longer a pinned external dependency**. It is vendored, unmodified, at
+[`../third_party/qcsuper/`](../third_party/) at commit `f5f1501`. See
+[`../third_party/README.md`](../third_party/README.md) for provenance, the one omission
+(prebuilt adb binaries), and the licensing consequence.
 
-* Upstream: https://github.com/P1sec/QCSuper
-* Licence: **GPLv3**
-* Pinned commit: `f5f1501` (merge of PR #119, tcp_connector)
-* Local working copy: `~/qcsuper` (clean, no local commits as of Nov 2025)
-
-```bash
-git clone https://github.com/P1sec/QCSuper.git tools/qcsuper
-cd tools/qcsuper && git checkout f5f1501
-```
-
-Ships its own Wireshark dissector at
-`src/modules/wireshark_plugin/diag_nr_rrc_dissector.lua`. Note that the copy previously
-kept in `~/Downloads` is byte-identical to this file — it is QCSuper's work, not ours,
-and it is covered by QCSuper's GPLv3.
+The local working clone at `~/qcsuper` remains the reference for pulling upstream updates.
 
 ## SCAT — alternative capture backend
 
