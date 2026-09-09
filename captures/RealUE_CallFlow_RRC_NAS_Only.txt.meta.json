@@ -1,0 +1,40 @@
+{
+  "_schema": "fieldtap-capture-meta/v1",
+  "_warning": "Metadata only. NEVER record subscriber identifiers (IMSI, IMEI, TMSI, GUTI, MSISDN) in this file - it is committed to git, unlike the capture itself.",
+  "file": "RealUE_CallFlow_RRC_NAS_Only.txt",
+  "size_bytes": 8811787,
+  "format": "QCAT-style Qualcomm diag log export (log-code headers, named field dumps)",
+  "capture_date": "2024-07-03",
+  "time_start": "2024-07-03T20:05:21.159",
+  "device": {
+    "vendor": "UNKNOWN",
+    "model": "UNKNOWN",
+    "android_build": "UNKNOWN",
+    "modem_firmware": "UNKNOWN",
+    "chipset": "Qualcomm (confirmed - Qualcomm diag log codes present)"
+  },
+  "network": {
+    "operator": "AT&T (United States)",
+    "mcc_mnc": "311-180",
+    "mcc_mnc_source": "Decoded from NAS 'Req PLMN Identity = { 0x13, 0x01, 0x81 }' and confirmed against explicit mcc_1/2/3 + mnc_1/2/3 fields in the log.",
+    "rat": ["NR5G"],
+    "bands": "NR5G band capability bitmap present in Rat Priority List; not yet decoded to band numbers"
+  },
+  "contents": {
+    "nas_message_count": 146,
+    "log_codes_observed": {
+      "0xB80D": "NR5G NAS MM5G Service Request",
+      "0xB80C": "NR5G NAS MM5G State"
+    },
+    "packet_version_fields_present": true
+  },
+  "findings": {
+    "significance": "The only NR-layer material in the corpus. Every other capture is LTE. This makes it disproportionately important to Roadmap Phase 2, which is entirely about owning NR decode.",
+    "second_operator": "Confirms the corpus spans two US operators - AT&T here, T-Mobile in the Nov 2025 OnePlus captures - rather than one as previously assumed."
+  },
+  "open_questions": [
+    "Device and modem generation are unrecorded. Without them this cannot serve as a regression fixture for Phase 2.3, which is specifically about per-modem-generation struct variance.",
+    "Capture predates the Nov 2025 sessions by ~16 months. Whoever ran it may still recall the handset - worth asking before that is lost."
+  ],
+  "provenance_confidence": "high for network and contents (decoded from the file itself); zero for device"
+}

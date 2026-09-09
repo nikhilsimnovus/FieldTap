@@ -19,32 +19,65 @@ a test SIM against a lab network.
 
 ## Current contents
 
-Moved here from `~/Downloads` — these files live in this folder on disk but are excluded
-from version control.
+Moved here from `~/Downloads`. These files live in this folder on disk but are excluded
+from version control. Each has a tracked `*.meta.json` sidecar — those **are** committed
+and form the corpus index.
 
-| File | Device / session | Date | Notes |
-| --- | --- | --- | --- |
-| `oneplus_latest_all_logs.pcapng` | OnePlus, T-Mobile | 19 Nov 2025 | ~2.5 MB. The raw QCSuper capture. |
-| `OnePlus_TMobile.txt` | OnePlus, T-Mobile | 21 Nov 2025 | ~7 MB Wireshark text export. GSMTAP → `lte_rrc` over UDP 4729. Confirms the LTE path decodes with stock Wireshark. |
-| `Signalling Message_GS24.txt` | **Samsung Galaxy S24** | 13 Nov 2025 | ~990 KB. UL EPS SM / PDN disconnect. A **second device and modem generation** — directly useful to Phase 2.3. |
-| `RealUE_CallFlow_RRC_NAS_Only.txt` | Unidentified | Jul 2024 | ~8.4 MB. NR5G NAS MM5G, log code `0xB80D`. QCAT-style export from an earlier session. **The only NR-layer material in the corpus.** |
+| File | Source | Date | RAT | Notes |
+| --- | --- | --- | --- | --- |
+| `oneplus_latest_all_logs.pcapng` | OnePlus, T-Mobile | 19 Nov 2025 | LTE | ~2.5 MB raw QCSuper capture |
+| `OnePlus_TMobile.txt` | OnePlus, T-Mobile | 21 Nov 2025 | LTE | ~7 MB Wireshark export, 223 frames over ~281 s |
+| `Signalling Message_GS24.txt` | **Uncertain — see below** | 13 Nov 2025 | LTE | ~990 KB, 89 messages, EPS SM/MM, NAS v950 |
+| `RealUE_CallFlow_RRC_NAS_Only.txt` | Unidentified device, **AT&T** | 3 Jul 2024 | **NR5G** | ~8.4 MB, 146 NAS messages, QCAT-style |
 
-## What this inventory tells us
+Full detail — including capture host, decode breakdown and confidence ratings — is in the
+sidecars.
 
-The project has captures from **at least three distinct devices/sessions**, not one. That
-matters more than it looks: Roadmap Phase 2.3 — packet-version variance across modem
-generations — is the technical moat, and it needs exactly this kind of cross-device
-material. The Galaxy S24 file and the Jul 2024 NR5G NAS export are the two most valuable
-items here, because they cover ground the OnePlus captures do not.
+## What the recovered provenance changed
 
-Two gaps to close:
+Reading the files rather than their filenames corrected three assumptions:
 
-* **Provenance is incomplete.** The device behind `RealUE_CallFlow_RRC_NAS_Only.txt` is
-  not recorded anywhere, and without the device and modem firmware the capture is much
-  less useful as a regression fixture. Reconstruct it while it is still reconstructable.
-* **There is still no backup.** These files are gitignored, so version control does not
-  protect them. They are the only empirical record the project has. Put them somewhere
-  durable that is not a single laptop.
+**The corpus spans two operators, not one.** The Jul 2024 capture decodes to **MCC 311 /
+MNC 180 — AT&T**, read from the NAS `Req PLMN Identity = { 0x13, 0x01, 0x81 }` and
+confirmed against the explicit MCC/MNC fields. The Nov 2025 work was T-Mobile.
+
+**The capture host is Linux, not macOS.** The pcapng section header records
+`Linux 6.8.0-85-generic`, an i9-13900H, and `Dumpcap (Wireshark) 4.4.9` reading from
+standard input — i.e. QCSuper's stdout piped into dumpcap on a Linux laptop. Anyone
+reproducing the Nov 2025 session needs that host, not this Mac. This is exactly the kind
+of detail Roadmap 1.2 exists to capture, and it was one file-header away from being lost.
+
+**35% of the OnePlus capture does not decode.** Of 223 frames, 136 resolve to
+`lte_rrc`, but **77 resolve only to `ip:udp:data`** — GSMTAP payloads Wireshark could not
+attribute to any dissector. That is the gap Phase 2 exists to close, now measured rather
+than assumed, and it is consistent with NR frames that depended on the expired
+third-party dissector.
+
+## Correction: the Galaxy S24 file is not confirmed to be a handset capture
+
+An earlier assessment recorded `Signalling Message_GS24.txt` as a second device and modem
+generation, and therefore directly useful to Phase 2.3. **That is not established.** The
+device attribution rests entirely on the `GS24` token in the filename, and the file's
+format — `PC Timestamp` fields, directional arrows, decoded-field blocks — reads more like
+a network-side or test-system log than an on-device Qualcomm diag capture. Downloads from
+the same date included Amarisoft UE Simbox documentation, which makes a test-system origin
+plausible.
+
+If it is a network-side log, its value to Phase 2.3 is much lower than assumed, because
+Phase 2.3 is specifically about per-modem-generation diag struct variance. Resolve this
+before counting it as corpus coverage. Note also that the Galaxy S24 shipped in both
+Exynos and Snapdragon variants, so even if it is a handset capture, which variant matters.
+
+## Corpus gaps
+
+* **NR coverage rests on a single file** whose device is unknown. Phase 2 is entirely
+  about NR decode, and the only NR material here cannot currently serve as a regression
+  fixture because there is no device or modem generation attached to it. It is ~16 months
+  old; whoever ran it may still remember the handset.
+* **No device or firmware is recorded for any capture.** Every `device` block in the
+  sidecars is largely `UNKNOWN`.
+* **Still no backup.** These files are gitignored, so version control does not protect
+  them. Moving them out of Downloads improved the filing, not the durability.
 
 ## Reproducing a capture
 

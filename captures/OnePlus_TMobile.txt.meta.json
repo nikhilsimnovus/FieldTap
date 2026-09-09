@@ -1,0 +1,37 @@
+{
+  "_schema": "fieldtap-capture-meta/v1",
+  "_warning": "Metadata only. NEVER record subscriber identifiers (IMSI, IMEI, TMSI, GUTI, MSISDN) in this file - it is committed to git, unlike the capture itself.",
+  "file": "OnePlus_TMobile.txt",
+  "size_bytes": 7114343,
+  "format": "Wireshark text export (full protocol detail)",
+  "capture_date": "2025-11-21",
+  "time_start": "2025-11-21T22:00:06.988-05:00",
+  "duration_seconds": 281,
+  "device": {
+    "vendor": "OnePlus",
+    "model": "UNKNOWN - reconstruct",
+    "android_build": "UNKNOWN - reconstruct",
+    "modem_firmware": "UNKNOWN - reconstruct"
+  },
+  "network": {
+    "operator": "T-Mobile",
+    "mcc_mnc": "UNKNOWN - not recorded in file",
+    "rat": ["LTE"]
+  },
+  "contents": {
+    "total_frames": 223,
+    "decode_breakdown": {
+      "ip:udp:gsmtap:lte_rrc": 136,
+      "ip:udp:data": 77,
+      "ip:udp:gsmtap:lte_rrc:nas": 8,
+      "ip:udp:gsmtap:lte_rrc:rrc": 2
+    },
+    "message_types": {"UL_DCCH": 32, "DL_DCCH": 24, "UL_CCCH": 1, "DL_CCCH": 1},
+    "encapsulation": "GSMTAP v2 over UDP 4729, GSMTAP payload type 13 (LTE RRC)"
+  },
+  "findings": {
+    "undissected_fraction": "77 of 223 frames (35%) decode only as 'ip:udp:data' - GSMTAP payloads Wireshark could not attribute to a dissector. This is the concrete measure of the gap Roadmap Phase 2 exists to close, and is consistent with NR frames that required the expired third-party dissector.",
+    "lte_path_healthy": "The LTE RRC path decodes correctly with stock Wireshark and is the working reference implementation for Phase 2.1."
+  },
+  "provenance_confidence": "high for contents and timing; low for device and firmware"
+}

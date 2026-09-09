@@ -1,0 +1,34 @@
+{
+  "_schema": "fieldtap-capture-meta/v1",
+  "_warning": "Metadata only. NEVER record subscriber identifiers (IMSI, IMEI, TMSI, GUTI, MSISDN) in this file - it is committed to git, unlike the capture itself.",
+  "file": "oneplus_latest_all_logs.pcapng",
+  "size_bytes": 2580488,
+  "capture_date": "2025-11-19",
+  "device": {
+    "vendor": "OnePlus",
+    "model": "UNKNOWN - reconstruct",
+    "android_build": "UNKNOWN - reconstruct",
+    "modem_firmware": "UNKNOWN - reconstruct",
+    "chipset": "Qualcomm (implied by diag capture path)",
+    "root_method": "UNKNOWN - reconstruct"
+  },
+  "network": {
+    "operator": "T-Mobile (inferred from companion export filename)",
+    "mcc_mnc": "UNKNOWN - not recorded in file",
+    "rat": ["LTE"],
+    "bands": "UNKNOWN"
+  },
+  "capture_host": {
+    "os": "Linux 6.8.0-85-generic",
+    "cpu": "13th Gen Intel(R) Core(TM) i9-13900H",
+    "tool": "Dumpcap (Wireshark) 4.4.9",
+    "interface": "Standard input",
+    "note": "Captured on a Linux host via stdin pipe, i.e. QCSuper stdout piped into dumpcap. Not captured on macOS."
+  },
+  "toolchain": {
+    "capture_backend": "QCSuper (assumed; consistent with GSMTAP-over-stdin pattern)",
+    "encapsulation": "GSMTAP over UDP"
+  },
+  "location": "UNKNOWN",
+  "provenance_confidence": "medium - host and toolchain confirmed from pcapng section header; device and network inferred"
+}

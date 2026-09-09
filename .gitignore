@@ -8,6 +8,9 @@
 captures/**
 !captures/README.md
 !captures/.gitkeep
+# Sidecar metadata IS tracked - it is the corpus index and carries no
+# subscriber identifiers. Keep it that way; see captures/README.md.
+!captures/*.meta.json
 
 # Wireshark text exports (large, and same identifier exposure as the pcaps)
 *_dissected.txt

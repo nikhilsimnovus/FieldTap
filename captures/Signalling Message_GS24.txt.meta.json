@@ -1,0 +1,34 @@
+{
+  "_schema": "fieldtap-capture-meta/v1",
+  "_warning": "Metadata only. NEVER record subscriber identifiers (IMSI, IMEI, TMSI, GUTI, MSISDN) in this file - it is committed to git, unlike the capture itself.",
+  "file": "Signalling Message_GS24.txt",
+  "size_bytes": 1013455,
+  "format": "Tab-delimited signalling log with per-message field decode and raw L3 hex. NOT QCAT format - source tool unidentified.",
+  "capture_date": "2025-11-13",
+  "time_start": "2025-11-13T12:04:31.437",
+  "device": {
+    "vendor": "Samsung (inferred)",
+    "model": "Galaxy S24 (INFERRED from the 'GS24' filename token only - unconfirmed)",
+    "android_build": "UNKNOWN",
+    "modem_firmware": "UNKNOWN",
+    "chipset": "UNKNOWN - Galaxy S24 shipped in both Exynos and Snapdragon variants, and which one this is materially affects its value as a Qualcomm diag fixture"
+  },
+  "network": {
+    "operator": "UNKNOWN",
+    "mcc_mnc": "UNKNOWN",
+    "rat": ["LTE"],
+    "note": "Messages are EPS SM / EPS MM, i.e. LTE core signalling, not 5G."
+  },
+  "contents": {
+    "message_count": 89,
+    "nas_version": "v950 (3GPP TS 24.301 v9.5.0)",
+    "sample_procedures": ["UL EPS SM PDN disconnect request", "UL EPS MM Security protected NAS message"],
+    "includes_raw_hex": true
+  },
+  "open_questions": [
+    "Which tool produced this format? It carries a 'PC Timestamp' field and directional arrows, which reads more like a network-side or test-system log than an on-device diag capture.",
+    "Was this taken from the handset, or from a callbox / UE simulator on the network side? Downloads from the same date included Amarisoft UE Simbox documentation, which makes a test-system origin plausible.",
+    "If it is a network-side log rather than a phone diag capture, its value to Phase 2.3 is much lower than assumed."
+  ],
+  "provenance_confidence": "low - device is a filename inference and the capture source is genuinely unclear"
+}
