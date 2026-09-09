@@ -89,6 +89,7 @@ explains what changed and Roadmap task 0.1 is now more urgent, not less.
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Target design and the decode pipeline |
 | [`docs/COMPETITIVE-LANDSCAPE.md`](docs/COMPETITIVE-LANDSCAPE.md) | XCAL-Mobile, NSG, QualiPoc and where FieldTap fits |
 | [`docs/DEVICE-SETUP.md`](docs/DEVICE-SETUP.md) | Getting a handset and this laptop ready |
+| [`docs/MACOS.md`](docs/MACOS.md) | Testing on a MacBook, where no driver is needed |
 | [`docs/research/`](docs/research/) | Competitor analysis, Windows/diag mechanics, Qualcomm log layouts |
 | [`captures/README.md`](captures/README.md) | Capture handling policy and how to reproduce |
 | [`third_party/README.md`](third_party/README.md) | Vendored QCSuper: provenance, and what it changed about the licence |

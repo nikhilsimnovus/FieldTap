@@ -391,8 +391,11 @@ def build(session_dir: str, tshark: Optional[str] = None, log=lambda s: None, re
         fh.write(page)
     log("report: %s" % report_path)
     if open_after:
+        import pathlib
         import webbrowser
-        webbrowser.open("file:///" + os.path.abspath(report_path).replace("\\", "/"))
+        # as_uri() gets the slashes right on both Windows (file:///C:/...) and
+        # Unix (file:///Users/...); string-building produced file://// there.
+        webbrowser.open(pathlib.Path(os.path.abspath(report_path)).as_uri())
     return {"report": report_path, "summary": os.path.join(session_dir, SUMMARY_FILE), "events": ev_path,
             "kpi": kpi_path if os.path.isfile(kpi_path) else None}
 

@@ -1,5 +1,8 @@
 # Getting a handset ready
 
+> **On a Mac?** Read [`MACOS.md`](MACOS.md) instead. macOS needs no driver at all, so most
+> of the Windows setup below does not apply, and a Mac is often the easier host.
+
 The goal is that an engineer plugs a phone into the laptop and `fieldtap auto`
 does the rest. That only works once the phone exposes its Qualcomm diag port
 and Windows has a driver for it. This page is the one-time preparation per

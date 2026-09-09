@@ -245,7 +245,8 @@ def parse_nmea(line: str, now: Optional[datetime] = None) -> Optional[Fix]:
 
 
 class NmeaPoller(threading.Thread):
-    """Read an NMEA receiver on a COM port; keep one fix per `interval` seconds."""
+    """Read an NMEA receiver on a serial port (COM7, /dev/ttyUSB0,
+    /dev/cu.usbserial-XXXX); keep one fix per `interval` seconds."""
 
     def __init__(self, port: str, track: Track, baud: int = 9600, interval: float = 1.0,
                  log: Callable[[str], None] = lambda s: None, stop: Optional[threading.Event] = None):

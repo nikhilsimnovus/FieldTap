@@ -286,7 +286,8 @@ def run(options: AutoOptions, log: Callable[[str], None] = lambda s: None,
         return workers
 
     if not tr.adb_path():
-        log("adb is not installed: phones must already expose a diag COM port; run `fieldtap setup` for help")
+        log("adb is not installed: phones must already expose a diag serial port (COM7 on Windows, "
+            "/dev/ttyUSB0 on Linux) or a raw USB diag interface; run `fieldtap setup` for help")
     log("watching for handsets under %s (profile %s); press Ctrl-C to stop" % (os.path.abspath(options.captures), options.profile))
     active: dict = {}
     finished: dict = {}

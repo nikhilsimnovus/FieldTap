@@ -347,7 +347,9 @@ def _add_auto_arguments(p) -> None:
     logs.add_argument("--keep-debug", action="store_true")
     logs.add_argument("--seconds", type=float, help="stop each session after N seconds")
     side = p.add_argument_group("gps and traffic")
-    side.add_argument("--gps", default="auto", help="auto (phone via adb when available), adb, none, or nmea:COM7[@9600]")
+    side.add_argument("--gps", default="auto",
+                      help="auto (phone via adb when available), adb, none, or nmea:PORT[@baud] "
+                           "where PORT is COM7, /dev/ttyUSB0 or /dev/cu.usbserial-XXXX")
     side.add_argument("--gps-interval", type=float, default=5.0)
     side.add_argument("--traffic", help="comma list of ping,download,iperf3 to run on the phone during capture")
     side.add_argument("--traffic-interval", type=float, default=60.0)

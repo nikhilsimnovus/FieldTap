@@ -3,8 +3,15 @@
 Three things can be visible for one phone:
 
 * an adb device (USB debugging on),
-* a Qualcomm diag serial port ("Qualcomm HS-USB Diagnostics 9091 (COM7)"),
-* a raw USB diag interface (when WinUSB/libusb is bound instead of the serial driver).
+* a Qualcomm diag serial port, on hosts that have a driver for it: Windows
+  names it "Qualcomm HS-USB Diagnostics 9091 (COM7)", Linux may bind it to
+  /dev/ttyUSB0 when the qcserial or option module knows the id,
+* a raw USB diag interface, reached through libusb.
+
+Which of those exists is a property of the host, not the phone. macOS ships
+no driver that matches a vendor-specific interface, so on a Mac the diag port
+never becomes a device node at all and the raw USB interface is the only
+route - which is also why a Mac needs no driver install. See docs/MACOS.md.
 
 `scan()` lists all three. `pair()` groups them into Handset objects using the
 USB serial number, which for Android phones is the adb serial, with a

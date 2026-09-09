@@ -75,8 +75,14 @@ def list_serial_ports() -> list:
     ports = []
     for p in list_ports.comports():
         desc = (p.description or "") + " " + (p.manufacturer or "") + " " + (p.product or "")
-        likely = ("diag" in desc.lower()) or (p.vid == QUALCOMM_VID and "9091" in desc) \
-            or ("901d" in desc.lower()) or ("9091" in desc.lower())
+        blob = (desc + " " + (p.hwid or "")).lower()
+        # Windows names the port "Qualcomm HS-USB Diagnostics 9091", which the
+        # text match catches. macOS and Linux give a bare /dev/cu.usbmodem* or
+        # /dev/ttyUSB* with little description, so the Qualcomm vendor id is
+        # the signal there. Over-inclusive on purpose: `fieldtap devices` lists
+        # what it found, and a modem or NMEA port simply fails the version
+        # query rather than producing wrong data.
+        likely = ("diag" in blob) or ("901d" in blob) or ("9091" in blob) or (p.vid == QUALCOMM_VID)
         ports.append(PortInfo(p.device, desc.strip(), p.vid, p.pid, likely,
                               getattr(p, "serial_number", None) or None,
                               getattr(p, "location", None) or None, p.hwid or ""))
@@ -324,12 +330,29 @@ def adb_path() -> Optional[str]:
         return found
     exe = "adb.exe" if os.name == "nt" else "adb"
     repo_tools = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tools")
-    candidates = [
-        os.path.join(os.environ.get("FIELDTAP_TOOLS", repo_tools), "platform-tools", exe),
-        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Android", "Sdk", "platform-tools", exe),
-        os.path.join(os.path.expanduser("~"), "platform-tools", exe),
-        os.path.join("C:\\", "platform-tools", exe),
-    ]
+    home = os.path.expanduser("~")
+    candidates = [os.path.join(os.environ.get("FIELDTAP_TOOLS", repo_tools), "platform-tools", exe)]
+    # An installed SDK announces itself; check that before guessing at paths.
+    for var in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
+        root = os.environ.get(var)
+        if root:
+            candidates.append(os.path.join(root, "platform-tools", exe))
+    if os.name == "nt":
+        candidates += [
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Android", "Sdk", "platform-tools", exe),
+            os.path.join("C:\\", "platform-tools", exe),
+        ]
+    else:
+        candidates += [
+            # macOS: Android Studio, then Homebrew on Apple Silicon and on Intel
+            os.path.join(home, "Library", "Android", "sdk", "platform-tools", exe),
+            "/opt/homebrew/bin/adb",
+            "/usr/local/bin/adb",
+            # Linux
+            os.path.join(home, "Android", "Sdk", "platform-tools", exe),
+            "/usr/lib/android-sdk/platform-tools/adb",
+            os.path.join(home, "platform-tools", exe),
+        ]
     for candidate in candidates:
         if candidate and os.path.isfile(candidate):
             return candidate
@@ -356,10 +379,21 @@ def adb_devices() -> list:
     out = adb(["devices", "-l"], check=False)
     devices = []
     for line in out.splitlines()[1:]:
+        if not line.strip() or line.startswith("*"):      # "* daemon started successfully"
+            continue
         parts = line.split()
-        if len(parts) >= 2 and parts[1] in ("device", "unauthorized", "offline"):
-            devices.append({"serial": parts[0], "state": parts[1],
-                            "info": " ".join(parts[2:])})
+        if len(parts) < 2:
+            continue
+        # On Linux without the Android udev rules - the default on a fresh
+        # machine - adb prints "<serial>  no permissions; see <url>". Dropping
+        # that line makes the phone look absent when it is really a udev
+        # problem, which is the opposite of helpful.
+        if "no permissions" in line:
+            devices.append({"serial": parts[0], "state": "no permissions",
+                            "info": line.split(None, 1)[1].strip()})
+        elif parts[1] in ("device", "unauthorized", "offline", "recovery", "sideload", "bootloader",
+                          "authorizing", "connecting"):
+            devices.append({"serial": parts[0], "state": parts[1], "info": " ".join(parts[2:])})
     return devices
 
 
