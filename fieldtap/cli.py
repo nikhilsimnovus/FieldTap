@@ -16,7 +16,7 @@ DEFAULT_CAPTURES = os.environ.get("FIELDTAP_CAPTURES", "captures")
 
 
 def _log(text: str) -> None:
-    sys.stderr.write("[fieldtap] %s\n" % text)
+    sys.stderr.write("[fieldtap %s] %s\n" % (time.strftime("%H:%M:%S"), text))
     sys.stderr.flush()
 
 
@@ -324,6 +324,119 @@ def cmd_fixtures(args) -> int:
     return 0
 
 
+def _add_auto_arguments(p) -> None:
+    src = p.add_argument_group("handsets")
+    src.add_argument("--simulate", action="append", metavar="QMDL",
+                     help="stand in a recorded .qmdl for a handset (repeatable: several files = several phones)")
+    src.add_argument("--no-enable-diag", action="store_true", help="never touch the phone's USB config; only use ports that already exist")
+    src.add_argument("--once", action="store_true", help="exit after the first handset finishes")
+    src.add_argument("--poll", type=float, default=2.0, help="seconds between USB scans")
+    out = p.add_argument_group("output")
+    out.add_argument("--captures", default=DEFAULT_CAPTURES, help="sessions root (default: %(default)s)")
+    out.add_argument("--name", help="session name (default: handset model + serial)")
+    out.add_argument("--note")
+    out.add_argument("--location")
+    out.add_argument("--gsmtap", action="store_true", help="also write the classic GSMTAP pcap (LTE only)")
+    out.add_argument("--live", action="store_true", help="open a Wireshark window per handset and stream into it")
+    out.add_argument("--no-raw", action="store_true", help="do not keep the raw .qmdl")
+    out.add_argument("--no-report", action="store_true")
+    out.add_argument("--open-report", action="store_true", help="open report.html in the browser when a session ends")
+    logs = p.add_argument_group("logs")
+    logs.add_argument("--profile", default="signalling", help="signalling (default), lte, nr, corpus, or all")
+    logs.add_argument("--codes", help="explicit log codes, e.g. 0xB821,0xB0C0")
+    logs.add_argument("--keep-debug", action="store_true")
+    logs.add_argument("--seconds", type=float, help="stop each session after N seconds")
+    side = p.add_argument_group("gps and traffic")
+    side.add_argument("--gps", default="auto", help="auto (phone via adb when available), adb, none, or nmea:COM7[@9600]")
+    side.add_argument("--gps-interval", type=float, default=5.0)
+    side.add_argument("--traffic", help="comma list of ping,download,iperf3 to run on the phone during capture")
+    side.add_argument("--traffic-interval", type=float, default=60.0)
+    side.add_argument("--ping-host", default="8.8.8.8")
+    side.add_argument("--download-url", default=None, help="URL for the download test (default: a 25 MB Cloudflare test file)")
+    side.add_argument("--iperf-server", help="iperf3 server for the iperf3 test (needs iperf3 pushed to the phone)")
+
+
+def cmd_auto(args) -> int:
+    from . import auto, traffic as traffic_mod
+    options = auto.AutoOptions(
+        captures=args.captures, profile=args.profile, codes=_parse_codes(args.codes), gsmtap=args.gsmtap,
+        live=args.live, keep_raw=not args.no_raw, report=not args.no_report, open_report=args.open_report,
+        gps=args.gps, gps_interval=args.gps_interval,
+        traffic=[t.strip() for t in (args.traffic or "").split(",") if t.strip()],
+        traffic_interval=args.traffic_interval, ping_host=args.ping_host,
+        download_url=args.download_url or traffic_mod.DEFAULT_DOWNLOAD_URL, iperf_server=args.iperf_server,
+        max_seconds=args.seconds, poll=args.poll, once=args.once, simulate=args.simulate or [],
+        name=args.name, note=args.note, location=args.location, enable_diag=not args.no_enable_diag,
+        keep_debug=args.keep_debug)
+    workers = auto.run(options, _log)
+    if workers:
+        print("\n".join(auto.summarize(workers)))
+    failed = [w for w in workers if w.state in ("failed",)]
+    done = [w for w in workers if w.state == "done"]
+    return 0 if done and not failed else (1 if workers else 0)
+
+
+def cmd_report(args) -> int:
+    from . import report
+    if args.index:
+        path = report.build_index(args.target, _log)
+        print(path)
+        return 0
+    session_dir = args.target
+    if os.path.isfile(session_dir):
+        session_dir = os.path.dirname(session_dir)
+    if not os.path.isfile(os.path.join(session_dir, "session.json")):
+        _log("not a session directory (no session.json): %s" % session_dir)
+        return 2
+    paths = report.build(session_dir, log=_log, rebuild=args.rebuild, open_after=args.open)
+    print(paths["report"])
+    return 0
+
+
+def cmd_events(args) -> int:
+    from . import events as events_mod
+    det = events_mod.from_pcapng(args.file)
+    evs = det.events
+    if not args.no_tshark:
+        events_mod.enrich_with_tshark(evs, args.file)
+    if not args.all:
+        evs = [e for e in evs if e.kind not in events_mod.LOW_PRIORITY]
+    if args.output:
+        with open(args.output, "w", encoding="utf-8", newline="") as fh:
+            fh.write(events_mod.to_csv(evs))
+        _log("wrote %s (%d events)" % (args.output, len(evs)))
+    else:
+        for e in evs:
+            print("%s %-4s %-6s %s%s" % (e.when_iso[11:23] if e.when_iso else "            ", e.rat.upper(), e.severity,
+                                         e.title, ("  [%s]" % e.detail) if e.detail else ""))
+        s = det.summary()
+        print("\n%d events, %d errors, %d warnings, %d handovers" % (s["events"], s["errors"], s["warnings"], s["handovers"]))
+    return 0
+
+
+def cmd_demo(args) -> int:
+    """Generate a simulated drive test and take it through the whole product."""
+    from . import auto, demo
+    directory = args.directory or os.path.join(args.captures, "_demo")
+    os.makedirs(directory, exist_ok=True)
+    qmdl = os.path.join(directory, "simulated_drive.qmdl")
+    profile = demo.DriveProfile(seconds=args.seconds)
+    demo.write_qmdl(qmdl, profile)
+    _log("wrote a simulated %.0f s drive test: %s (%d bytes)" % (args.seconds, qmdl, os.path.getsize(qmdl)))
+    _log("NOTE: this is generated data, not a handset capture. The report is labelled SIMULATED.")
+    options = auto.AutoOptions(captures=args.captures, simulate=[qmdl], name=args.name or "simulated-drive",
+                               note="Simulated drive test generated by `fieldtap demo` - not a real capture.",
+                               location=args.location, open_report=not args.no_open, gsmtap=args.gsmtap)
+    workers = auto.run(options, _log)
+    print("\n".join(auto.summarize(workers)))
+    return 0 if workers and workers[0].state == "done" else 1
+
+
+def cmd_setup(args) -> int:
+    from . import setup as setup_mod
+    return setup_mod.run(install_adb=args.install_adb, log=print)
+
+
 # --- parser ---------------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -372,7 +485,8 @@ def build_parser() -> argparse.ArgumentParser:
     out.add_argument("--no-raw", action="store_true", help="do not keep the raw .qmdl")
     out.add_argument("--handset-info", action="store_true", help="query adb getprop for the sidecar")
     logs = p.add_argument_group("logs")
-    logs.add_argument("--profile", default="signalling", help="log profile: signalling, lte, nr, corpus")
+    logs.add_argument("--profile", default="signalling",
+                      help="log profile: signalling, lte, nr, corpus, or all (every code the modem reports)")
     logs.add_argument("--codes", help="explicit log codes, e.g. 0xB821,0xB0C0")
     logs.add_argument("--keep-debug", action="store_true", help="do not silence modem debug messages")
     logs.add_argument("--seconds", type=float, help="stop after N seconds")
@@ -419,6 +533,38 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("fixtures", help="write the synthetic corpus files")
     p.add_argument("directory")
     p.set_defaults(func=cmd_fixtures)
+
+    p = sub.add_parser("auto", help="plug-and-go: watch USB, capture every handset that appears, report on unplug")
+    _add_auto_arguments(p)
+    p.set_defaults(func=cmd_auto)
+
+    p = sub.add_parser("report", help="build report.html + summary.json for a session directory")
+    p.add_argument("target", help="session directory (or --index: captures root)")
+    p.add_argument("--index", action="store_true", help="build index.html over a captures root instead")
+    p.add_argument("--rebuild", action="store_true", help="recompute events and KPIs instead of reusing the CSVs")
+    p.add_argument("--open", action="store_true")
+    p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser("events", help="list the procedures and failures in a FieldTap pcapng")
+    p.add_argument("file")
+    p.add_argument("--all", action="store_true", help="include low-priority events (measurement reports, paging, SIB1)")
+    p.add_argument("--no-tshark", action="store_true")
+    p.add_argument("-o", "--output", help="write CSV instead of printing")
+    p.set_defaults(func=cmd_events)
+
+    p = sub.add_parser("demo", help="generate a simulated drive test and produce a full report (no handset needed)")
+    p.add_argument("--captures", default=DEFAULT_CAPTURES)
+    p.add_argument("--directory", help="where to put the generated .qmdl (default: <captures>/_demo)")
+    p.add_argument("--seconds", type=float, default=480.0, help="length of the simulated drive")
+    p.add_argument("--name", help="session name")
+    p.add_argument("--location", default="simulated route")
+    p.add_argument("--gsmtap", action="store_true")
+    p.add_argument("--no-open", action="store_true", help="do not open the report in a browser")
+    p.set_defaults(func=cmd_demo)
+
+    p = sub.add_parser("setup", help="check this machine (Wireshark, adb, drivers) and install what is missing")
+    p.add_argument("--install-adb", action="store_true", help="download Google platform-tools into tools/")
+    p.set_defaults(func=cmd_setup)
 
     p = sub.add_parser("version")
     p.set_defaults(func=cmd_version)
