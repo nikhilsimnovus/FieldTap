@@ -21,6 +21,7 @@ the cell identity and the band list. This module reads those.
 from __future__ import annotations
 
 import csv
+import html
 import io
 import re
 import time
@@ -271,10 +272,131 @@ def sim_state(serial: Optional[str] = None) -> str:
 
 def request_operator_search(serial: Optional[str] = None) -> None:
     """Open the manual network-selection screen, which makes the modem run a
-    real PLMN search and list every operator it can hear. The result is shown
-    on the phone; Android exposes no machine-readable form of it."""
+    real PLMN search across the bands it supports and list every operator it
+    can hear - including ones it is not allowed to register with."""
     tr.adb(["shell", "am", "start", "-a", "android.settings.NETWORK_OPERATOR_SETTINGS"],
            serial=serial, timeout=20, check=False)
+
+
+# Chrome that appears on the network-selection screen and is not an operator.
+_UI_NOISE = re.compile(
+    r"^(|search|searching|searching\.\.\.|available networks?|select( a)? network|network|networks|"
+    r"choose (a )?network|automatic|automatically|manual|manually|cancel|ok|done|back|refresh|"
+    r"mobile network|mobile networks|network operators?|select automatically|register|registering|"
+    r"navigate up|more options|settings|no service|not available|unavailable)$", re.I)
+_PLMN_TEXT_RE = re.compile(r"^\d{3}[\s-]?\d{2,3}$")
+
+
+def read_operator_list(serial: Optional[str] = None, timeout: float = 90.0,
+                       poll: float = 8.0, log: Callable[[str], None] = lambda s: None) -> list:
+    """Read the operator list off the network-selection screen.
+
+    Android gives no API for the result of a manual PLMN search, so this
+    scrapes the screen with uiautomator. It is best-effort by nature: the
+    layout is the OEM's, and a phone that words things differently will yield
+    less. Everything found is returned, so a caller can show the raw list
+    rather than silently dropping what the filter did not recognise.
+    """
+    deadline = time.monotonic() + timeout
+    best: list = []
+    while time.monotonic() < deadline:
+        time.sleep(poll)
+        try:
+            tr.adb(["shell", "uiautomator", "dump", "/sdcard/fieldtap_ui.xml"],
+                   serial=serial, timeout=40, check=False)
+            xml = tr.adb(["shell", "cat", "/sdcard/fieldtap_ui.xml"], serial=serial,
+                         timeout=30, check=False)
+        except Exception as exc:
+            log("could not read the screen: %s" % exc)
+            return best
+        texts = re.findall(r'text="([^"]*)"', xml)
+        found = []
+        for raw in texts:
+            # uiautomator emits XML, so "AT&T" arrives as "AT&amp;T".
+            value = html.unescape(raw).strip()
+            if not value or _UI_NOISE.match(value) or len(value) > 40:
+                continue
+            if value not in found:
+                found.append(value)
+        if len(found) > len(best):
+            best = found
+        # A scan in progress shows "Searching"; once operators appear, entries
+        # that look like names or PLMN codes settle and stop growing.
+        if best and not re.search(r"search", xml, re.I):
+            break
+    try:
+        tr.adb(["shell", "rm", "-f", "/sdcard/fieldtap_ui.xml"], serial=serial, timeout=15, check=False)
+    except Exception:
+        pass
+    return best
+
+
+def looks_like_plmn(text: str) -> bool:
+    return bool(_PLMN_TEXT_RE.match(text.strip()))
+
+
+# --- forcing the modem to look further ------------------------------------------------------
+
+def _airplane(serial: Optional[str], on: bool) -> None:
+    """Toggle airplane mode. Android 11+ has a proper command; older builds
+    need the setting plus a broadcast."""
+    word = "enable" if on else "disable"
+    out = tr.adb(["shell", "cmd", "connectivity", "airplane-mode", word], serial=serial,
+                 timeout=20, check=False)
+    if "Error" in out or "Unknown" in out or "unknown command" in out.lower():
+        tr.adb(["shell", "settings", "put", "global", "airplane_mode_on", "1" if on else "0"],
+               serial=serial, timeout=20, check=False)
+        tr.adb(["shell", "am", "broadcast", "-a", "android.intent.action.AIRPLANE_MODE",
+                "--ez", "state", "true" if on else "false"], serial=serial, timeout=20, check=False)
+
+
+def sweep(serial: Optional[str] = None, seconds: float = 180.0, settle: float = 12.0,
+          cycle_radio: bool = True, log: Callable[[str], None] = print,
+          stop=None) -> list:
+    """Accumulate every distinct cell seen over a period, nudging the modem to
+    re-select in between.
+
+    This is still not a spectrum scan - the modem only reports what it chooses
+    to measure - but re-selection makes it look again, and sampling over time
+    catches cells a single reading misses. Airplane mode is restored before
+    returning.
+    """
+    found: dict = {}
+    started = time.monotonic()
+    round_no = 0
+    try:
+        while time.monotonic() - started < seconds:
+            if stop is not None and stop():
+                break
+            round_no += 1
+            if cycle_radio and round_no > 1:
+                log("  forcing the modem to re-select (airplane mode off and on) ...")
+                _airplane(serial, True)
+                time.sleep(4)
+                _airplane(serial, False)
+                time.sleep(settle)
+            try:
+                cells, _state = snapshot(serial)
+            except Exception as exc:
+                log("  sample failed: %s" % exc)
+                time.sleep(settle)
+                continue
+            new = 0
+            for cell in cells:
+                if cell.key not in found:
+                    found[cell.key] = cell
+                    new += 1
+                    log("  + %s" % cell.line())
+                else:
+                    existing = found[cell.key]
+                    if cell.rsrp is not None and existing.rsrp is None:
+                        existing.rsrp, existing.rsrq, existing.sinr = cell.rsrp, cell.rsrq, cell.sinr
+            log("round %d: %d cells reported, %d new, %d total"
+                % (round_no, len(cells), new, len(found)))
+            time.sleep(settle)
+    finally:
+        _airplane(serial, False)
+    return list(found.values())
 
 
 def watch(serial: Optional[str] = None, interval: float = 5.0, seconds: Optional[float] = None,

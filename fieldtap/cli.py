@@ -431,10 +431,32 @@ def cmd_scan(args) -> int:
             return 2
         serial = devices[0]["serial"]
     if args.operators:
+        if scan_mod.sim_state(serial) == "ABSENT":
+            _log("note: no SIM. The modem can still search, but some builds refuse a manual")
+            _log("      network search without one. If nothing appears, insert any SIM.")
         scan_mod.request_operator_search(serial)
-        _log("asked the phone to run a PLMN search; the operator list appears on its screen")
-        _log("(Android exposes no machine-readable form of that list)")
+        _log("the phone is running a PLMN search across the bands it supports; this takes a minute")
+        found = scan_mod.read_operator_list(serial, log=_log)
+        if not found:
+            _log("could not read the result off the screen; look at the phone directly")
+            return 1
+        print("operators the phone listed (read from its screen):")
+        for item in found:
+            print("  %s%s" % (item, "   <- looks like a PLMN code" if scan_mod.looks_like_plmn(item) else ""))
+        print("")
+        print("Read from the network-selection screen, so it may include a stray label.")
         return 0
+
+    if args.full:
+        _log("sweeping for %.0f s, forcing the modem to re-select between samples" % args.full)
+        cells = scan_mod.sweep(serial, args.full, log=lambda t: print(t, flush=True))
+        print("")
+        print(scan_mod.render(cells, {}, scan_mod.sim_state(serial)))
+        if args.output and cells:
+            with open(args.output, "w", encoding="utf-8", newline="") as fh:
+                fh.write(scan_mod.to_csv(cells))
+            _log("wrote %s (%d cells)" % (args.output, len(cells)))
+        return 0 if cells else 1
     if args.watch:
         _log("sampling every %.0f s; Ctrl-C to stop" % args.watch)
         history = scan_mod.watch(serial, args.watch, args.seconds, log=lambda t: print(t, flush=True))
@@ -595,7 +617,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--watch", type=float, metavar="SECONDS", help="keep sampling every N seconds")
     p.add_argument("--seconds", type=float, help="with --watch, stop after N seconds")
     p.add_argument("--operators", action="store_true",
-                   help="ask the modem for a full PLMN search (result shows on the phone screen)")
+                   help="run a real PLMN search and read the operator list off the phone screen")
+    p.add_argument("--full", type=float, metavar="SECONDS", nargs="?", const=180.0,
+                   help="sweep: sample repeatedly for N seconds (default 180), forcing the modem "
+                        "to re-select in between, and report every cell seen")
     p.add_argument("-o", "--output", help="write the cells to CSV")
     p.set_defaults(func=cmd_scan)
 

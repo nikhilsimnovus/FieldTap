@@ -587,3 +587,51 @@ def test_scan_merges_the_same_cell_reported_twice():
     assert nr[0].rsrp == -95                      # measurements came from the second copy
     assert nr[0].operator == "Verizon Wireless"   # the fuller name won
     assert nr[0].registered is True
+
+
+def test_operator_list_scraper_keeps_operators_and_drops_chrome():
+    """The manual-search result exists only on the phone's screen, so it is
+    scraped. Operator names must survive, UI furniture must not."""
+    from fieldtap import scan
+    import html as _html
+    import re as _re
+    xml = ('<node text="Available networks"/><node text="Searching..."/><node text="Verizon"/>'
+           '<node text="T-Mobile"/><node text="AT&amp;T"/><node text="311 480"/>'
+           '<node text="Automatic"/><node text="Cancel"/><node text=""/>'
+           '<node text="Select automatically"/><node text="Navigate up"/>')
+    kept = []
+    for raw in _re.findall(r'text="([^"]*)"', xml):
+        value = _html.unescape(raw).strip()
+        if value and not scan._UI_NOISE.match(value) and len(value) <= 40:
+            kept.append(value)
+    assert kept == ["Verizon", "T-Mobile", "AT&T", "311 480"], kept
+    assert scan.looks_like_plmn("311 480") and scan.looks_like_plmn("310260")
+    assert not scan.looks_like_plmn("Verizon")
+
+
+def test_sweep_accumulates_and_always_restores_airplane_mode():
+    """A sweep toggles the radio to force re-selection. If it raises halfway
+    the phone must not be left in airplane mode."""
+    from fieldtap import scan
+    calls = []
+    samples = [
+        [scan.Cell(rat="nr", mcc="311", mnc="480", pci=269, arfcn=396030, rsrp=-95)],
+        [scan.Cell(rat="nr", mcc="311", mnc="480", pci=269, arfcn=396030),
+         scan.Cell(rat="lte", mcc="310", mnc="260", pci=101, arfcn=1850, rsrp=-108)],
+    ]
+
+    def fake_snapshot(serial=None):
+        return (samples.pop(0) if samples else []), {}
+
+    original_snapshot, original_air = scan.snapshot, scan._airplane
+    scan.snapshot = fake_snapshot
+    scan._airplane = lambda serial, on: calls.append(on)
+    try:
+        cells = scan.sweep(None, seconds=0.1, settle=0, log=lambda t: None)
+    finally:
+        scan.snapshot, scan._airplane = original_snapshot, original_air
+    assert calls and calls[-1] is False, calls      # radio left on
+    assert len(cells) >= 1
+    # the measurement from the first sample is not lost when the second omits it
+    nr = [c for c in cells if c.rat == "nr"][0]
+    assert nr.rsrp == -95
