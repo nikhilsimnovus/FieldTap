@@ -692,3 +692,38 @@ def test_diag_interface_selection_prefers_protocol_0x30():
     dev = Device(0x2CB7, 0x01A2, Config([Interface(0, 0x30), Interface(3, 0x30)]))
     order = [intf.bInterfaceNumber for _cfg, intf, _i, _o in tr._iter_diag_interfaces(dev)]
     assert order[0] == 3, order
+
+
+def test_report_for_a_measurement_only_session_hides_signalling_sections(tmp_path):
+    """An Android app session has no capture file. Its report must render the
+    measurements and must not show procedures, events or a call flow, which
+    would read as failures rather than as not collected."""
+    import csv as _csv
+    import json as _json
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from fieldtap import gps as _gps, kpi as _kpi, report as _report
+    d = tmp_path / "20260910-100000_app"
+    d.mkdir()
+    t0 = _dt(2026, 9, 10, 10, 0, 0, tzinfo=_tz.utc)
+    (d / "session.json").write_text(_json.dumps({
+        "name": "app", "started_utc": t0.isoformat(), "stopped_utc": (t0 + _td(seconds=300)).isoformat(),
+        "transport": {"transport": "android-public-api"}, "handset": {"model": "NE2215"},
+        "summary": {"plmns": {"311480": 20}}}), encoding="utf-8")
+    with open(d / "kpi.csv", "w", newline="", encoding="utf-8") as fh:
+        w = _csv.DictWriter(fh, fieldnames=_kpi.COLUMNS + ["lat", "lon"])
+        w.writeheader()
+        for i in range(20):
+            w.writerow({"time_epoch": "%.3f" % (t0 + _td(seconds=i * 15)).timestamp(), "rat": "nr", "pci": 269,
+                        "rsrp_dbm": str(-85 - i), "rsrq_db": "-11.0", "sinr_db": "9.0",
+                        "lat": "12.97", "lon": "77.59"})
+    track = _gps.Track()
+    for i in range(20):
+        track.add(_gps.Fix(t0 + _td(seconds=i * 15), 12.97 + i * 1e-4, 77.59, 5.0, source="android"))
+    track.write_csv(str(d / "track.csv"))
+    paths = _report.build(str(d), tshark=None)
+    page = open(paths["report"], encoding="utf-8").read()
+    assert "RSRP over time" in page and '<svg class="map"' in page
+    for signalling_only in ("<h2>Procedures</h2>", "<h2>Events</h2>", "<h2>Call flow</h2>", "RRC/NAS messages"):
+        assert signalling_only not in page, signalling_only
+    assert "public telephony interface" in page
+    assert "share below -105 dBm" in page
