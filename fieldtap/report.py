@@ -290,9 +290,11 @@ def build(session_dir: str, tshark: Optional[str] = None, log=lambda s: None, re
     have_pcapng = os.path.isfile(pcapng)
     exe = tshark or tshark_mod.find_tshark()
 
-    # events
+    # events. A rebuild re-derives events and KPIs from the capture; a session
+    # with no capture (an Android app session, a scan log) keeps the files it has
+    # instead of being silently emptied.
     ev_path = os.path.join(session_dir, EVENTS_FILE)
-    if os.path.isfile(ev_path) and not rebuild:
+    if os.path.isfile(ev_path) and not (rebuild and have_pcapng):
         events = events_mod.read_csv(ev_path)
     elif have_pcapng:
         det = events_mod.from_pcapng(pcapng)
@@ -311,7 +313,7 @@ def build(session_dir: str, tshark: Optional[str] = None, log=lambda s: None, re
     # KPI rows (MeasurementReport-derived, through tshark)
     kpi_path = os.path.join(session_dir, KPI_FILE)
     kpi_note = ""
-    if os.path.isfile(kpi_path) and not rebuild:
+    if os.path.isfile(kpi_path) and not (rebuild and have_pcapng and exe):
         kpi_rows = _read_csv(kpi_path)
     elif have_pcapng and exe:
         try:
@@ -387,8 +389,14 @@ def build(session_dir: str, tshark: Optional[str] = None, log=lambda s: None, re
     # A session with no capture file is measurements only: an Android app using
     # the public telephony interface, or a scan log. Its report must not show
     # signalling sections, which would read as failures rather than as "not
-    # collected".
-    has_signalling = have_pcapng or bool(events)
+    # collected". The Android app writes events of its own (cell changes,
+    # markers, sampling gaps), so it declares this rather than leaving it to be
+    # inferred from whether an events file exists.
+    if (meta.get("capabilities") or {}).get("layer3") is False or \
+            (meta.get("transport") or {}).get("transport") == "android-api":
+        has_signalling = False
+    else:
+        has_signalling = have_pcapng or bool(events)
     page = render_html(summary, meta, events, kpi_rows, track, traffic_results, cells, ladder, flow_events,
                        started, kpi_note, has_signalling)
     report_path = os.path.join(session_dir, REPORT_FILE)
@@ -487,7 +495,8 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
         # show zeros that look like failures. Show what was actually measured.
         rat_kpi = kpi.get(rsrp_avg[0].lower(), {}) if rsrp_avg else {}
         below = rat_kpi.get("pct_below_-105")
-        plmns_seen = sorted({str(c.get("plmn")) for c in cells if c.get("plmn")})
+        plmns_seen = sorted({str(c.get("plmn")) for c in cells if c.get("plmn")}) or \
+            sorted(str(p) for p in (net.get("plmns") or {}))
         tiles = [
             tiles[-1],
             _tile("measurements", rat_kpi.get("samples", 0)),
@@ -496,6 +505,9 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
             _tile("serving cells", len(cells)),
             _tile("operators", ", ".join(plmns_seen) or "-"),
         ]
+        if events:
+            tiles.append(_tile("events (errors / warnings)", "%d (%d / %d)" % (ev["events"], ev["errors"], ev["warnings"]),
+                               "bad" if ev["errors"] else ""))
     if traffic_sum.get("ping"):
         tiles.append(_tile("ping avg / loss", "%s ms / %s%%" % (_fmt(traffic_sum["ping"]["rtt_avg_ms"]), _fmt(traffic_sum["ping"]["loss_pct_avg"]))))
     if traffic_sum.get("download"):
@@ -585,7 +597,7 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
     cell_rows = "".join("<tr>%s</tr>" % "".join("<td>%s</td>" % _esc(c.get(k, "")) for k in
                                                 ("first_seen_utc", "rat", "plmn", "tac", "enb_id", "sector", "pci", "band", "dl_earfcn", "dl_bw_mhz"))
                         for c in cells)
-    cells_html = ("<table><tr><th>first seen</th><th>RAT</th><th>PLMN</th><th>TAC</th><th>eNB</th><th>sector</th><th>PCI</th><th>band</th><th>DL EARFCN</th><th>BW MHz</th></tr>%s</table>" % cell_rows) if cells else '<p class="muted">No serving-cell records (log code 0xB0C2) in this session.</p>'
+    cells_html = ("<table><tr><th>first seen</th><th>RAT</th><th>PLMN</th><th>TAC</th><th>eNB</th><th>sector</th><th>PCI</th><th>band</th><th>DL EARFCN</th><th>BW MHz</th></tr>%s</table>" % cell_rows) if cells else '<p class="muted">No serving-cell records%s in this session.</p>' % (" (log code 0xB0C2)" if has_signalling else "")
 
     tr_rows = "".join("<tr><td>%s</td><td>%s</td><td>%s</td><td class=\"sev-%s\">%s</td><td>%s</td></tr>" % (
         _esc(r.when_iso[11:19]), _esc(r.test), _esc(r.target), "ok" if r.ok else "error", "ok" if r.ok else "failed", _esc(r.line() if r.ok else r.metrics.get("error", "")))
@@ -597,12 +609,27 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
         for name, p in procs.items() if p["attempts"] or p["failures"])
     proc_html = ("<table><tr><th>procedure</th><th>attempts</th><th>success</th><th>failure</th><th>rate</th><th>avg setup</th><th>max setup</th></tr>%s</table>" % proc_rows) if proc_rows else '<p class="muted">No signalling procedures observed.</p>'
 
+    rec_counts = summary.get("counts") or {}
+    records_crc = ("%s / %s" % (rec_counts.get("records"), rec_counts.get("crc_errors"))
+                   if rec_counts.get("records") is not None or rec_counts.get("crc_errors") is not None else None)
+    # An app session records the cadence Android actually delivered, which is
+    # what a reader needs to judge how dense the measurements are.
+    collection = meta.get("collection") or {}
+    cadence = None
+    try:
+        if collection.get("median_fresh_interval_ms") not in (None, ""):
+            cadence = "%.1f s between fresh samples (median)" % (float(collection["median_fresh_interval_ms"]) / 1000.0)
+            if collection.get("short_interval_pct") not in (None, ""):
+                cadence += ", %.0f%% of the time at the 2 s interval" % float(collection["short_interval_pct"])
+    except (TypeError, ValueError):
+        cadence = None
     kv = []
     for label, value in (("Handset", handset_line), ("Android", "%s (%s)" % (hs.get("android_version", "?"), hs.get("android_build", "?")) if hs.get("android_version") else None),
                          ("Baseband", hs.get("baseband")), ("Modem build", modem.get("build_id") or modem.get("version_dir")),
                          ("SoC", hs.get("soc") or hs.get("platform")), ("SIM operator", "%s %s" % (hs.get("sim_operator_name", ""), hs.get("sim_mccmnc", "")) if hs.get("sim_mccmnc") else None),
                          ("PLMNs seen", ", ".join(net.get("plmns", {}).keys()) or None), ("Transport", json.dumps(summary.get("transport"))),
-                         ("Log profile", summary.get("log_profile")), ("Records / CRC errors", "%s / %s" % (summary["counts"].get("records"), summary["counts"].get("crc_errors"))),
+                         ("Log profile", summary.get("log_profile")), ("Records / CRC errors", records_crc),
+                         ("Cadence", cadence),
                          ("Stopped by", (meta.get("summary") or {}).get("stopped_by")), ("Note", summary.get("note"))):
         if value:
             kv.append("<b>%s</b><span>%s</span>" % (_esc(label), _esc(value)))
@@ -622,12 +649,12 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
        "files": files_html, "map": map_html or '<p class="muted">No GPS track (enable with --gps adb or --gps nmea:COMx).</p>',
        "charts": charts_html, "cells": cells_html, "traffic": traffic_html,
        "procs_section": ("<section><h2>Procedures</h2>%s</section>\n" % proc_html) if has_signalling else "",
-       "events_section": ("<section><h2>Events</h2>%s</section>\n" % events_html) if has_signalling else "",
+       "events_section": ("<section><h2>Events</h2>%s</section>\n" % events_html) if (has_signalling or events) else "",
        "ladder_section": ("<section><h2>Call flow</h2><pre>%s</pre></section>\n" % _esc(ladder or "(no messages)"))
                          if has_signalling else "",
        "source_note": "" if has_signalling else (
            '<section class="muted">Measurements from the Android public telephony interface: signal strength '
-           'and cell identity. No signalling was captured, so this report has no procedures, events or call '
+           'and cell identity. No signalling was captured, so this report has no procedures, handovers or call '
            'flow.</section>\n'),
        "footer_note": ("Decode by Wireshark; open capture.pcapng for the full message detail." if has_signalling
                        else "Measurements only; no signalling decode."),

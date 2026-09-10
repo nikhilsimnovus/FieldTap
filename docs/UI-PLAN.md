@@ -1,5 +1,10 @@
 # The UI question, and the app question
 
+> **Decision, 2026-09-10:** this page answered the app question "not now". The user has
+> since decided to build an Android app without a modem; the build plan is in
+> [`APP-PLAN.md`](APP-PLAN.md). The local web UI half of this page still stands. The app
+> reasoning below is kept as the record of the trade-offs that were weighed.
+
 Two questions, two different answers. The research behind them:
 [`research/drive-test-ui-landscape.md`](research/drive-test-ui-landscape.md),
 [`research/ui-technical-options.md`](research/ui-technical-options.md),

@@ -1,5 +1,10 @@
 # App, account, cloud: what makes sense
 
+> **Decision, 2026-09-10:** the user decided to build the app anyway, without a modem, as a
+> measurement logger feeding the same report and account. The build plan is in
+> [`APP-PLAN.md`](APP-PLAN.md). Everything below about layer 3, the account, pricing and
+> the redaction rule still applies; only the "no app" conclusion was overruled.
+
 The question was whether an app should do the logging and upload to an account.
 Short answer: **yes to the account, no to the app doing the logging** — and there
 is one engineering requirement that decides whether the upload is a product or a

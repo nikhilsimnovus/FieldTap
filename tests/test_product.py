@@ -727,3 +727,54 @@ def test_report_for_a_measurement_only_session_hides_signalling_sections(tmp_pat
         assert signalling_only not in page, signalling_only
     assert "public telephony interface" in page
     assert "share below -105 dBm" in page
+
+
+def test_report_for_an_app_session_keeps_its_events_and_survives_rebuild(tmp_path):
+    """The Android app writes events of its own and declares layer3 false. Its
+    report shows those events but no signalling sections, and a rebuild does
+    not empty a session that has no capture file to rebuild from."""
+    import csv as _csv
+    import json as _json
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from fieldtap import events as _events, kpi as _kpi, report as _report
+
+    def iso(t):
+        return t.strftime("%Y-%m-%dT%H:%M:%S.") + "%03d+00:00" % (t.microsecond // 1000)
+
+    d = tmp_path / "20260910-110000_walk"
+    d.mkdir()
+    t0 = _dt(2026, 9, 10, 11, 0, 0, tzinfo=_tz.utc)
+    (d / "session.json").write_text(_json.dumps({
+        "format": "fieldtap-session/1", "name": "walk", "started_utc": iso(t0),
+        "stopped_utc": iso(t0 + _td(seconds=120)),
+        "transport": {"transport": "android-api", "app": "FieldTap Mobile"}, "handset": {"model": "NE2215"},
+        "device": {}, "modem": {}, "log_mask": {}, "files": {},
+        "summary": {"stopped_by": "user", "plmns": {"311480": 12}, "messages": {}},
+        "capabilities": {"layer3": False},
+        "collection": {"median_fresh_interval_ms": 2000, "short_interval_pct": 87.0}}), encoding="utf-8")
+    with open(d / "kpi.csv", "w", newline="", encoding="utf-8") as fh:
+        w = _csv.DictWriter(fh, fieldnames=_kpi.COLUMNS + ["lat", "lon"])
+        w.writeheader()
+        for i in range(12):
+            w.writerow({"time_epoch": "%.3f" % (t0 + _td(seconds=i * 10)).timestamp(), "rat": "lte", "pci": 101,
+                        "rsrp_dbm": "-95.0", "rsrq_db": "-10.0", "sinr_db": "12.0",
+                        "comment": "android-api age_ms=300 src=request"})
+    with open(d / "events.csv", "w", newline="", encoding="utf-8") as fh:
+        w = _csv.writer(fh)
+        w.writerow(_events.COLUMNS)
+        w.writerow([iso(t0), "lte", "serving_cell", "info", "Serving cell", "PCI 101", "", "101", "5230", "", ""])
+        w.writerow([iso(t0 + _td(seconds=40)), "-", "marker", "info", "Marker", "lobby entrance", "", "", "", "", ""])
+        w.writerow([iso(t0 + _td(seconds=60)), "lte", "service_lost", "error", "Service lost", "", "", "", "", "", ""])
+    for rebuild in (False, True):
+        paths = _report.build(str(d), tshark=None, rebuild=rebuild)
+        page = open(paths["report"], encoding="utf-8").read()
+        with open(paths["summary"], encoding="utf-8") as fh:
+            summary = _json.load(fh)
+        assert abs(summary["kpi"]["lte"]["rsrp_avg"] + 95.0) < 0.01, rebuild
+        assert summary["events"]["events"] == 3, rebuild
+        assert "<h2>Events</h2>" in page and "lobby entrance" in page, rebuild
+        for signalling_only in ("<h2>Procedures</h2>", "<h2>Call flow</h2>", "RRC/NAS messages",
+                                '<div class="l">handovers</div>', "Records / CRC errors", "0xB0C2",
+                                "MeasurementReports"):
+            assert signalling_only not in page, (rebuild, signalling_only)
+        assert "2.0 s between fresh samples" in page and "87% of the time" in page, rebuild
