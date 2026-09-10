@@ -54,6 +54,26 @@ class Transport:
 
 QUALCOMM_VID = 0x05C6
 
+# Standalone Qualcomm modem modules present the same diag interface as a
+# phone, but with no Android, no root and no bootloader unlock in the way.
+# Recognising their vendor ids means `fieldtap devices` names them instead of
+# leaving an unexplained serial port, and the diag heuristic accepts them.
+MODEM_VENDORS = {
+    0x05C6: "Qualcomm",
+    0x2C7C: "Quectel",
+    0x1199: "Sierra Wireless",
+    0x1E0E: "SIMCom",
+    0x1BC7: "Telit",
+    0x2CB7: "Fibocom",
+    0x413C: "Dell (rebadged Sierra)",
+    0x1410: "Novatel",
+    0x03F0: "HP (rebadged)",
+}
+
+
+def vendor_name(vid) -> str:
+    return MODEM_VENDORS.get(vid, "")
+
 
 @dataclass
 class PortInfo:
@@ -82,7 +102,7 @@ def list_serial_ports() -> list:
         # the signal there. Over-inclusive on purpose: `fieldtap devices` lists
         # what it found, and a modem or NMEA port simply fails the version
         # query rather than producing wrong data.
-        likely = ("diag" in blob) or ("901d" in blob) or ("9091" in blob) or (p.vid == QUALCOMM_VID)
+        likely = ("diag" in blob) or ("901d" in blob) or ("9091" in blob) or (p.vid in MODEM_VENDORS)
         ports.append(PortInfo(p.device, desc.strip(), p.vid, p.pid, likely,
                               getattr(p, "serial_number", None) or None,
                               getattr(p, "location", None) or None, p.hwid or ""))

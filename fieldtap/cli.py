@@ -55,6 +55,9 @@ def cmd_devices(args) -> int:
     for p in ports:
         flag = "  <- looks like a diag port" if p.likely_diag else ""
         vidpid = " [%04X:%04X]" % (p.vid, p.pid) if p.vid is not None else ""
+        vendor = tr.vendor_name(p.vid)
+        if vendor:
+            vidpid += " %s" % vendor
         print("  %-12s %s%s%s" % (p.device, p.description, vidpid, flag))
     print("usb diag interfaces")
     devices = tr.list_usb_diag_devices()

@@ -635,3 +635,15 @@ def test_sweep_accumulates_and_always_restores_airplane_mode():
     # the measurement from the first sample is not lost when the second omits it
     nr = [c for c in cells if c.rat == "nr"][0]
     assert nr.rsrp == -95
+
+
+def test_modem_modules_are_recognised_as_diag_candidates():
+    """A standalone Qualcomm modem presents the same diag interface as a
+    phone, without Android in the way. It must not be mistaken for a random
+    serial port just because it has no Windows friendly name."""
+    from fieldtap.diag import transport as tr
+    assert tr.vendor_name(0x2C7C) == "Quectel"
+    assert tr.vendor_name(0x1199) == "Sierra Wireless"
+    assert tr.vendor_name(0x05C6) == "Qualcomm"
+    assert tr.vendor_name(0x1234) == ""
+    assert set(tr.MODEM_VENDORS) >= {0x05C6, 0x2C7C, 0x1199, 0x1E0E, 0x1BC7, 0x2CB7}
