@@ -647,3 +647,48 @@ def test_modem_modules_are_recognised_as_diag_candidates():
     assert tr.vendor_name(0x05C6) == "Qualcomm"
     assert tr.vendor_name(0x1234) == ""
     assert set(tr.MODEM_VENDORS) >= {0x05C6, 0x2C7C, 0x1199, 0x1E0E, 0x1BC7, 0x2CB7}
+
+
+def test_diag_interface_selection_prefers_protocol_0x30():
+    """0x30 is the real diag protocol; 0xFF is a looser fallback. Trying them
+    as one alternation picks whichever comes first in enumeration order, which
+    on some modules is the wrong endpoint pair."""
+    from fieldtap.diag import transport as tr
+
+    class Endpoint:
+        def __init__(self, addr):
+            self.bEndpointAddress = addr
+            self.bmAttributes = 2          # bulk
+
+    class Interface:
+        def __init__(self, number, protocol):
+            self.bInterfaceNumber = number
+            self.bInterfaceClass = 0xFF
+            self.bInterfaceSubClass = 0xFF
+            self.bInterfaceProtocol = protocol
+            self.bNumEndpoints = 2
+            self._eps = [Endpoint(0x81), Endpoint(0x01)]
+
+        def __iter__(self):
+            return iter(self._eps)
+
+    class Device:
+        def __init__(self, vid, pid, interfaces):
+            self.idVendor, self.idProduct = vid, pid
+            self._cfg = interfaces
+
+        def __iter__(self):
+            return iter([self._cfg])
+
+    class Config(list):
+        pass
+
+    # interface 0 is the loose 0xFF match, interface 2 is the real diag
+    dev = Device(0x2C7C, 0x0125, Config([Interface(0, 0xFF), Interface(2, 0x30)]))
+    order = [intf.bInterfaceNumber for _cfg, intf, _i, _o in tr._iter_diag_interfaces(dev)]
+    assert order[0] == 2, order
+
+    # a module with a documented diag interface gets it first among equals
+    dev = Device(0x2CB7, 0x01A2, Config([Interface(0, 0x30), Interface(3, 0x30)]))
+    order = [intf.bInterfaceNumber for _cfg, intf, _i, _o in tr._iter_diag_interfaces(dev)]
+    assert order[0] == 3, order

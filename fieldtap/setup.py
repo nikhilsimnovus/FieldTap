@@ -170,6 +170,19 @@ def run(install_adb: bool = False, log: Callable[[str], None] = print) -> int:
                 log("  MISSING " + USB_MISSING_HINT)
     except ImportError:
         pass
+    if sys.platform.startswith("linux"):
+        import subprocess
+        try:
+            active = subprocess.run(["systemctl", "is-active", "ModemManager"], capture_output=True,
+                                    text=True, timeout=10).stdout.strip()
+        except Exception:
+            active = ""
+        if active == "active":
+            problems += 1
+            log("  WARNING ModemManager is running. It opens the same diag port and interleaves its "
+                "own reads, which shows up as corrupt frames rather than as an error. Stop it for "
+                "the capture (`sudo systemctl stop ModemManager`) or exclude the diag interface "
+                "with a udev rule setting ID_MM_DEVICE_IGNORE=1.")
     if adb:
         devs = tr.adb_devices()
         if devs:

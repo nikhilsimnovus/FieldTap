@@ -162,28 +162,55 @@ class SerialTransport(Transport):
 
 # --- Raw USB (libusb / WinUSB) --------------------------------------------------------------
 
+# 0x30 is the real diag protocol; 0xFF is a looser fallback some devices use.
+# They are tried as two separate passes, not as one alternation, so a genuine
+# 0x30 interface always wins even when an 0xFF one sits at a lower index. On a
+# module whose diag interface is not interface 0 that ordering is the
+# difference between capturing and reading someone else's endpoint.
 DIAG_INTERFACE_PROTOCOLS = (0x30, 0xFF)
+
+# Where diag actually sits on modules where it is not interface 0.
+KNOWN_DIAG_INTERFACE = {
+    (0x2CB7, 0x01A2): 3,     # Fibocom
+    (0x2CB7, 0x01A4): 1,     # Fibocom
+}
+
+
+def _diag_endpoints(intf):
+    import usb.util
+    bulk_in = bulk_out = None
+    for ep in intf:
+        if usb.util.endpoint_type(ep.bmAttributes) != usb.util.ENDPOINT_TYPE_BULK:
+            continue
+        if usb.util.endpoint_direction(ep.bEndpointAddress) == usb.util.ENDPOINT_IN:
+            bulk_in = bulk_in or ep
+        else:
+            bulk_out = bulk_out or ep
+    if bulk_in is not None and bulk_out is not None and intf.bNumEndpoints == 2:
+        return bulk_in, bulk_out
+    return None
 
 
 def _iter_diag_interfaces(dev):
-    """Yield (interface, ep_in, ep_out) for interfaces that look like diag."""
-    import usb.util
-    for cfg in dev:
-        for intf in cfg:
-            if intf.bInterfaceClass != 0xFF or intf.bInterfaceSubClass != 0xFF:
-                continue
-            if intf.bInterfaceProtocol not in DIAG_INTERFACE_PROTOCOLS:
-                continue
-            bulk_in = bulk_out = None
-            for ep in intf:
-                if usb.util.endpoint_type(ep.bmAttributes) != usb.util.ENDPOINT_TYPE_BULK:
+    """Yield (cfg, interface, ep_in, ep_out) for interfaces that look like diag,
+    strongest match first."""
+    hint = KNOWN_DIAG_INTERFACE.get((dev.idVendor, dev.idProduct))
+    for wanted in DIAG_INTERFACE_PROTOCOLS:
+        matches = []
+        for cfg in dev:
+            for intf in cfg:
+                if intf.bInterfaceClass != 0xFF or intf.bInterfaceSubClass != 0xFF:
                     continue
-                if usb.util.endpoint_direction(ep.bEndpointAddress) == usb.util.ENDPOINT_IN:
-                    bulk_in = bulk_in or ep
-                else:
-                    bulk_out = bulk_out or ep
-            if bulk_in is not None and bulk_out is not None and intf.bNumEndpoints == 2:
-                yield cfg, intf, bulk_in, bulk_out
+                if intf.bInterfaceProtocol != wanted:
+                    continue
+                endpoints = _diag_endpoints(intf)
+                if endpoints is not None:
+                    matches.append((cfg, intf, endpoints[0], endpoints[1]))
+        # A module that documents which interface is diag gets that one first.
+        if hint is not None:
+            matches.sort(key=lambda m: m[1].bInterfaceNumber != hint)
+        for match in matches:
+            yield match
 
 
 def list_usb_diag_devices() -> list:
