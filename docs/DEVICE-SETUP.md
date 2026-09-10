@@ -114,7 +114,20 @@ data flows, that is the failure you are looking at.
 
 ---
 
-## 4. Recording what worked
+## 4. Device support matrix
+
+One row so far, and it is honest about what is confirmed.
+
+| Handset | SoC | Android | Root | Detected on | Diag capture |
+| --- | --- | --- | --- | --- | --- |
+| OnePlus 10 Pro (NE2215, OP516FL1) | SM8450 Snapdragon 8 Gen 1, platform `taro` | 15 | Yes, bootloader unlocked (`verifiedbootstate=orange`), `su` present | macOS: yes. Windows: **never enumerated at all** on the test laptop | Not yet attempted |
+
+The Windows column is the interesting one: the same phone and cable that
+macOS enumerates immediately produced no USB event whatsoever on a Windows 11
+laptop that had never enumerated any handset. Try a Mac before spending time
+on Windows drivers.
+
+## 5. Recording what worked
 
 Every capture writes `session.json` with the handset model, Android build,
 baseband, modem build and the transport used. That file is how a support matrix
