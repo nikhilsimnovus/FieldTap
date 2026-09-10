@@ -434,17 +434,30 @@ def cmd_scan(args) -> int:
         if scan_mod.sim_state(serial) == "ABSENT":
             _log("note: no SIM. The modem can still search, but some builds refuse a manual")
             _log("      network search without one. If nothing appears, insert any SIM.")
+        scan_mod.clear_radio_log(serial)
         scan_mod.request_operator_search(serial)
         _log("the phone is running a PLMN search across the bands it supports; this takes a minute")
-        found = scan_mod.read_operator_list(serial, log=_log)
-        if not found:
-            _log("could not read the result off the screen; look at the phone directly")
+        screen = scan_mod.read_operator_list(serial, log=_log)
+        radio, raw_lines = scan_mod.read_radio_scan_log(serial)
+        if radio:
+            print("operators found (from the phone's radio log):")
+            for name, short, plmn, state in radio:
+                print("  %-24s %-8s %s" % (name, plmn, state))
+        if screen:
+            print("")
+            print("read from the network-selection screen:")
+            for item in screen:
+                print("  %s%s" % (item, "   <- PLMN code" if scan_mod.looks_like_plmn(item) else ""))
+        if not radio and not screen:
+            _log("no operator list could be read.")
+            if scan_mod.sim_state(serial) == "ABSENT":
+                _log("the phone has no SIM, and many builds grey out manual network search")
+                _log("without one. Insert any SIM and run this again.")
+            if raw_lines:
+                _log("radio log did mention a scan; last lines:")
+                for line in raw_lines[-5:]:
+                    _log("  " + line[:160])
             return 1
-        print("operators the phone listed (read from its screen):")
-        for item in found:
-            print("  %s%s" % (item, "   <- looks like a PLMN code" if scan_mod.looks_like_plmn(item) else ""))
-        print("")
-        print("Read from the network-selection screen, so it may include a stray label.")
         return 0
 
     if args.full:

@@ -120,12 +120,38 @@ One row so far, and it is honest about what is confirmed.
 
 | Handset | SoC | Android | Root | Detected on | Diag capture |
 | --- | --- | --- | --- | --- | --- |
-| OnePlus 10 Pro (NE2215, OP516FL1) | SM8450 Snapdragon 8 Gen 1, platform `taro` | 15 | Yes, bootloader unlocked (`verifiedbootstate=orange`), `su` present | macOS: yes. Windows: **never enumerated at all** on the test laptop | Not yet attempted |
+| OnePlus 10 Pro (NE2215, OP516FL1) | SM8450 Snapdragon 8 Gen 1, platform `taro` | 15 | Yes, unlocked + Magisk | macOS: yes. Windows: **never enumerated at all** | **No. OnePlus ships no diag driver** |
+| Samsung Galaxy S22/S23/S24, **Snapdragon SKUs only** | Snapdragon | - | **Not required** | - | Reported yes, via `*#0808#`. Untested by us |
+| Xiaomi / Redmi / POCO, Snapdragon | Snapdragon | - | Required | - | Reported yes. Untested by us |
 
 The Windows column is the interesting one: the same phone and cable that
 macOS enumerates immediately produced no USB event whatsoever on a Windows 11
 laptop that had never enumerated any handset. Try a Mac before spending time
 on Windows drivers.
+
+### The OnePlus finding, and why it matters
+
+**OnePlus does not ship the diag driver at all.** This is not a setting, a
+permission or a missing root. OnePlus publishes its kernel source to meet the
+GPL, and across every branch released for the 10 Pro from OxygenOS 12.1 to 15
+there is no `drivers/char/diag`, no `diagchar`, and no `CONFIG_DIAG_CHAR` in any
+defconfig. The code was never compiled in.
+
+That also settles a question worth knowing generally: `/dev/diag` and the diag
+USB interface are **not** independent paths. Both are front ends onto the same
+`diagchar` driver, so with it absent, changing the USB composition has no
+backend to attach to and cannot restore diag either. The same pattern shows
+across OnePlus 8 Pro through 12, three chipset generations, which makes it a
+vendor policy rather than a quirk of this model.
+
+**Consequence for the product:** do not buy OnePlus for diag capture. The
+Samsung Snapdragon route is more interesting than it first looks, because it is
+reported to need **no root and no bootloader unlock**, just a dialer code. If
+that holds, it removes the single biggest objection to this class of tool: a
+rooted handset is hard to justify to an operator's security team, and a stock
+one is not. Worth buying one to confirm before committing the roadmap.
+
+Sources and the full analysis: [`research/oneplus-10-pro-diag.md`](research/oneplus-10-pro-diag.md).
 
 ## 5. Recording what worked
 

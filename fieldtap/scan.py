@@ -335,6 +335,41 @@ def looks_like_plmn(text: str) -> bool:
     return bool(_PLMN_TEXT_RE.match(text.strip()))
 
 
+# The radio log is a better source than the screen: the telephony layer logs
+# the scan request and its result, so the operator list can be read even when
+# the UI does not render it in a scrapeable way.
+_RADIO_SCAN_RE = re.compile(
+    r"QUERY_AVAILABLE_NETWORKS|START_NETWORK_SCAN|NetworkScan|availableNetworks|OperatorInfo", re.I)
+# android.telephony.OperatorInfo renders as "OperatorInfo Verizon/VZW/311480/available"
+_OPERATOR_INFO_RE = re.compile(r"([^/\s]+)/([^/\s]*)/(\d{5,6})/(\w+)")
+
+
+def clear_radio_log(serial: Optional[str] = None) -> None:
+    tr.adb(["logcat", "-b", "radio", "-c"], serial=serial, timeout=20, check=False)
+
+
+def read_radio_scan_log(serial: Optional[str] = None) -> tuple:
+    """-> (operator tuples, raw matching lines) from the radio buffer.
+
+    Each tuple is (long name, short name, plmn, state); state is Android's own
+    word, so a network the SIM may not use shows as "forbidden" rather than
+    being hidden.
+    """
+    try:
+        text = tr.adb(["logcat", "-b", "radio", "-d", "-v", "time"], serial=serial,
+                      timeout=40, check=False)
+    except Exception:
+        return [], []
+    lines = [ln.strip() for ln in text.splitlines() if _RADIO_SCAN_RE.search(ln)]
+    operators = []
+    for line in lines:
+        for name, short, plmn, state in _OPERATOR_INFO_RE.findall(line):
+            entry = (name, short, plmn, state)
+            if entry not in operators:
+                operators.append(entry)
+    return operators, lines
+
+
 # --- forcing the modem to look further ------------------------------------------------------
 
 def _airplane(serial: Optional[str], on: bool) -> None:
