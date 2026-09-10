@@ -488,3 +488,102 @@ def test_all_profile_is_resolved_by_the_modem_not_a_static_list():
     assert len(profile_codes("signalling")) > 10
     with pytest.raises(KeyError):
         profile_codes("nonsense")
+
+
+# --- scanning without diag ---------------------------------------------------------------------
+
+# The NR block is verbatim from `dumpsys telephony.registry` on the OnePlus
+# 10 Pro (NE2215, Android 15) under test; the rest follows Android's format
+# for the other RATs, including Integer.MAX_VALUE for "not available" and an
+# operator name containing a space.
+REAL_TELEPHONY = """
+mServiceState={mVoiceRegState=1(OUT_OF_SERVICE), mDataRegState=1(OUT_OF_SERVICE),
+ mNetworkRegistrationInfos=[NetworkRegistrationInfo{ domain=CS transportType=WWAN
+ cellIdentity=CellIdentityNr:{ mPci = 269 mTac = 5767433 mNrArfcn = 396030 mBands = [2]
+ mMcc = 311 mMnc = 480 mNci = 14567084500 mAlphaLong = Verizon mAlphaShort = Verizon
+ mAdditionalPlmns = {} } }], mIsEmergencyOnly=true, rRplmn=311480}
+mCellInfo=[CellInfoNr:{mRegistered=YES mTimeStamp=123 mCellConnectionStatus=1
+ CellIdentityNr:{ mPci = 269 mTac = 5767433 mNrArfcn = 396030 mBands = [2] mMcc = 311
+ mMnc = 480 mNci = 14567084500 mAlphaLong = Verizon Wireless mAlphaShort = Verizon
+ mAdditionalPlmns = {311489} }
+ CellSignalStrengthNr:{ csiRsrp = 2147483647 csiRsrq = 2147483647 csiSinr = 2147483647
+ ssRsrp = -95 ssRsrq = -11 ssSinr = 12 timingAdvance = 2147483647 level = 3 }},
+CellInfoLte:{mRegistered=NO mTimeStamp=124
+ CellIdentityLte:{ mCi = 12345 mPci = 101 mTac = 4660 mEarfcn = 1850 mBands = [3]
+ mBandwidth = 20000 mMcc = 310 mMnc = 260 mAlphaLong = T-Mobile mAlphaShort = T-Mobile
+ mAdditionalPlmns = {310410} mCsgInfo = null }
+ CellSignalStrengthLte:{ rssi = -70 rsrp = -108 rsrq = -14 rssnr = 3 cqi = 2147483647
+ ta = 2 level = 1 }}]
+"""
+
+
+def test_scan_parses_real_android_15_cell_info():
+    from fieldtap import scan
+    cells = scan.parse_cells(REAL_TELEPHONY)
+    nr = [c for c in cells if c.rat == "nr" and c.rsrp is not None]
+    lte = [c for c in cells if c.rat == "lte"]
+    assert nr and lte, [c.line() for c in cells]
+    n = nr[0]
+    assert n.plmn == "311480" and n.mcc == "311" and n.mnc == "480"
+    assert n.operator == "Verizon Wireless"          # a value with a space survives
+    assert n.pci == 269 and n.arfcn == 396030 and n.bands == "2"
+    assert n.tac == 5767433 and n.cell_id == 14567084500
+    assert (n.rsrp, n.rsrq, n.sinr) == (-95, -11, 12)
+    assert n.registered is True
+    assert n.additional_plmns == "311489"            # extra PLMNs come from SIB1
+    l = lte[0]
+    assert l.plmn == "310260" and l.pci == 101 and l.arfcn == 1850
+    assert l.cell_id == 12345 and l.bandwidth_khz == 20000
+    assert (l.rsrp, l.rsrq, l.rssi) == (-108, -14, -70)
+    assert l.registered is False
+
+
+def test_scan_treats_integer_max_value_as_unavailable():
+    """Android prints 2147483647 for anything it does not have. Reporting
+    that as a measurement would put +2147483647 dBm in a drive-test log."""
+    from fieldtap import scan
+    cells = scan.parse_cells(REAL_TELEPHONY)
+    for cell in cells:
+        for value in (cell.rsrp, cell.rsrq, cell.sinr, cell.rssi):
+            assert value is None or -200 < value < 200, (cell.line(), value)
+
+
+def test_scan_reads_service_state_and_renders():
+    from fieldtap import scan
+    state = scan.parse_service_state(REAL_TELEPHONY)
+    assert state["voice"] == "OUT_OF_SERVICE" and state["data"] == "OUT_OF_SERVICE"
+    assert state["registered_plmn"] == "311480" and state["emergency_only"] == "true"
+    text = scan.render(scan.parse_cells(REAL_TELEPHONY), state, sim="ABSENT")
+    assert "SIM: ABSENT" in text
+    assert "311480" in text and "310260" in text
+    assert "emergency only" in text
+    assert "MIB/SIB decode needs" in text            # the limit is stated, not implied
+
+
+def test_scan_csv_round_trip():
+    from fieldtap import scan
+    cells = scan.parse_cells(REAL_TELEPHONY)
+    text = scan.to_csv(cells)
+    header, first = text.splitlines()[0], text.splitlines()[1]
+    assert "plmn" in header and "rsrp" in header
+    assert "311480" in first or "310260" in first
+
+
+def test_scan_survives_junk_and_empty_input():
+    from fieldtap import scan
+    assert scan.parse_cells("") == []
+    assert scan.parse_cells("no cells here at all") == []
+    # a truncated block must not raise
+    scan.parse_cells("CellIdentityNr:{ mPci = 1 mMcc = 310")
+
+
+def test_scan_merges_the_same_cell_reported_twice():
+    """Android names the serving cell in the registration block without
+    measurements, and again in the cell list with them. One cell, not two."""
+    from fieldtap import scan
+    cells = scan.parse_cells(REAL_TELEPHONY)
+    nr = [c for c in cells if c.rat == "nr"]
+    assert len(nr) == 1, [c.line() for c in nr]
+    assert nr[0].rsrp == -95                      # measurements came from the second copy
+    assert nr[0].operator == "Verizon Wireless"   # the fuller name won
+    assert nr[0].registered is True

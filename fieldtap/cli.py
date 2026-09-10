@@ -416,6 +416,42 @@ def cmd_events(args) -> int:
     return 0
 
 
+def cmd_scan(args) -> int:
+    """Cells and operators from the Android telephony layer: no root, no diag."""
+    from . import scan as scan_mod
+    from .diag import transport as tr
+    if not tr.adb_path():
+        _log("adb is not installed: run `fieldtap setup --install-adb`")
+        return 2
+    serial = args.serial
+    if serial is None:
+        devices = [d for d in tr.adb_devices() if d["state"] == "device"]
+        if not devices:
+            _log("no phone in 'device' state; `fieldtap devices` shows what adb sees")
+            return 2
+        serial = devices[0]["serial"]
+    if args.operators:
+        scan_mod.request_operator_search(serial)
+        _log("asked the phone to run a PLMN search; the operator list appears on its screen")
+        _log("(Android exposes no machine-readable form of that list)")
+        return 0
+    if args.watch:
+        _log("sampling every %.0f s; Ctrl-C to stop" % args.watch)
+        history = scan_mod.watch(serial, args.watch, args.seconds, log=lambda t: print(t, flush=True))
+        if args.output and history:
+            with open(args.output, "w", encoding="utf-8", newline="") as fh:
+                fh.write(scan_mod.to_csv(history))
+            _log("wrote %s (%d samples)" % (args.output, len(history)))
+        return 0
+    cells, state = scan_mod.snapshot(serial)
+    print(scan_mod.render(cells, state, scan_mod.sim_state(serial)))
+    if args.output:
+        with open(args.output, "w", encoding="utf-8", newline="") as fh:
+            fh.write(scan_mod.to_csv(cells))
+        _log("wrote %s" % args.output)
+    return 0 if cells else 1
+
+
 def cmd_demo(args) -> int:
     """Generate a simulated drive test and take it through the whole product."""
     from . import auto, demo
@@ -553,6 +589,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-tshark", action="store_true")
     p.add_argument("-o", "--output", help="write CSV instead of printing")
     p.set_defaults(func=cmd_events)
+
+    p = sub.add_parser("scan", help="list nearby cells, operators and signal strength (no root, no diag)")
+    p.add_argument("--serial", help="adb device serial")
+    p.add_argument("--watch", type=float, metavar="SECONDS", help="keep sampling every N seconds")
+    p.add_argument("--seconds", type=float, help="with --watch, stop after N seconds")
+    p.add_argument("--operators", action="store_true",
+                   help="ask the modem for a full PLMN search (result shows on the phone screen)")
+    p.add_argument("-o", "--output", help="write the cells to CSV")
+    p.set_defaults(func=cmd_scan)
 
     p = sub.add_parser("demo", help="generate a simulated drive test and produce a full report (no handset needed)")
     p.add_argument("--captures", default=DEFAULT_CAPTURES)
