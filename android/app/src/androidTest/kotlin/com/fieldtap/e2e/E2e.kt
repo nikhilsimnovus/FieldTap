@@ -326,6 +326,31 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
         E2e.screenshot(group, name)
     }
 
+    /** Scrolls the first scrolling list of the screen back to its top. */
+    fun scrollToTop() {
+        compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(0)
+        compose.waitForIdle()
+    }
+
+    /**
+     * Runs [block] with the device turned to landscape, the way a phone sits in a car mount, then turns it back and lets
+     * the sensor decide again. The activity is recreated both ways, as on a phone.
+     */
+    fun inLandscape(block: () -> Unit) {
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        device.setOrientationLandscape()
+        try {
+            device.waitForIdle()
+            compose.waitForIdle()
+            block()
+        } finally {
+            device.setOrientationNatural()
+            device.unfreezeRotation()
+            device.waitForIdle()
+            compose.waitForIdle()
+        }
+    }
+
     /** The top bar's navigate-up button. */
     fun back() {
         click(hasContentDescription(E2e.string(R.string.action_back)) and hasClickAction())

@@ -70,8 +70,8 @@ HEARTBEAT_SLACK_MS = 7_000
 
 FIRST_RUN_SCREENS = ("01-disclosure", "01b-disclosure-limits", "02-permissions")
 TOUR_SCREENS = (
-    "03-live", "03b-start-dialog", "04-sessions", "05-session-detail", "05b-session-share",
-    "06-readiness", "07-probe", "08-settings", "09-about",
+    "03-live", "03c-live-trend", "03d-live-serving", "03e-live-landscape", "03b-start-dialog", "04-sessions",
+    "05-session-detail", "05b-session-share", "06-readiness", "07-probe", "08-settings", "09-about",
 )
 WALK_SCREENS = (
     "01-disclosure", "02-permissions", "03-permissions-allowed", "04-live-radio", "05-settings-tests",

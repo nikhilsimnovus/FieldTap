@@ -40,6 +40,19 @@ class ScreenTourTest {
 
         screens.awaitLiveRadio(E2e.expectLteNr())
         screens.shot("03-live")
+        // Below the first screen: the trend, then the serving cell's details.
+        screens.scrollTo(hasText(E2e.string(R.string.live_section_chart)))
+        screens.shot("03c-live-trend")
+        screens.scrollTo(hasText(E2e.string(R.string.live_section_serving)))
+        screens.shot("03d-live-serving")
+        screens.scrollToTop()
+        // A phone in landscape: two panes, with the session buttons beside them instead of under them.
+        screens.inLandscape {
+            screens.awaitText(R.string.live_title)
+            screens.await(hasText(E2e.string(R.string.live_start)) and hasClickAction())
+            screens.shot("03e-live-landscape")
+        }
+        screens.awaitText(R.string.live_title)
         screens.click(hasText(E2e.string(R.string.live_start)) and hasClickAction())
         screens.awaitText(R.string.live_start_dialog_title)
         Espresso.closeSoftKeyboard()
