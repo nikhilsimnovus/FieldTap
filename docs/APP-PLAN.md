@@ -1,8 +1,20 @@
-# FieldTap Mobile: the Android app plan
+# 5gto6G FieldTap: the Android app plan
 
 > **Decided 2026-09-10:** build an Android app, with no modem module for now. This page is
 > the build plan. It replaces the "no app" conclusions in [`UI-PLAN.md`](UI-PLAN.md) and
 > [`APP-AND-CLOUD-PLAN.md`](APP-AND-CLOUD-PLAN.md); the research behind those still stands.
+>
+> **Also decided 2026-09-10:**
+> - The app is **5gto6G FieldTap**, and everything is under the 5gto6g name: the app, the
+>   publisher, the website and the account.
+> - It is **free for now**.
+> - The publisher registers as **5gto6g, a company**. That needs 5gto6g to be a legal entity
+>   with a free D-U-N-S number.
+> - The package ID is **`com.fieldtap`** for now. It is set in one Gradle property, so it can
+>   still change before it is registered with Google.
+> - The code lives in **`android/` in this repository**, on the `android-app` branch.
+> - Before hand-over, the app is verified on an **Android emulator in GitHub Actions**. This
+>   Windows PC cannot run one: Hyper-V holds the CPU's virtualization, and it has 7.8 GB of RAM.
 
 How this plan was made: three independent plans (ship fast, one platform for the long term,
 what kills it), then a synthesis. Every Android claim the plan depends on was checked against
@@ -54,7 +66,7 @@ backend.
 
 ## What it is, and who it is for
 
-**FieldTap Mobile: the walk-test logger that produces the FieldTap report.**
+**5gto6G FieldTap: the walk-test logger that produces the FieldTap report.**
 
 For:
 
@@ -73,8 +85,9 @@ report:
 > cannot lock bands or cells, cannot scan operators, and needs no root. For signalling, use
 > FieldTap on a laptop with a modem module.
 
-The app is free and so is the pilot. Revenue later comes from team accounts priced under
-RantCell's roughly $320 per device per year. Never market the live meter or crowdsourcing.
+The app is free for now, and so is the pilot. Pricing is decided after the pilot; the
+reference point is RantCell's roughly $320 per device per year. Never market the live meter or
+crowdsourcing.
 
 ---
 
@@ -134,15 +147,20 @@ RantCell's roughly $320 per device per year. Never market the live meter or crow
 - **Not Flutter or React Native.** Every call that matters is Android-only, and iOS has no
   cell API, so a cross-platform layer adds a bridge and buys no reach.
 
-**Two Gradle modules:**
+**Three Gradle modules:**
 
-- `:format`, plain Kotlin/JVM: the session model, the CSV and JSON writers, the UTC clock,
-  and the column constants, generated from `schema/columns.json`. Its tests run on any JDK,
-  including the Windows machine, and write the golden session the Python tests check.
-- `:app`, the Android app.
+- `:format`, plain Kotlin/JVM: the session model, the CSV and JSON writers, and the column
+  constants, generated from `schema/columns.json`. Its tests reproduce the golden session the
+  Python tests check.
+- `:core`, plain Kotlin/JVM: everything that does not need Android, which is the freshness
+  engine, events, GPS matching, privacy zones and the session state machine, all tested on a
+  JVM.
+- `:app`, the Android app: thin adapters over the platform APIs, the service and the screens.
 
-**Separate repository, `FieldTap-Android`.** The Python package is still only on the open
-PR #1 branch and another account pushes to main, so the app's CI pins a fieldTap commit.
+**In this repository, under `android/`.** It lives on the `android-app` branch, which is based
+on the PR #1 branch because the Python package and the session-format contract are only there.
+Its CI runs only when `android/`, the schema, the fixtures, `fieldtap/` or the workflow itself
+changes.
 
 ### The parts
 
@@ -204,6 +222,9 @@ the report.
 
 ## The session format
 
+> The authoritative contract is now [`SESSION-FORMAT.md`](SESSION-FORMAT.md) with
+> `schema/columns.json`. Where this summary differs, they win.
+
 The app writes the same directory the laptop tool writes, so `fieldtap report <dir>`
 renders it. **This was tested before planning:** an app-shaped 10-minute NSA session
 rendered on Python 3.11 and 3.12 with the RSRP chart, the coloured route, the serving-cell
@@ -217,7 +238,8 @@ from that JSON.
 
 - Directory `<YYYYMMDD-HHMMSS UTC start>_<slug>`; slug characters `[A-Za-z0-9._-]`, at
   most 48.
-- UTF-8, no BOM, LF line endings, header row always present.
+- UTF-8, no BOM, header row always present. CSV lines end in CR LF, which is what fieldtap's
+  Python writers produce; `session.json` ends lines in LF.
 - **Blank means unknown.** Never `null`, never 2147483647.
 - Every `*_utc` value is exactly `yyyy-MM-ddTHH:mm:ss.SSS+00:00`. Never a trailing `Z`,
   which Python before 3.11 rejects, and never a time with no offset, which crashes the
@@ -242,13 +264,14 @@ from that JSON.
 | `cells.csv` | `first_seen_utc,rat,plmn,mcc,mnc,tac,cell_id,enb_id,sector,pci,band,dl_earfcn,ul_earfcn,dl_bw_mhz,ul_bw_mhz,version,plausible`, then `operator,additional_plmns,samples,rsrp_min,rsrp_max` | One row per serving cell. LTE: eNB is ECI>>8, sector ECI&0xFF. NR: NCI in `cell_id`, eNB and sector blank, NR-ARFCN in `dl_earfcn`. `version` is `android`. |
 | `cellinfo.csv` | The first 19 columns exactly as `fieldtap scan --watch` writes them, then `time_epoch,timestamp_ms,age_ms,stale,connection_status,source,cqi,timing_advance,csi_rsrp,csi_rsrq,csi_sinr,screen_on,charging,wifi_connected,sub_id,lat,lon` | The raw log: every cell seen, serving and neighbour, fresh and stale. The report ignores it. `fieldtap scan --watch` on the same phone is its test oracle. |
 
-Upload and export bundle: `<dirname>.zip`, flat, only these seven files, at most 50 MB,
+Upload and export bundle: `<dirname>.zip`, flat, only these seven files, at most 50 MiB,
 sent with its SHA-256.
 
 ### Keeping both sides honest
 
 - `schema/columns.json` is the one source of the column lists.
-- The app's `:format` test writes `tests/fixtures/android_session/` byte for byte.
+- `tests/fixtures/make_android_session.py` generates `tests/fixtures/android_session/`, and the
+  app's `:format` test must reproduce its CSVs byte for byte.
 - `tests/test_android_session.py` renders it and runs `fieldtap validate`, including the
   broken cases above.
 - CI runs both sides, and the server runs `fieldtap validate` on every upload.
@@ -265,15 +288,12 @@ The file format needs no Python change. Already done on the PR #1 branch:
 - `rebuild=True` on a session with no capture file keeps its KPI and event files instead of
   silently emptying them.
 
-Still to do, all small:
+Also done: the contract itself. [`SESSION-FORMAT.md`](SESSION-FORMAT.md) and
+`schema/columns.json` define it, `fieldtap validate DIR [--upload]` checks a session or an
+upload zip, and `tests/fixtures/android_session/` is the golden session both sides test against.
 
-- `fieldtap/contract.py` and `fieldtap validate <dir>`: `session.json` parses with no null
-  objects, CSV headers exact, every `*_utc` has an offset, track rows have coordinates, only
-  allowed file names.
-- `schema/columns.json`, `docs/SESSION-FORMAT.md`, the Android fixture and
-  `tests/test_android_session.py`.
-- `server/worker.py`, about 150 lines. The fieldtap package has no third-party dependencies,
-  so the worker needs only Python 3.11 plus a Supabase client or plain `urllib`.
+Still to do: `server/worker.py`, about 150 lines. The fieldtap package has no third-party
+dependencies, so the worker needs only Python 3.11 plus a Supabase client or plain `urllib`.
 
 ---
 
@@ -294,7 +314,7 @@ real users, because free projects pause.
   at all, so separating data classes is structural.
 
 **Render worker,** `server/worker.py` in this repo. It claims an uploaded row; downloads and
-checks the zip (hash, 50 MB compressed and 200 MB uncompressed, only the seven names, no
+checks the zip (hash, 50 MiB compressed and 200 MiB uncompressed, only the seven names, no
 path tricks); runs `fieldtap validate`; runs `report.build(dir, tshark=None, rebuild=False)`;
 uploads `report.html` and `summary.json`; and copies the summary fields into the row. Runs
 on a $5–10/month container with no inbound port.
@@ -333,10 +353,12 @@ Android developer verification, as checked on 2026-09-10:
 
 **Do this week:**
 
-1. **Register Simnovus as an organisation** (D-U-N-S is the calendar risk) and register the
-   package `com.simnovus.fieldtap`. `com.5gto6g` is not a legal package name, because each
-   segment must start with a letter. If the paperwork stalls, the limited-distribution
-   account covers a 20-device pilot.
+1. **Register 5gto6g as an organisation** and register the package. 5gto6g must be a legal
+   entity with a D-U-N-S number, and the D-U-N-S is the calendar risk. The working package ID
+   is `com.fieldtap`; confirm it is available when registering, because a contested name goes
+   to the verified developer with more installs. `com.5gto6g` is not legal, because each
+   segment must start with a letter. If the paperwork stalls, a limited-distribution account
+   covers a 20-device pilot.
 2. **Generate the release key once.** Keep an offline escrow copy and a CI secret. When Play
    comes, upload the same key to Play App Signing so website and Play installs can update
    each other.
@@ -402,7 +424,7 @@ assessment come before any public signup. India's DPDP rules apply if the pilot 
 - `./gradlew installDebug`, then Logcat and the Background Task Inspector.
 - Run `fieldtap scan --watch 2 -o oracle.csv` while the app records. The first 19 columns
   of `cellinfo.csv` diff directly against it.
-- Pull sessions with `adb pull /sdcard/Android/data/com.simnovus.fieldtap/files/sessions`,
+- Pull sessions with `adb pull /sdcard/Android/data/com.fieldtap/files/sessions`,
   then run `fieldtap report` on the Mac.
 
 **Measurement traps,** from Android's own `DeviceStateMonitor`:
@@ -413,13 +435,15 @@ assessment come before any public signup. India's DPDP rules apply if the pilot 
 - **So cadence and kill-survival tests run unplugged, with Wi-Fi off and the screen off,** and
   results are pulled afterwards.
 
-**The Windows machine** has no Android emulator (virtualization is disabled and it has
-7.8 GB RAM), and an emulator's modem is synthetic anyway. Use it for the Python contract
-tests, `fieldtap validate`, the render worker, the plain-JVM `:format` tests (JDK 21 and
-Gradle, no Android SDK), and installing CI-built APKs over `adb connect`.
+**The Windows machine** has JDK 21, the Android SDK and Gradle installed in the user folder
+(`~/tools/android-env.sh` sets the paths), so it compiles the app and runs the JVM tests. It
+cannot run an emulator: Hyper-V holds the CPU's virtualization, and it has 7.8 GB of RAM. An
+emulator's modem is synthetic anyway, so an emulator run proves the app works end to end, not
+that its measurements are right.
 
-**CI, GitHub Actions:** on push, the `:format` tests, unit tests, a debug build and lint, plus
-a job that checks out fieldTap at a pinned commit and runs the contract tests. On a tag, a
+**CI, GitHub Actions:** on push, the JVM tests, a debug build, and an **emulator job**. That
+job boots an Android emulator on a Linux runner, installs the app, runs a session end to end,
+checks the session with `fieldtap validate` and renders it with `fieldtap report`. On a tag: a
 signed release build, upload to 5gto6g.com, and an updated `version.json`.
 
 **Phones:**
@@ -436,7 +460,7 @@ signed release build, upload to 5gto6g.com, and an updated `version.json`.
 
 | Phase | Deliverable | Effort |
 | --- | --- | --- |
-| **0. Prerequisites** | SIM in the OnePlus; unrooted Samsung ordered. Organisation registration and D-U-N-S started; package and release certificate registered; key escrowed. `FieldTap-Android` repo with CI building an empty signed APK. `SESSION-FORMAT.md` and `columns.json` agreed. `dumpsys telephony.registry` baselines captured with and without the SIM. | 2–3 days; verification paperwork runs 1–4 weeks in the background |
+| **0. Prerequisites** | SIM in the OnePlus; unrooted Samsung ordered. Organisation registration and D-U-N-S started; package and release certificate registered; key escrowed. The `android/` project, with CI that builds it and runs it on an emulator. `SESSION-FORMAT.md` and `columns.json` agreed. `dumpsys telephony.registry` baselines captured with and without the SIM. | 2–3 days; verification paperwork runs 1–4 weeks in the background |
 | **1. Probe spike** (week 1) | A throwaway APK writing `cellinfo.csv`. It measures: the fresh-sample interval across screen, Wi-Fi and charging states; whether timestamps advance and SINR looks plausible; that cell-info updates work without the Phone permission while the push and physical-channel listeners refuse; and a 2-hour screen-off, unplugged soak on OxygenOS 15, with and without the battery settings and a wake lock, with exit reasons. **Ends in a go/no-go** on the wake lock and on what walk and pocket modes can promise. | 1 week |
 | **2. Logger alpha** (weeks 2–3) | The `:format` writer for all seven files, the freshness engine, events, GPS matching, crash recovery, readiness check and soak test, probe screen, disclosure and consent, privacy zones, the Live, Sessions and Detail screens, zip export. Python: `fieldtap validate`, fixture, contract tests, CI green. **Exit test:** a 30-minute pocket walk and a 30-minute walk-mode walk on the OnePlus with a SIM render with `fieldtap report`, and `cellinfo.csv` agrees with `fieldtap scan --watch`. Debug APK to 2–3 friendly engineers. | 2 weeks, plus 2 days Python |
 | **3. Tests and hardening** (week 4) | Ping and download bound to cellular, with caps, budget, and failures as events. Storage cap; Mark and Stop in the notification; illustrated OxygenOS and One UI battery guidance. **Exit test:** a 1-hour screen-off session with the SIM in and Wi-Fi left on survives, `traffic.csv` shows cellular round-trip times, and battery drain per hour is measured and published. | 1 week |
@@ -455,7 +479,7 @@ signed release build, upload to 5gto6g.com, and an updated `version.json`.
 | Cadence collapses in normal use: 10 s with the screen off or on Wi-Fi, and no signal updates screen-off on battery. Users expecting laptop density will call it broken. | Walk mode; cadence shown live and stored; tests run unplugged with Wi-Fi off. |
 | The wake-lock trade-off. Without one, the ticker may stall indoors; with one, a future Play listing risks the wake-lock penalty. | The week 1 measurement decides. If needed, the website build only. |
 | The Kotlin writer and the Python reader drift apart. | `columns.json`, the golden fixture, and `fieldtap validate` in CI and on every upload. |
-| The Python package lives only on open PR #1, and another account pushes to main. | Pin the contract job to a commit; merge PR #1 before building on it. |
+| The Python package lives only on open PR #1, and another account pushes to main. | The app branch is based on PR #1's branch; merge PR #1 before the app branch. |
 | Vendor variation: timestamps that never advance, SINR in the wrong unit, a missing NSA leg or neighbours, dual-SIM confusion. | The probe, a supported-device list, and implausible values written blank instead of wrong. |
 | Seen as a NetMonster clone. | Lead with the report, the account and honest freshness, never the live meter. |
 | 2027 verification makes website installs painful. | Register the organisation now. |
@@ -467,21 +491,23 @@ signed release build, upload to 5gto6g.com, and an updated `version.json`.
 
 ---
 
-## Decisions needed
+## Decisions
 
-1. **Publisher and package.** Register Simnovus as the organisation with
-   `com.simnovus.fieldtap` (recommended), or a separate 5gto6g entity. Permanent once
-   registered, and the D-U-N-S clock only starts when this is decided.
-2. **Brand on 5gto6g.com.** "FieldTap Mobile" (recommended, keeps the layer-3 upgrade story),
-   or a separate 5gto6g-branded app.
+**Made on 2026-09-10:** the brand is 5gto6G FieldTap; everything is under 5gto6g; the publisher
+is 5gto6g as a company; the working package ID is `com.fieldtap`; the code is in `android/` of
+this repository; the app is free for now.
+
+**Still open:**
+
+1. **Is 5gto6g already a registered company?** If not, registering it and getting a D-U-N-S
+   number come before Google developer verification.
+2. **Confirm the package ID** before registering it. It is permanent once registered.
 3. **Pilot model and region.** An invite-only named team (recommended) or public signup; US or
    India hosting. This decides whether the privacy paperwork blocks launch.
 4. **Hardware budget.** A prepaid data SIM for the OnePlus and at least one unrooted Samsung,
    optionally a Pixel.
 5. **Who owns Android after launch:** releases, SDK bumps, Play declarations, the device list.
    Needed before Phase 4.
-6. **Commercial model after the pilot.** A free app with paid team accounts priced under
-   RantCell's $320 per device per year, or free for FieldTap customers.
 
 ---
 

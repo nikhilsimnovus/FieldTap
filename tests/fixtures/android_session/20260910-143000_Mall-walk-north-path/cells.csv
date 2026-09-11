@@ -1,0 +1,4 @@
+first_seen_utc,rat,plmn,mcc,mnc,tac,cell_id,enb_id,sector,pci,band,dl_earfcn,ul_earfcn,dl_bw_mhz,ul_bw_mhz,version,plausible,operator,additional_plmns,samples,rsrp_min,rsrp_max
+2026-09-10T14:30:00.400+00:00,lte,311480,311,480,18704,21640193,84532,1,212,66,66786,132322,20.0,20.0,android,True,Verizon,,32,-102.0,-83.0
+2026-09-10T14:30:08.400+00:00,nr,,,,,,,,393,77,650000,,,,android,True,,,46,-110.0,-88.0
+2026-09-10T14:31:04.400+00:00,lte,311480,311,480,18704,21640194,84532,2,213,66,66786,132322,20.0,20.0,android,True,Verizon,,22,-90.0,-84.0

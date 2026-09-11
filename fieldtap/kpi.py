@@ -82,6 +82,9 @@ def extract(path: str, tshark: Optional[str] = None) -> list:
 
 
 COLUMNS = ["frame", "time_epoch", "rat", "meas_id", "pci", "rsrp_dbm", "rsrq_db", "sinr_db", "comment"]
+# kpi.csv inside a session directory: the rows above, tagged with the GPS
+# position nearest in time (gps.tag_rows). schema/columns.json repeats this list.
+SESSION_COLUMNS = COLUMNS + ["lat", "lon"]
 
 
 def to_csv(rows: list) -> str:

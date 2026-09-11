@@ -398,6 +398,37 @@ def cmd_report(args) -> int:
     return 0
 
 
+def _print_safe(text: str) -> None:
+    """print(), without dying on a console that cannot encode the text."""
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(text.encode(encoding, "backslashreplace").decode(encoding, "replace"))
+
+
+def cmd_validate(args) -> int:
+    """Check a session directory, or an upload bundle, against fieldtap-session/1."""
+    from . import contract
+    target = args.target
+    if os.path.isdir(target):
+        kind = "session"
+        problems = contract.validate_session(target, upload=args.upload)
+    elif os.path.isfile(target) and target.lower().endswith(".zip"):
+        kind = "bundle"
+        problems = contract.validate_bundle(target)
+    else:
+        _log("not a session directory or a .zip bundle: %s" % target)
+        return 2
+    errors = sum(1 for p in problems if p.severity == contract.ERROR)
+    warnings = len(problems) - errors
+    if args.json:
+        print(json.dumps({"target": target, "kind": kind, "format": contract.FORMAT, "errors": errors,
+                          "warnings": warnings, "problems": [p.to_dict() for p in problems]}, indent=2))
+    else:
+        for problem in problems:
+            _print_safe(str(problem))
+    _log("%s %s: %d error(s), %d warning(s)" % (kind, target, errors, warnings))
+    return 1 if errors else 0
+
+
 def cmd_events(args) -> int:
     from . import events as events_mod
     det = events_mod.from_pcapng(args.file)
@@ -620,6 +651,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rebuild", action="store_true", help="recompute events and KPIs instead of reusing the CSVs")
     p.add_argument("--open", action="store_true")
     p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser("validate", help="check a session directory (or an upload .zip) against fieldtap-session/1")
+    p.add_argument("target", help="session directory, or an upload bundle .zip")
+    p.add_argument("--upload", action="store_true",
+                   help="also require that the directory holds only the seven session files")
+    p.add_argument("--json", action="store_true", help="print the problems as JSON")
+    p.set_defaults(func=cmd_validate)
 
     p = sub.add_parser("events", help="list the procedures and failures in a FieldTap pcapng")
     p.add_argument("file")

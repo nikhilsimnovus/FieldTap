@@ -26,6 +26,7 @@ from . import gps as gps_mod
 from . import kpi as kpi_mod
 from . import traffic as traffic_mod
 from . import tshark as tshark_mod
+from .isotime import parse_iso
 from .session import CELLS_FILE, PCAPNG_FILE, RAW_FILE, SIDE_CAR, list_sessions
 
 EVENTS_FILE = "events.csv"
@@ -38,6 +39,13 @@ INDEX_FILE = "index.html"
 
 MAX_LADDER_LINES = 400
 MAX_EVENT_ROWS = 600
+# fieldtap.contract.FORMAT. A session that declares it is the Android app's: measurements only.
+APP_FORMAT = "fieldtap-session/1"
+# Event kinds a reader looks for in the table. When a session has more events than
+# the table lists, these stay, with every error and warning, ahead of the rest.
+KEEP_EVENT_KINDS = frozenset(["marker", "serving_cell", "rat_change", "service_lost", "emergency_only",
+                              "service_restored", "sampling_gap", "gps_lost", "gps_restored", "test_failed",
+                              "session_interrupted", "privacy_zone", "handover"])
 
 
 # --- small helpers -----------------------------------------------------------------------------
@@ -79,7 +87,7 @@ def _iso_to_dt(text: Optional[str]) -> Optional[datetime]:
     if not text:
         return None
     try:
-        return datetime.fromisoformat(text)
+        return parse_iso(text)
     except ValueError:
         return None
 
@@ -95,6 +103,38 @@ def _haversine_km(a, b) -> float:
 
 def _esc(text) -> str:
     return html.escape("" if text is None else str(text))
+
+
+def _utc_text(value) -> str:
+    """A *_utc value as yyyy-mm-dd HH:MM:SS in UTC, whatever offset it was written with."""
+    when = _iso_to_dt(value) if isinstance(value, str) else None
+    if when is not None and when.utcoffset() is not None:
+        try:
+            return when.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        except (OverflowError, ValueError):
+            pass
+    return value[:19].replace("T", " ") if isinstance(value, str) else ""
+
+
+def _events_for_table(events: list, limit: int = MAX_EVENT_ROWS) -> tuple:
+    """The events the report lists, in time order, and how many the limit left out.
+
+    Low-priority signalling (measurement reports, paging, ...) is left out while
+    anything else remains. Past the limit, errors, warnings and KEEP_EVENT_KINDS
+    (markers, cell changes, failures) are kept first, then the other non-info
+    events, then info events such as the 5G icon changing."""
+    shown = [e for e in events if e.kind not in events_mod.LOW_PRIORITY] or list(events)
+    if len(shown) <= limit:
+        return shown, 0
+
+    def rank(item):
+        index, event = item
+        if event.severity in ("error", "warn") or event.kind in KEEP_EVENT_KINDS:
+            return 0, index
+        return (2 if event.severity == "info" else 1), index
+
+    kept = sorted(sorted(enumerate(shown), key=rank)[:limit], key=lambda item: item[0])
+    return [event for _index, event in kept], len(shown) - limit
 
 
 # --- SVG charts ------------------------------------------------------------------------------------
@@ -322,7 +362,7 @@ def build(session_dir: str, tshark: Optional[str] = None, log=lambda s: None, re
             kpi_rows, kpi_note = [], str(exc)
         if len(track):
             gps_mod.tag_rows(kpi_rows, track)
-        _write_csv(kpi_path, kpi_rows, kpi_mod.COLUMNS + ["lat", "lon"])
+        _write_csv(kpi_path, kpi_rows, kpi_mod.SESSION_COLUMNS)
     else:
         kpi_rows = []
         kpi_note = "tshark not found: measurement KPIs need Wireshark" if have_pcapng else ""
@@ -392,7 +432,7 @@ def build(session_dir: str, tshark: Optional[str] = None, log=lambda s: None, re
     # collected". The Android app writes events of its own (cell changes,
     # markers, sampling gaps), so it declares this rather than leaving it to be
     # inferred from whether an events file exists.
-    if (meta.get("capabilities") or {}).get("layer3") is False or \
+    if (meta.get("capabilities") or {}).get("layer3") is False or meta.get("format") == APP_FORMAT or \
             (meta.get("transport") or {}).get("transport") == "android-api":
         has_signalling = False
     else:
@@ -456,12 +496,13 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
     kpi = summary["kpi"]
     traffic_sum = summary["traffic"]
     simulated = bool((meta.get("transport") or {}).get("transport") == "file")
+    app_session = meta.get("format") == APP_FORMAT or (meta.get("transport") or {}).get("transport") == "android-api"
 
     handset_line = " ".join(x for x in (hs.get("manufacturer"), hs.get("model")) if x) or (summary.get("device") or {}).get("label") or "handset"
     title = "%s - %s" % (summary.get("name") or "session", handset_line)
     sub = []
     if summary.get("started_utc"):
-        sub.append("%s UTC" % summary["started_utc"][:19].replace("T", " "))
+        sub.append("%s UTC" % _utc_text(summary["started_utc"]))
     if summary.get("duration_s") is not None:
         sub.append("%s" % _fmt_seconds(summary["duration_s"]))
     if net.get("operator") or net.get("mccmnc"):
@@ -479,7 +520,9 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
         if kpi.get(rat, {}).get("rsrp_avg") is not None:
             rsrp_avg = (rat.upper(), kpi[rat]["rsrp_avg"])
             break
-    msgs = sum((summary.get("counts") or {}).get("messages", {}).values())
+    messages = (summary.get("counts") or {}).get("messages")
+    msgs = sum(v for v in (messages.values() if isinstance(messages, dict) else ())
+               if isinstance(v, int) and not isinstance(v, bool))
     tiles = [
         _tile("RRC/NAS messages", msgs),
         _tile("events (errors / warnings)", "%d (%d / %d)" % (ev["events"], ev["errors"], ev["warnings"]),
@@ -581,9 +624,7 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
                 len(fixes), summary["gps"]["distance_km"])
 
     # tables
-    shown = [e for e in events if e.kind not in events_mod.LOW_PRIORITY] or events
-    if len(shown) > MAX_EVENT_ROWS:
-        shown = [e for e in shown if e.severity != "info"][:MAX_EVENT_ROWS] or shown[:MAX_EVENT_ROWS]
+    shown, left_out = _events_for_table(events)
     ev_rows = []
     for e in shown:
         t = (e.when - started).total_seconds() if (e.when and started) else None
@@ -593,6 +634,9 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
             _esc(e.detail) + ((" <span class=\"muted\">PCI %s</span>" % _esc(e.fields.get("pci"))) if e.fields.get("pci") not in (None, "") else "")))
     events_html = ("<table><tr><th>t (s)</th><th>UTC</th><th>RAT</th><th>severity</th><th>event</th><th>detail</th></tr>%s</table>"
                    % "".join(ev_rows)) if ev_rows else '<p class="muted">No events detected.</p>'
+    if left_out:
+        events_html += ('<p class="muted">%d more events are not listed here; %s has all %d.</p>'
+                        % (left_out, EVENTS_FILE, len(events)))
 
     cell_rows = "".join("<tr>%s</tr>" % "".join("<td>%s</td>" % _esc(c.get(k, "")) for k in
                                                 ("first_seen_utc", "rat", "plmn", "tac", "enb_id", "sector", "pci", "band", "dl_earfcn", "dl_bw_mhz"))
@@ -602,7 +646,8 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
     tr_rows = "".join("<tr><td>%s</td><td>%s</td><td>%s</td><td class=\"sev-%s\">%s</td><td>%s</td></tr>" % (
         _esc(r.when_iso[11:19]), _esc(r.test), _esc(r.target), "ok" if r.ok else "error", "ok" if r.ok else "failed", _esc(r.line() if r.ok else r.metrics.get("error", "")))
         for r in traffic_results)
-    traffic_html = ("<table><tr><th>UTC</th><th>test</th><th>target</th><th>result</th><th>detail</th></tr>%s</table>" % tr_rows) if traffic_results else '<p class="muted">No traffic tests were run (enable with --traffic ping,download).</p>'
+    traffic_html = ("<table><tr><th>UTC</th><th>test</th><th>target</th><th>result</th><th>detail</th></tr>%s</table>" % tr_rows) if traffic_results else \
+        '<p class="muted">No traffic tests were run%s.</p>' % ("" if app_session else " (enable with --traffic ping,download)")
 
     proc_rows = "".join("<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
         _esc(name), p["attempts"], p["successes"], p["failures"], _fmt(p["success_rate"], 1, "%"), _fmt(p["setup_ms_avg"], 0, " ms"), _fmt(p["setup_ms_max"], 0, " ms"))
@@ -646,7 +691,9 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
 <section><h2>Traffic tests</h2>%(traffic)s</section>
 %(ladder_section)s</main><footer>Generated by FieldTap %(version)s. %(footer_note)s</footer></body></html>
 """ % {"title": _esc(title), "css": _CSS, "sub": _esc(" | ".join(sub)), "tiles": "".join(tiles), "kv": "".join(kv),
-       "files": files_html, "map": map_html or '<p class="muted">No GPS track (enable with --gps adb or --gps nmea:COMx).</p>',
+       "files": files_html,
+       "map": map_html or ('<p class="muted">No GPS track in this session.</p>' if app_session
+                           else '<p class="muted">No GPS track (enable with --gps adb or --gps nmea:COMx).</p>'),
        "charts": charts_html, "cells": cells_html, "traffic": traffic_html,
        "procs_section": ("<section><h2>Procedures</h2>%s</section>\n" % proc_html) if has_signalling else "",
        "events_section": ("<section><h2>Events</h2>%s</section>\n" % events_html) if (has_signalling or events) else "",
@@ -681,7 +728,7 @@ def build_index(root: str, log=lambda s: None) -> Optional[str]:
         rsrp = next((kpi[r]["rsrp_avg"] for r in ("nr", "lte") if kpi.get(r, {}).get("rsrp_avg") is not None), None)
         report_link = ('<a href="%s/%s">report</a>' % (rel, REPORT_FILE)) if os.path.isfile(os.path.join(s["dir"], REPORT_FILE)) else '<span class="muted">no report</span>'
         rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td class=\"%s\">%s</td><td>%s</td><td>%s</td></tr>" % (
-            _esc((s["started_utc"] or "")[:19].replace("T", " ")), _esc(s["name"]), _esc(s["handset"]), _esc(s["plmns"]),
+            _esc(_utc_text(s["started_utc"])), _esc(s["name"]), _esc(s["handset"]), _esc(s["plmns"]),
             _esc(_fmt_seconds(summ["duration_s"]) if summ.get("duration_s") is not None else "-"), s["messages"],
             "sev-error" if ev.get("errors") else "", _esc(ev.get("errors", "-")), _esc(_fmt(rsrp, 1, " dBm")), report_link))
     page = """<!doctype html><html><head><meta charset="utf-8"><title>FieldTap sessions</title><style>%s</style></head>

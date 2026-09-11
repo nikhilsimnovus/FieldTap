@@ -1,0 +1,3 @@
+time_utc,test,target,ok,seconds,loss_pct,rtt_min_ms,rtt_avg_ms,rtt_max_ms,mbps,bytes,http_code,error
+2026-09-10T14:30:30.000+00:00,ping,8.8.8.8,1,4.13,0.0,38.2,44.7,58.9,,,,
+2026-09-10T14:30:36.000+00:00,download,https://probe.5gto6g.com/10MB.bin,1,4.00,,,,,20.062,10031250,200,

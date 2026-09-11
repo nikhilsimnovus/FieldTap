@@ -82,15 +82,20 @@ COLUMNS = ["seen_utc", "rat", "registered", "plmn", "mcc", "mnc", "operator", "p
            "tac", "cell_id", "bandwidth_khz", "rsrp", "rsrq", "sinr", "rssi", "level", "additional_plmns"]
 
 
+def csv_row(cell: Cell) -> dict:
+    """The COLUMNS values of one cell as `to_csv` writes them."""
+    row = {k: getattr(cell, k, "") for k in COLUMNS}
+    row["registered"] = int(cell.registered)
+    row["plmn"] = cell.plmn
+    return {k: ("" if v is None else v) for k, v in row.items()}
+
+
 def to_csv(cells: list) -> str:
     out = io.StringIO()
     w = csv.DictWriter(out, fieldnames=COLUMNS, extrasaction="ignore")
     w.writeheader()
     for c in cells:
-        row = {k: getattr(c, k, "") for k in COLUMNS}
-        row["registered"] = int(c.registered)
-        row["plmn"] = c.plmn
-        w.writerow({k: ("" if v is None else v) for k, v in row.items()})
+        w.writerow(csv_row(c))
     return out.getvalue()
 
 
