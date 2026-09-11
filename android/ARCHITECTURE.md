@@ -147,8 +147,10 @@ Step by step, for one `requestCellInfoUpdate` answer while recording:
 
 1. `TelephonySource` receives `onCellInfo(list)`. It reads both clocks and `DeviceStateSource.current()`,
    maps each `CellInfo` with `CellInfoMapper` (sentinels to null), and emits a `CellInfoAnswer`.
-2. The hub delivers it to the recorder's forwarding collector, which calls `submit`.
-3. On the session dispatcher, the recorder calls `radio.onCellInfo(answer, writing = !location.paused)`.
+2. The hub delivers it to the recorder's forwarding collector (on `MeasurementHub.inputsWithCurrentState`), which
+   calls `submit`.
+3. On the session dispatcher, the recorder calls `radio.onCellInfo(answer, writing = !location.paused)`. With
+   privacy zones set, it first holds the answer until a fix shows the phone outside every zone (section 6.5).
 4. `FreshnessEngine` marks each cell stale or fresh on its cell key and modem timestamp, computes age
    and measurement time, and picks the primary and NSA secondary serving cells.
 5. `RadioRows` builds a cellinfo candidate for every cell, and a KPI candidate for each fresh serving
@@ -178,7 +180,7 @@ Step by step, for one `requestCellInfoUpdate` answer while recording:
 | Where | Thread | Rule |
 | --- | --- | --- |
 | Platform callbacks | An executor owned by each adapter | Convert, stamp, `trySend`. No IO, no decisions. |
-| `MeasurementHub` | Its collectors | `SharedFlow` with no replay; collectors never block. |
+| `MeasurementHub` | Its collectors | `inputs` is a `SharedFlow` with no replay. `inputsWithCurrentState`, which the recorder and `HubLiveFeed` collect, first replays the newest service state, data state, display info and location availability, stamped at subscription: Android delivers those once when the listeners register, and a session starts after the Live screen registered them. Cell answers, fixes and signal strengths are never replayed. Collectors never block. |
 | `SessionRecorder` | `SessionDispatchers.newSessionDispatcher()` = `Dispatchers.IO.limitedParallelism(1)`, one per session | The only code that touches the active session directory. All engines it calls are single-threaded. |
 | `HubLiveFeed` | `Dispatchers.Default` | Its own `LiveStateReducer`; never writes files. |
 | Repositories | `Dispatchers.IO` | Read closed sessions; refuse to delete or export the active one. |
@@ -194,7 +196,8 @@ The KDoc of each stub is the full contract. This section is the summary an imple
 | --- | --- |
 | A cell is a repeat when an equal `CellKey` (rat, plmn, pci, arfcn, cell id) with an equal `timestampMs` was already seen, by any answer, request or push. Repeats go to cellinfo.csv with `stale` 1, never to kpi.csv. | `FreshnessEngine` |
 | An answer is fresh when its primary serving cell is fresh (no primary: any cell). `fresh_samples` counts fresh answers; `repeats_dropped` counts repeats. | `FreshnessEngine`, `CollectionStats` |
-| Age = elapsed at answer - `timestampMs` (clamped to 0). Measurement time = wall at answer - age. | `FreshnessEngine` |
+| Age = elapsed at answer - `timestampMs` (clamped to 0). Measurement time = wall at answer - age. A repeat keeps the measurement time of its first sighting: the two clocks are read separately at each answer, so recomputing it moves the time. | `FreshnessEngine` |
+| The telephony adapter's one `getAllCellInfo` read when its listeners start is a `CellInfoAnswer` with `cached` true. Live shows it; the recorder and the soak test ignore it, because Android may have measured it long before. | `TelephonySource`, `SessionRecorder` |
 | Short interval (2 s) when screen on and (Wi-Fi off or charging); otherwise 10 s. KPI rows at most 2500 ms old on the short interval, 11000 ms on the long. | `CadencePolicy`, `RadioRows` |
 | Primary serving = connection status 1 (vendors without statuses: first registered LTE or NR cell). NSA leg = NR cell with status 2 under an LTE primary. At most one KPI row per RAT per answer. | `ServingCellSelector`, `RadioRows` |
 | Emergency-only comes from service state only; emergency-camped samples are still KPI rows. | `ServingCellSelector` |
@@ -208,6 +211,10 @@ The KDoc of each stub is the full contract. This section is the summary an imple
   ending answer's arrival) and a `collection.gaps` entry (start and stop = measurement times).
 - Reason: `app_paused` (our ticker stalled more than 3 s), else `no_service`, else `screen_off`, else
   `unknown`. A privacy-zone resume resets the detector, so no gap straddles a pause.
+- A sample measured before the session started may still be written, but it is never the previous sample of a gap
+  or an interval: the detector and the statistics start at the session start
+  (`DefaultRadioPipeline(sessionStartElapsedMs)`). After a privacy-zone resume, likewise, nothing measured before
+  the resume is written or starts a gap.
 - `median_fresh_interval_ms`: sorted intervals between fresh answers, element at `size / 2`.
 - `*_pct`: share of `request` answers with that condition, unrounded; session.json writes one decimal.
 
@@ -224,7 +231,7 @@ The KDoc of each stub is the full contract. This section is the summary an imple
 | `nr_display` | `RadioEventDeriver.onDisplayInfo` | Observed | `5G icon on` / `5G icon off` (`override NR_NSA, network LTE`) |
 | `sampling_gap` | `SamplingGap.toEvent` | Ending answer's arrival | `Sampling gap` (`no fresh cell info for 14.0 s`), cause = reason |
 | `gps_lost` / `gps_restored` | `GpsEventDeriver` | Tick / fix observed | `GPS lost` / `GPS restored` |
-| `privacy_zone` | `PrivacyZoneGate` | Fix observed | `Logging paused in a privacy zone` / `Logging resumed`, never a place |
+| `privacy_zone` | `PrivacyZoneGate` | Fix observed, or the tick that ends an overlong hold | `Logging paused in a privacy zone` / `Logging paused until the location is known` (`no location fix showed the phone outside every privacy zone`) / `Logging resumed`, never a place |
 | `marker` | `SessionEvents.marker` | Tap | `Marker` (the note) |
 | `test_failed` | `SessionEvents.testFailed` via `TrafficRecords` | Test start | `Ping failed` / `Download failed` (error) |
 | `session_interrupted` | `SessionEvents.sessionInterrupted` via `SessionRecovery` | Last heartbeat | `Session interrupted`, cause = exit token |
@@ -245,14 +252,24 @@ row before them by at most the sample age (at most 11 s). `fieldtap validate` do
 
 ### 6.5 Privacy zones (location-privacy-core, enforced by session-core)
 
-- Logging pauses at the first accepted fix inside a zone (distance at most radius plus up to 50 m of
-  accuracy) and resumes at the first accepted fix outside every zone. With no fix yet, it is not paused.
-- While paused, nothing is written to any file except the two `privacy_zone` events. That includes
+- Each accepted fix is placed by `PrivacyZones.placement`: INSIDE a zone (distance at most radius plus up to 50 m
+  of accuracy); else AMBIGUOUS when its whole accuracy circle, uncapped, reaches into a zone; else NEAR within
+  250 m of a zone's edge; else CLEAR.
+- Logging pauses at an INSIDE fix and resumes at a NEAR or CLEAR fix. An AMBIGUOUS fix neither pauses nor
+  resumes, and becomes no track row and no join fix.
+- With zones set, the recorder holds cell answers, service, data and display state, test results and marks
+  (`LocationPipeline.holding`): before the first fix, from a NEAR fix until the next fix, and from an AMBIGUOUS
+  fix until a fix shows inside or outside. A fix that confirms the phone outside (`LocationStep.confirmsOutside`)
+  handles what was held as if it had just arrived; a pause drops it. A hold longer than 60 s pauses logging as
+  `Logging paused until the location is known`, counted in `zone_pauses` only once a fix inside a zone confirms
+  it. A session without zones never holds, and one that starts outside its zones writes what it wrote before.
+- While paused, nothing is written to any file except the `privacy_zone` events. That includes
   kpi, cellinfo, track, traffic rows and markers, radio events and statistics. A fix inside a zone never
-  enters the join buffer, so no row gets a position from inside a zone.
+  enters the join buffer, so no row gets a position from inside a zone. When logging pauses, pending rows
+  measured after the newest fix outside every zone are dropped, not written with that fix.
 - De-duplication and the latest service, data and display state keep updating while paused. On resume,
   the pipeline re-feeds that state stamped with the resume time, so the files learn what changed but not
-  when.
+  when. Nothing measured before the resume is written.
 - `privacy.zone_pauses` counts pauses. A zone's label never leaves the Settings screen.
 
 ### 6.6 Location precision and the export zip (location-privacy-core)
@@ -271,7 +288,7 @@ row before them by at most the sample age (at most 11 s). `fieldtap validate` do
 | kpi.csv, cellinfo.csv, track.csv, events.csv, traffic.csv | Append-only | Header at creation; flush every 1 s; `FileDescriptor.sync()` every 5 s. |
 | cells.csv | Rewritten atomically every 60 s and at stop | May hold only its header early on. |
 | session.json | Created at start; rewritten atomically every 60 s and at stop | `.tmp`, sync, atomic rename. While open: `stopped_utc` null and `summary.stopped_by` `recording`. |
-| `<filesDir>/session-state/<dir>.heartbeat` | Every 5 s, deleted at close | `v1 <wallMs> <elapsedMs> <pid>`. Outside the session directory. |
+| `<filesDir>/session-state/<dir>.heartbeat` | Every 5 s, deleted at close | `v1 <wallMs> <elapsedMs> <pid>`; `v2 <wallMs> <elapsedMs> <pid> <stop token>` when the recorder stopped the session but could not write its final session.json (section 6.8). Outside the session directory. |
 
 - Root: `<getExternalFilesDir(null)>/sessions/`, pullable at `/sdcard/Android/data/<applicationId>/files/sessions`.
 - Directory `SessionDirName.of(startedUtcMs, name)`. On a collision within the same second,
@@ -289,9 +306,15 @@ row before them by at most the sample age (at most 11 s). `fieldtap validate` do
 - The service returns `START_NOT_STICKY`. At the next process start, `LaunchRecovery` finds sessions with
   `stopped_utc` null. `RecoveryPlanner` takes the stop time from the heartbeat (else the newest file time)
   and the reason from the exit record with the heartbeat's pid (else the first record at or after the stop
-  time minus 10 s, else `unknown`). `SessionRecovery.close` cuts each CSV back to its last CR LF, appends
-  `session_interrupted`, and rewrites session.json from the last snapshot. Summary counts of an
-  interrupted session are therefore up to 60 s old.
+  time minus 10 s, else `unknown`): `RecoveryAction.CloseInterrupted`. `SessionRecovery.close` cuts each CSV back
+  to its last CR LF, appends `session_interrupted`, and rewrites session.json from the last snapshot with
+  `summary.plmns`, cells.csv and `collection` rebuilt from the repaired rows (`SessionRebuild`), so a session killed
+  before its first 60 s snapshot still counts what it holds.
+- When the recorder stops a session itself (`storage_full`, say) but cannot write its final session.json, it leaves
+  a v2 heartbeat carrying the stop token. Such a session is `RecoveryAction.CloseStopped`: closed as that stop, with
+  no `session_interrupted` event and no exit record matched, since Android stopped nothing.
+  `SessionRecovery.closeStoppedSessions` closes these at any time; `FileSessionRepository` calls it before it lists,
+  opens or exports sessions.
 
 ### 6.9 Storage cap (session-core)
 
@@ -363,7 +386,8 @@ The public APIs these names rely on were checked against the installed `platform
 ## 9. Debug automation hook
 
 Debug builds only. `app/src/debug/AndroidManifest.xml` declares an exported, translucent
-`com.fieldtap.debug.AutomationActivity`. Release has no such source set, so a release APK contains no
+`com.fieldtap.debug.AutomationActivity` that requires `android.permission.DUMP`, which the adb shell holds and no
+installed app can. Release has no such source set, so a release APK contains no
 exported automation entry point. CI checks this with
 `aapt2 dump xmltree --file AndroidManifest.xml <release apk>`: no `com.fieldtap.debug` may appear.
 
@@ -416,14 +440,16 @@ pulls after every run. `android/e2e/check_e2e.py` asserts what the files hold.
 | Step | Driven by | Must hold |
 | --- | --- | --- |
 | First run, in light, dark and font scale 1.3 (`cmd uimode night`, `font_scale`, each after `pm clear`) | `FirstRunScreensTest` | The disclosure shows before any permission prompt; nothing is granted before Allow |
-| The walk: consent, permissions in Android's dialog, Live, Settings (ping `10.0.2.2`, 1 MB download), Start through the pre-start sheet, a marker, Stop after 180 s, Build zip, Share | `EndToEndWalkTest`, while the host sends `adb emu geo fix` once a second and `adb emu gsm signal-profile` every 20 s | Live shows a serving cell with its age badge; the zip's SHA-256 on screen is the file's; the share sheet opens |
+| The walk: consent, permissions in Android's dialog, Live, Settings (ping `10.0.2.2`, 1 MB download), Start through the pre-start sheet, a marker, Stop after 180 s, Build zip, Share | `EndToEndWalkTest`, while the host sends `adb emu geo fix` once a second and `adb emu gsm signal-profile` every 20 s | Live shows a serving cell with its age badge; leaving Settings with unsaved test edits asks first; walk mode keeps the screen on without overriding brightness; the zip's SHA-256 on screen is the file's; the share sheet opens |
 | Every screen in the three variants | `ScreenTourTest` | Live, Start dialog, Sessions, detail and Share card, Readiness, Probe, Settings, About |
 | Process death | The host: START through the automation hook, `am force-stop` (relaunch with `am start`) and `run-as <pkg> kill -9` (relaunch by `RecoveryUiTest`) | The session is closed with a `session_interrupted` event whose cause is the exit reason `dumpsys activity exit-info` gives for the killed pid, at the last heartbeat; Live names it |
+| The minified release build | `android/e2e/release_smoke.sh`, last, with the APK the build job signed with a key made for the run | It installs, launches, and still runs with no crash 15 s later |
 | The files | `python -m fieldtap validate DIR --upload`, `python -m fieldtap report DIR`, `fieldtap validate` on the zip, `check_e2e.py` | Every session validates; kpi rows are fresh serving-cell measurements in cellinfo.csv, never a modem timestamp twice for a cell, positioned from the nearest fix within 5 s; track fixes lie on the injected walk; serving_cell and the marker with its note; ping and download rows; `stopped_by` user, `layer3` false, collection statistics; cells.csv agrees with `summary.plmns`; the report has no Procedures or Call flow section |
 
 The artifacts of each leg are `e2e-sessions-api<N>` (sessions with report.html, the exported zip),
 `e2e-screenshots-api<N>`, `e2e-logcat-api<N>` (redacted as the probe redacts) and `e2e-reports-api<N>` (summary, JUnit XML
-of each instrumentation run, fieldtap output, check results).
+of each instrumentation run, fieldtap output, check results). The build job adds `release-apk`, the minified APK
+signed for the smoke test, and each leg adds `release-smoke-api<N>`.
 
 ## 10. Workstreams
 
@@ -626,6 +652,17 @@ Changes agreed at integration:
   "Rec" and "1:", cutting off the elapsed time. `SessionButton` now leaves out its label and the Stop word when its
   content is narrower than 168 dp times the font scale (`recordingIsCompact`), the time shrinks before it would clip,
   and TalkBack reads "Recording, 12:34, Stop" in both layouts.
+- Review round 1 (2026-09-11) changed these shapes, each for a finding named in section 6 or 13:
+  - `CellInfoAnswer.cached`: the telephony adapter's `getAllCellInfo` read, which the recorder and the soak test ignore.
+  - `LocationPipeline.holding`, `pausedWithoutFix` and `holdAgeMs(nowElapsedMs)`, and `LocationStep.confirmsOutside`,
+    all with defaults; `DefaultLocationPipeline(zones, allowMockFixes, holdLimitMs)`.
+  - `RadioPipeline.sampleCounts()`, with a default, and `DefaultRadioPipeline(sessionStartElapsedMs)`.
+  - `RecoveryAction.Close`, sealed into `CloseInterrupted` and `CloseStopped`; `SessionRecovery.closeStoppedSessions`;
+    `FileSessionRepository(closeStoppedSessions)`.
+  - `HeartbeatRecord.stoppedBy` (the v2 line), `SessionOutcome.name`, `RecorderSnapshot.waitingForLocation` and
+    `locationEnabled`, and `LiveState.locationEnabled`.
+  - `MeasurementHub` takes the clock and adds `inputsWithCurrentState` and `currentDisplayInfo()`.
+  - `app/build.gradle.kts` gains the R8 release build type, with `app/proguard-rules.pro`.
 
 Inside owned files, an implementer may add private or internal helpers, new files in owned packages, and
 tests. Public API added for one's own use is fine; public API another workstream needs goes through the
@@ -635,7 +672,8 @@ orchestrator.
 
 - Commands, from `android/`:
   `./gradlew :format:test :core:test :app:testDebugUnitTest :app:assembleDebug :app:lintDebug`; to compile only:
-  `./gradlew :format:compileKotlin :core:compileKotlin :app:compileDebugKotlin`.
+  `./gradlew :format:compileKotlin :core:compileKotlin :app:compileDebugKotlin`; the R8-minified release APK:
+  `./gradlew :app:assembleRelease`.
 - In Bash, first `source /c/Users/Simnovus-Lab/tools/android-env.sh` and
   `export JAVA_TOOL_OPTIONS='-Djdk.net.unixdomain.tmpdir=C:\Users\Simnovus-Lab\.gradle\afunix'`. Without the
   second, JDK 21's selector cannot open its AF_UNIX pipe under `%TEMP%` on this PC.
@@ -659,8 +697,8 @@ orchestrator.
 | `summary.stopped_by` is `recording` while open; extra stop tokens `storage_full`, `permission_revoked`, `service_destroyed` | The field is required and non-null, and these stops are not Android exit reasons. |
 | Gap reasons `app_paused`, `no_service`, `screen_off`, `unknown` | The contract gives examples only. |
 | Heartbeat outside the session directory | The directory holds only the seven files. |
-| cells.csv and session.json snapshotted every 60 s | Recovery then needs no reconstruction. The cost is up to 60 s of stale counts after a kill. |
-| Privacy pause is sticky until a fix outside, stops statistics too, and resume re-stamps state | Nothing written inside a zone, including times. |
+| cells.csv and session.json snapshotted every 60 s; recovery rebuilds plmns, cells.csv and collection from the rows | The rows are the truth: a session killed in its first minute had 17 kpi rows but no operator, no fresh sample and no serving cell. |
+| Privacy pause is sticky until a fix outside, stops statistics too, and resume re-stamps state. With zones set, writes wait for a fix that places the phone outside, and a hold of 60 s becomes a pause | Nothing written inside a zone, including times, even before the first fix or when GPS is lost next to a zone. |
 | Mock fixes rejected in release builds | Honest tracks. Debug builds accept them for the emulator. |
 | No WorkManager or OkHttp | No upload in this version. `Network.openConnection` binds to cellular. |
 | The Live screen runs the sources while visible, with no session | Live is a screen of the plan. Location is while-in-use there. |
@@ -669,3 +707,9 @@ orchestrator.
 | Consent text `2026-09-10-draft` in `Consent.CURRENT`, worded per decision 2 | Not legally reviewed. Any change to the text needs a new version and the new SHA-256 pinned in `ConsentTest`, because stored consent records and every session's `consent_sha256` depend on the exact bytes. |
 | The sampling-gap threshold uses the interval in force when the previous fresh sample was measured | Only this reproduces the golden 14.0 s `screen_off` gap: the answer that delivered the previous fresh sample already reports the screen off. |
 | A cells.csv row may lack `pci` or `dl_earfcn` | SESSION-FORMAT.md: the cells must account for every row of kpi.csv, and `plausible` says which rows are incomplete. |
+| The hub replays the newest service, data and display state to each new collector, and nothing else | Android delivers them once, at registration, and a session starts after the Live screen registered. Answers and fixes are timed by their arrival, so they are never replayed. |
+| Location switched off during a session is shown on Live and in the notification, not written to the files | Writing it needs a new event token, and tokens are the lead's (decision 4). |
+| The release build runs R8 with resource shrinking and no keep rules; CI launches the minified APK on both emulators | 28 MB became 3.8 MB. A class R8 removed wrongly then fails on the emulator, not on a phone. |
+| The debug automation hook requires `android.permission.DUMP` | The debug APK is the build alpha testers install; only the adb shell may drive it. |
+| Walk mode keeps the screen on but leaves brightness to the phone | Forcing 15 % overrode adaptive brightness outdoors, where the screen must stay readable. |
+| Settings saves its switches at once and the test fields with Save, and asks before leaving with unsaved test edits | The fields are validated before they are saved; the switches need no validation. |
