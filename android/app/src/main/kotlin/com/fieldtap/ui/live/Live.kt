@@ -848,7 +848,7 @@ private fun LiveList(
     )
     val gutter = screenGutter()
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        if (maxWidth >= Sizes.WideLayoutMinWidth) {
+        if (LivePresentation.twoPanes(maxWidth, actionsBeside != null)) {
             Row(
                 modifier = Modifier
                     .fillMaxSize()

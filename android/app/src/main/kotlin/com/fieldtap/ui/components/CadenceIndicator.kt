@@ -1,6 +1,7 @@
 package com.fieldtap.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -61,25 +62,25 @@ fun CadenceIndicator(
     }
     val shape = if (reason == null) ShapeRoles.Pill else ShapeRoles.Tile
     val body: @Composable () -> Unit = {
-        Row(
+        // The reason sits beside the interval when it fits, and wraps under it when not: squeezed beside it in a narrow
+        // pane it shrank to a letter a line.
+        FlowRow(
             modifier = Modifier
                 .heightIn(min = if (onClick != null) Sizes.MinTouchTarget else Sizes.BadgeMinHeight + Spacing.Md)
                 .padding(horizontal = Spacing.Md, vertical = Spacing.Xs),
-            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
+            verticalArrangement = Arrangement.spacedBy(Spacing.Xxs, Alignment.CenterVertically),
+            itemVerticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(imageVector = FieldTapIcons.Timer, contentDescription = null, modifier = Modifier.size(Sizes.IconSmall))
-            if (label != null) {
-                Text(text = label, style = MaterialTheme.typography.labelLarge)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
+                Icon(imageVector = FieldTapIcons.Timer, contentDescription = null, modifier = Modifier.size(Sizes.IconSmall))
+                if (label != null) {
+                    Text(text = label, style = MaterialTheme.typography.labelLarge)
+                }
+                Text(text = intervalText, style = MaterialTheme.typography.titleSmall.tabular())
             }
-            Text(text = intervalText, style = MaterialTheme.typography.titleSmall.tabular())
             if (reason != null) {
-                Text(
-                    text = reason,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 2,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
+                Text(text = reason, style = MaterialTheme.typography.bodySmall)
             }
         }
     }

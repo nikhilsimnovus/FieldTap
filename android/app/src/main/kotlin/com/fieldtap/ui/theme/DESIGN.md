@@ -105,7 +105,9 @@ Any other text whose numbers change: `MaterialTheme.typography.titleSmall.tabula
   centred, on tablets and in landscape; centred prose at `Sizes.MaxTextWidth`.
 - A window at least `Sizes.WideLayoutMinWidth` wide and lower than `Sizes.ShortWindowMaxHeight` (a phone in
   landscape) has no room for a bottom action bar: primary actions move to a `Sizes.ActionRailWidth` column beside
-  the content, at its bottom, so the number a screen is about stays in view.
+  the content, at its bottom, so the number a screen is about stays in view. Two panes need
+  `Sizes.WideLayoutMinWidth` beside that column; a smaller window keeps one pane.
+- Words that explain a missing value wrap; a chip holds only a short state word, never a sentence.
 - `Durations`: SHORT 150, MEDIUM 250, LONG 400 ms. Animate colour and state, never the numbers.
 
 ## Icons, words, numbers

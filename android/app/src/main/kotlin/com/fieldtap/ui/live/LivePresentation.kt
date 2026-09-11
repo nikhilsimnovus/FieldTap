@@ -1,6 +1,7 @@
 package com.fieldtap.ui.live
 
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import com.fieldtap.app.SessionStatus
 import com.fieldtap.core.input.DataConnState
 import com.fieldtap.core.input.DataStateSnapshot
@@ -272,6 +273,13 @@ object LivePresentation {
      * column beside the content, so the serving cell's value stays in view.
      */
     fun actionsBesideContent(width: Dp, height: Dp): Boolean = width >= Sizes.WideLayoutMinWidth && height < Sizes.ShortWindowMaxHeight
+
+    /**
+     * Two panes when the width left beside the session buttons, if they sit there, still holds two: on a small phone in
+     * landscape, one pane beside the buttons reads better than two narrow ones that cut labels and wrap every chip.
+     */
+    fun twoPanes(width: Dp, actionsBeside: Boolean): Boolean =
+        width >= Sizes.WideLayoutMinWidth + if (actionsBeside) Sizes.ActionRailWidth else 0.dp
 
     /** Mark writes an event only while recording outside a privacy zone. */
     fun markAllowed(status: SessionStatus): Boolean = status is SessionStatus.Recording && !status.snapshot.paused

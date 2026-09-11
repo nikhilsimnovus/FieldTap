@@ -180,8 +180,8 @@ fun MetricTile(
 
 /**
  * A secondary live value under a [MetricEmphasis.HERO] tile, sharing a row with another: label, number and unit, and its
- * quality as a swatch and a word. A missing value shows [placeholder] with no unit, and [qualityLabel] says why, for
- * example "Not reported". [stale] dims the number as a stale hero does. TalkBack reads one sentence: the label, the value
+ * quality as a swatch and a word. A missing value shows [placeholder] with no unit, and [qualityLabel] says why in plain
+ * words that wrap, for example "Not reported". [stale] dims the number as a stale hero does. TalkBack reads one sentence: the label, the value
  * with its unit or the placeholder, then the quality.
  */
 @Composable
@@ -242,7 +242,12 @@ fun SecondaryMetricTile(
                 }
             }
             if (qualityLabel != null) {
-                SignalQualityChip(quality = if (value == null) null else quality, label = qualityLabel)
+                if (value == null) {
+                    // Why there is no number, as words that wrap: a chip cut "Not reported" to "Not repo…" at font scale 1.3.
+                    Text(text = qualityLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    SignalQualityChip(quality = quality, label = qualityLabel)
+                }
             }
         }
     }

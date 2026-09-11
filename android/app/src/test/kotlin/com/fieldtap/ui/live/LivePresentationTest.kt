@@ -174,6 +174,14 @@ class LivePresentationTest {
     }
 
     @Test
+    fun twoPanesNeedTheirWidthBesideTheSessionButtons() {
+        assertTrue("a large phone in landscape", LivePresentation.twoPanes(915.dp, actionsBeside = true))
+        assertFalse("a small phone in landscape: one pane beside the buttons", LivePresentation.twoPanes(640.dp, actionsBeside = true))
+        assertTrue("a tablet upright, buttons below", LivePresentation.twoPanes(640.dp, actionsBeside = false))
+        assertFalse("a phone upright", LivePresentation.twoPanes(412.dp, actionsBeside = false))
+    }
+
+    @Test
     fun markNeedsARecordingSessionOutsideAZone() {
         assertFalse(LivePresentation.markAllowed(SessionStatus.Idle))
         assertFalse(LivePresentation.markAllowed(SessionStatus.Starting(StartRequest("Walk"))))
