@@ -52,6 +52,7 @@ import java.security.MessageDigest
 import java.util.Locale
 import java.util.regex.Pattern
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.rules.TestWatcher
 import org.junit.runner.Description
 
@@ -99,6 +100,24 @@ object E2e {
 
     /** An argument the test cannot run without. */
     fun requireArgument(name: String): String = checkNotNull(argument(name)) { "Pass -e $name VALUE to am instrument" }
+
+    /**
+     * Whether the screen is phone-sized, as on the API 36 legs' Pixel 7 profile (411 x 914 dp), where the design is judged.
+     * The API 31 legs keep the emulator's 320 x 640 dp screen as the robustness check.
+     */
+    fun phoneSizeScreen(): Boolean {
+        val metrics = context.resources.displayMetrics
+        val shortSide = minOf(metrics.widthPixels, metrics.heightPixels) / metrics.density
+        val longSide = maxOf(metrics.widthPixels, metrics.heightPixels) / metrics.density
+        return shortSide >= PHONE_SHORT_SIDE_DP && longSide >= PHONE_LONG_SIDE_DP
+    }
+
+    private const val PHONE_SHORT_SIDE_DP = 400f
+    private const val PHONE_LONG_SIDE_DP = 850f
+
+    /** Live's Start button: "Start session" upright; in the landscape rail it reads "Start" and is described "Start session". */
+    fun startButton(): SemanticsMatcher =
+        (hasText(string(R.string.live_start)) or hasContentDescription(string(R.string.live_start))) and hasClickAction()
 
     /** One of the app's strings, so the tests follow its wording instead of copying it. */
     fun string(@StringRes id: Int, vararg formatArgs: Any): String = context.getString(id, *formatArgs)
@@ -217,7 +236,7 @@ object E2e {
  * The look a run is checked in. android/e2e/run_e2e.sh applies it with `cmd uimode night`, `font_scale` and
  * `user_rotation`.
  */
-enum class Variant(val group: String, private val night: Boolean, private val fontScale: Float, val landscape: Boolean = false) {
+enum class Variant(val group: String, private val night: Boolean, val fontScale: Float, val landscape: Boolean = false) {
     LIGHT("light", night = false, fontScale = 1.0f),
     DARK("dark", night = true, fontScale = 1.0f),
     FONT_130("font130", night = false, fontScale = 1.3f),
@@ -456,6 +475,33 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
         click(hasContentDescription(E2e.string(R.string.action_back)) and hasClickAction())
     }
 
+    /** Waits for Live by its Sessions action, which is in the top bar upright and in the action rail in landscape, where Live has no title. */
+    fun awaitLive(timeoutMs: Long = WAIT_MS) {
+        await(hasContentDescription(E2e.string(R.string.live_action_sessions)) and hasClickAction(), timeoutMs)
+    }
+
+    /**
+     * Fails unless Live's 5-minute chart lies wholly inside the list's viewport with the list at its top: what an engineer
+     * glances at while walking belongs on a phone's first screen. Call it upright, at font scale 1.0, with a serving cell.
+     */
+    fun assertChartOnFirstScreen() {
+        scrollToTop()
+        val chart = hasDescriptionMatching(chartSummary())
+        waitFor("Live's chart to be composed on the first screen") { exists(chart) }
+        val list = compose.onAllNodes(hasScrollToIndexAction()).onFirst().fetchSemanticsNode().boundsInRoot
+        val bounds = compose.onAllNodes(chart).onFirst().fetchSemanticsNode().boundsInRoot
+        val density = compose.density.density
+        val message = "Live's chart spans %.0f..%.0f dp, beyond the list's %.0f..%.0f dp".format(
+            Locale.ROOT,
+            bounds.top / density,
+            bounds.bottom / density,
+            list.top / density,
+            list.bottom / density,
+        )
+        Log.i(E2e.TAG, message.replace("beyond", "inside"))
+        assertTrue(message, bounds.top >= list.top && bounds.bottom <= list.bottom)
+    }
+
     /** Opens [label] from the Live screen's overflow menu. */
     fun openMenuItem(@StringRes label: Int) {
         click(hasContentDescription(E2e.string(R.string.live_action_more)) and hasClickAction())
@@ -539,6 +585,14 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
             val sample = 987_654_321
             val parts = E2e.string(R.string.live_pci, sample).split(sample.toString(), limit = 2)
             return Regex(Regex.escape(parts[0]) + "\\d+" + Regex.escape(parts.getOrElse(1) { "" }))
+        }
+
+        /** The start of the chart's TalkBack summary: "RSRP over the last 5 minutes: latest ", or its words before any sample. */
+        fun chartSummary(): Regex {
+            val sample = 987_654_321
+            val withSamples = E2e.string(R.string.chart_summary_rsrp, sample, sample, sample).substringBefore(sample.toString())
+            val empty = E2e.string(R.string.chart_summary_rsrp_empty)
+            return Regex("^(" + Regex.escape(withSamples) + "|" + Regex.escape(empty) + ")")
         }
 
         /** "2.1 s old" as `R.string.age_old` words it, with any number of seconds. */

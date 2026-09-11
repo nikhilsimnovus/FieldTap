@@ -15,7 +15,6 @@ import androidx.compose.ui.test.hasAnyChild
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasParent
-import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
@@ -23,7 +22,6 @@ import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onFirst
-import androidx.compose.ui.test.performScrollToIndex
 import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
@@ -160,7 +158,12 @@ class EndToEndWalkTest {
 
     private fun saveTestSettings() {
         screens.openMenuItem(R.string.live_menu_settings)
-        screens.awaitText(R.string.settings_section_tests)
+        screens.awaitText(R.string.settings_section_measurement)
+        // The targets are a screen of their own, opened from the tests card's row.
+        val targets = hasText(E2e.string(R.string.settings_test_targets)) and hasClickAction()
+        screens.scrollTo(targets)
+        screens.click(targets)
+        screens.awaitText(R.string.settings_ping_heading)
         screens.replaceText(R.string.settings_ping_target, PING_TARGET)
         screens.replaceText(R.string.settings_ping_interval, PING_INTERVAL_S.toString())
         screens.replaceText(R.string.settings_ping_count, PING_COUNT.toString())
@@ -173,9 +176,9 @@ class EndToEndWalkTest {
         screens.back()
         screens.awaitText(R.string.settings_discard_title)
         screens.click(hasText(E2e.string(R.string.settings_discard_keep)) and hasClickAction())
-        val save = hasText(E2e.string(R.string.settings_tests_save)) and hasClickAction()
-        screens.scrollTo(save)
-        screens.await(save and isEnabled())
+        // Save is pinned in the bar under the form, so it needs no scrolling.
+        val save = hasText(E2e.string(R.string.settings_tests_save)) and hasClickAction() and isEnabled()
+        screens.await(save)
         screens.shot("05-settings-tests")
         screens.click(save)
         screens.awaitText(R.string.settings_tests_saved)
@@ -189,16 +192,18 @@ class EndToEndWalkTest {
         assertEquals(DOWNLOAD_CAP_MB * 1_000_000L, tests.downloadCapBytes)
         assertEquals(SESSION_BUDGET_MB * 1_000_000L, tests.sessionBudgetBytes)
         screens.back()
+        screens.awaitText(R.string.settings_title)
+        screens.back()
         screens.awaitText(R.string.live_title)
     }
 
     /**
      * Walk mode keeps the screen on and leaves its brightness to the phone: a window brightness overrides adaptive
-     * brightness, and a fixed dim level is unreadable outdoors. Turned off again, the screen may sleep.
+     * brightness, and a fixed dim level is unreadable outdoors. Turned off again, the screen may sleep. It is an on-off
+     * icon in Live's top bar.
      */
     private fun checkWalkMode() {
-        val walkMode = isToggleable() and hasText(E2e.string(R.string.live_walk_mode))
-        screens.scrollTo(walkMode)
+        val walkMode = isToggleable() and hasContentDescription(E2e.string(R.string.live_walk_mode))
         if (screens.isOn(walkMode)) screens.click(walkMode)
         screens.click(walkMode)
         compose.onAllNodes(walkMode).onFirst().assertIsOn()
@@ -218,8 +223,6 @@ class EndToEndWalkTest {
         compose.runOnUiThread {
             stillKeptOn = compose.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0
         }
-        compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(0)
-        compose.waitForIdle()
         result["walk_mode_keeps_screen_on"] = keepsScreenOn
         result["walk_mode_brightness_override"] = brightness != WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
         result["walk_mode_clears_keep_screen_on"] = !stillKeptOn

@@ -19,9 +19,11 @@ import org.junit.runner.RunWith
 
 /**
  * Every screen after the walk, at every scroll position ([Screens.shotFull]), in the variant `-e variant` names: Live with
- * its serving cell, the Start dialog, Sessions, the walk's detail, Readiness, Probe, Settings and About. An upright variant
- * also turns the phone for Live, the screen a car mount holds; the landscape variant takes every screen turned. The
- * disclosure and Permissions screens are taken on a first run by [FirstRunScreensTest]. `-e dir_name` is the walk's session.
+ * its serving cell, the Start dialog, Sessions, the walk's detail, Readiness, Probe, Settings, its Test targets and About.
+ * An upright variant also turns the phone for Live, the screen a car mount holds; the landscape variant takes every screen
+ * turned. On a phone-sized screen upright at font scale 1.0, Live's 5-minute chart must lie wholly on the first screen.
+ * The disclosure and Permissions screens are taken on a first run by [FirstRunScreensTest]. `-e dir_name` is the walk's
+ * session.
  */
 @RunWith(AndroidJUnit4::class)
 class ScreenTourTest {
@@ -39,22 +41,28 @@ class ScreenTourTest {
         val sessionName = runBlocking { E2e.graph.sessions.detail(dirName) }?.meta?.name
             ?: throw AssertionError("Session $dirName is missing or unreadable")
 
-        screens.awaitLiveRadio(E2e.expectLteNr())
+        val expectLteNr = E2e.expectLteNr()
+        screens.awaitLiveRadio(expectLteNr)
+        if (expectLteNr && !variant.landscape && variant.fontScale == 1.0f && E2e.phoneSizeScreen()) {
+            screens.assertChartOnFirstScreen()
+        }
         screens.shotFull("03-live")
         if (!variant.landscape) {
             // A phone in landscape: two panes, with the session buttons beside them instead of under them.
             screens.inLandscape {
-                screens.awaitText(R.string.live_title)
-                screens.await(hasText(E2e.string(R.string.live_start)) and hasClickAction())
+                screens.awaitLive()
+                screens.await(E2e.startButton())
                 screens.shotFull("03e-live-landscape")
             }
         }
-        screens.awaitText(R.string.live_title)
-        screens.click(hasText(E2e.string(R.string.live_start)) and hasClickAction())
+        screens.awaitLive()
+        screens.click(E2e.startButton())
         screens.awaitText(R.string.live_start_dialog_title)
         Espresso.closeSoftKeyboard()
         screens.shot("03b-start-dialog")
-        screens.click(hasText(E2e.string(R.string.action_cancel)) and hasClickAction() and hasAnyAncestor(isDialog()))
+        // Cancel upright; in landscape the dialog fills the screen and closes with an icon described "Cancel".
+        val cancel = E2e.string(R.string.action_cancel)
+        screens.click((hasText(cancel) or hasContentDescription(cancel)) and hasClickAction() and hasAnyAncestor(isDialog()))
 
         screens.click(hasContentDescription(E2e.string(R.string.live_action_sessions)) and hasClickAction())
         val row = hasText(sessionName) and hasClickAction()
@@ -66,11 +74,11 @@ class ScreenTourTest {
         screens.back()
         screens.await(row)
         screens.back()
-        screens.awaitText(R.string.live_title)
+        screens.awaitLive()
 
         visit(screens, R.string.live_menu_readiness, R.string.readiness_checks_title, "06-readiness")
         visit(screens, R.string.live_menu_probe, R.string.probe_run, "07-probe")
-        visit(screens, R.string.live_menu_settings, R.string.settings_section_tests, "08-settings")
+        visitSettings(screens)
         visit(screens, R.string.live_menu_about, R.string.about_account_title, "09-about")
     }
 
@@ -80,6 +88,22 @@ class ScreenTourTest {
         screens.awaitText(shows)
         screens.shotFull(shot)
         screens.back()
-        screens.awaitText(R.string.live_title)
+        screens.awaitLive()
+    }
+
+    /** Settings, then the Test targets screen its tests card opens, each at every scroll position. */
+    private fun visitSettings(screens: Screens) {
+        screens.openMenuItem(R.string.live_menu_settings)
+        screens.awaitText(R.string.settings_section_measurement)
+        screens.shotFull("08-settings")
+        val targets = hasText(E2e.string(R.string.settings_test_targets)) and hasClickAction()
+        screens.scrollTo(targets)
+        screens.click(targets)
+        screens.awaitText(R.string.settings_ping_heading)
+        screens.shotFull("08b-test-targets")
+        screens.back()
+        screens.awaitText(R.string.settings_title)
+        screens.back()
+        screens.awaitLive()
     }
 }

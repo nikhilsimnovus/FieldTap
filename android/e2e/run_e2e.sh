@@ -646,6 +646,7 @@ main() {
   detect_lte_nr || true
   echo "expect_lte_nr=$EXPECT_LTE_NR" >> "$OUT/checks/device.txt"
   first_runs
+  instrument recording-strip RecordingStripTest || true
   walk || true
   tour || true
   location_off || true
