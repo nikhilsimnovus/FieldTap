@@ -177,6 +177,29 @@ object E2e {
         device.findObject(By.res("android", "aerr_wait"))?.click()
     }
 
+    /** Turns the screen upright with rotation frozen there ([turn]). */
+    fun upright() {
+        turn(landscape = false)
+    }
+
+    /**
+     * Turns the screen to landscape, or upright, with rotation frozen there, and fails unless it has turned within
+     * [ROTATION_WAIT_MS]. The host's `user_rotation` setting takes effect a step late on the API 36 emulator, so a test that
+     * needs an orientation sets it here, through UiAutomator, as [Screens.inLandscape] does.
+     */
+    fun turn(landscape: Boolean) {
+        if (landscape) device.setOrientationLandscape() else device.setOrientationNatural()
+        val deadline = SystemClock.elapsedRealtime() + ROTATION_WAIT_MS
+        while (turned() != landscape && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(ROTATION_POLL_MS)
+        assertEquals("the screen turned to " + if (landscape) "landscape" else "upright", landscape, turned())
+        device.waitForIdle()
+    }
+
+    private fun turned(): Boolean = device.displayWidth > device.displayHeight
+
+    private const val ROTATION_WAIT_MS = 10_000L
+    private const val ROTATION_POLL_MS = 200L
+
     /** The running session's notification as Android holds it for this app, or null while none is posted. */
     fun sessionNotification(): Notification? =
         context.getSystemService(NotificationManager::class.java)?.activeNotifications
@@ -203,23 +226,20 @@ enum class Variant(val group: String, private val night: Boolean, private val fo
     LANDSCAPE("landscape", night = false, fontScale = 1.0f, landscape = true),
     ;
 
-    /** Fails unless the app's process started in this variant's night mode and font scale, with the screen turned as it asks. */
-    fun assertApplied() {
+    /**
+     * Turns the screen as this variant asks ([E2e.turn]), then fails unless the app's process started in this variant's
+     * night mode and font scale.
+     */
+    fun apply() {
+        E2e.turn(landscape)
         val configuration = E2e.context.resources.configuration
         val nightNow = (configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         assertEquals("night mode of variant $group", night, nightNow)
         assertEquals("font scale of variant $group", fontScale, configuration.fontScale, FONT_SCALE_TOLERANCE)
-        val deadline = SystemClock.elapsedRealtime() + ROTATION_WAIT_MS
-        while (turned() != landscape && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(ROTATION_POLL_MS)
-        assertEquals("landscape in variant $group", landscape, turned())
     }
-
-    private fun turned(): Boolean = E2e.device.displayWidth > E2e.device.displayHeight
 
     companion object {
         private const val FONT_SCALE_TOLERANCE = 0.01f
-        private const val ROTATION_WAIT_MS = 10_000L
-        private const val ROTATION_POLL_MS = 200L
 
         /** The variant named by `-e variant light|dark|font130`. */
         fun fromArguments(): Variant {

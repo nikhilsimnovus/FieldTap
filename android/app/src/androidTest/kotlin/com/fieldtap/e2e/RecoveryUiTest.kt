@@ -32,6 +32,7 @@ class RecoveryUiTest {
 
     @Test
     fun liveReportsTheInterruptedSession() {
+        E2e.upright()
         val dirName = E2e.requireArgument("recovered_dir")
         val scenario = E2e.requireArgument("scenario")
         val expectedCause = E2e.argument("expected_cause")

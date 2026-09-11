@@ -72,6 +72,7 @@ class EndToEndWalkTest {
 
     @Test
     fun firstRunToSharedSession() {
+        E2e.upright()
         val walkMs = (E2e.argument("walk_seconds")?.toLongOrNull() ?: DEFAULT_WALK_SECONDS) * 1_000
         result["api"] = Build.VERSION.SDK_INT
         result["session_name"] = SESSION_NAME

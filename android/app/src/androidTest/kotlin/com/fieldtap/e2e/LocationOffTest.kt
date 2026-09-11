@@ -8,12 +8,15 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Until
 import com.fieldtap.MainActivity
 import com.fieldtap.R
 import com.fieldtap.app.SessionStatus
 import com.fieldtap.core.privacy.PrivacyZone
 import com.fieldtap.core.session.RecorderSnapshot
 import com.fieldtap.debug.DebugAutomation
+import java.util.regex.Pattern
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -35,6 +38,9 @@ import org.junit.runner.RunWith
  *    `gps_restored`.
  * 6. Stopped, the Session detail screen says a marker was not saved.
  *
+ * On the Google APIs images, Google Play services answers location switched off with a "No location access" dialog over
+ * the app, which Compose testing cannot see through; every wait after the switch closes it, as a user would.
+ *
  * The times of the switches and what each screen said go to `e2e/location-off-result.json`, which android/e2e/check_e2e.py
  * reads with the pulled session. The host grants the permissions beforehand and switches location back on afterwards,
  * whatever happens here; the zone is removed here.
@@ -51,6 +57,7 @@ class LocationOffTest {
 
     @Test
     fun locationSwitchedOffIsRecordedAndADroppedMarkerIsShown() {
+        E2e.upright()
         runBlocking { E2e.graph.settings.update { it.copy(zones = listOf(FAR_ZONE)) } }
         try {
             recordWithLocationSwitchedOff()
@@ -84,33 +91,37 @@ class LocationOffTest {
         result["location_off_utc_ms"] = E2e.graph.clock.wallMillis()
         save()
         setLocationEnabled(false)
-        screens.await(hasText(E2e.string(R.string.live_location_off_recording)), SWITCH_WAIT_MS)
+        val offBanner = hasText(E2e.string(R.string.live_location_off_recording))
+        waitClosingDialog("Live to say location is off", SWITCH_WAIT_MS) { screens.exists(offBanner) }
         result["live_location_off_banner"] = true
-        screens.waitFor("the notification to say location is off", NOTIFICATION_WAIT_MS) {
+        waitClosingDialog("the notification to say location is off", NOTIFICATION_WAIT_MS) {
             E2e.notificationTitle(E2e.sessionNotification()) == E2e.string(R.string.notification_location_off_title)
         }
         result["notification_location_off"] = true
         save()
+        closeLateDialog()
         screens.shot("20-live-location-off")
 
         // No fix shows where the phone is any more, so a marker waits for one.
-        screens.waitFor("inputs to wait for a location fix", HOLD_WAIT_MS) { snapshot()?.holdingInputs == true }
+        waitClosingDialog("inputs to wait for a location fix", HOLD_WAIT_MS) { snapshot()?.holdingInputs == true }
         val inDialog = hasAnyAncestor(isDialog())
         screens.click(hasText(E2e.string(R.string.live_mark)) and hasClickAction() and !inDialog)
         screens.awaitText(R.string.live_mark_dialog_title)
         screens.click(hasText(E2e.string(R.string.live_mark_confirm)) and hasClickAction() and inDialog)
-        screens.awaitText(R.string.live_message_mark_held, SNACKBAR_WAIT_MS)
+        val heldMessage = hasText(E2e.string(R.string.live_message_mark_held))
+        waitClosingDialog("Live to say the marker waits for a fix", SNACKBAR_WAIT_MS) { screens.exists(heldMessage) }
         result["mark_held_message"] = true
         save()
 
         // A minute after the last fix outside the zone, logging pauses and drops what waited, the marker with it.
-        screens.waitFor("logging to pause for want of a fix", PAUSE_WAIT_MS) {
+        waitClosingDialog("logging to pause for want of a fix", PAUSE_WAIT_MS) {
             snapshot()?.let { it.paused && it.waitingForLocation && it.markersDropped == 1 } == true
         }
-        screens.awaitText(R.string.live_message_mark_dropped, SNACKBAR_WAIT_MS)
+        val droppedMessage = hasText(E2e.string(R.string.live_message_mark_dropped))
+        waitClosingDialog("Live to say the marker was not saved", SNACKBAR_WAIT_MS) { screens.exists(droppedMessage) }
         result["mark_dropped_message"] = true
         val droppedText = E2e.context.resources.getQuantityString(R.plurals.notification_markers_dropped, 1, 1)
-        screens.waitFor("the notification to say the marker was not saved", NOTIFICATION_WAIT_MS) {
+        waitClosingDialog("the notification to say the marker was not saved", NOTIFICATION_WAIT_MS) {
             E2e.notificationText(E2e.sessionNotification()) == droppedText
         }
         result["notification_markers_dropped"] = true
@@ -120,7 +131,7 @@ class LocationOffTest {
         result["location_on_utc_ms"] = E2e.graph.clock.wallMillis()
         save()
         setLocationEnabled(true)
-        screens.waitFor("logging to resume at a fix", RESUME_WAIT_MS) { snapshot()?.let { !it.paused && it.hasRecentFix } == true }
+        waitClosingDialog("logging to resume at a fix", RESUME_WAIT_MS) { snapshot()?.let { !it.paused && it.hasRecentFix } == true }
         SystemClock.sleep(AFTER_RESUME_MS)
 
         val stopped = runBlocking { DebugAutomation.stop(E2e.context, STOP_TIMEOUT_MS) }
@@ -151,6 +162,29 @@ class LocationOffTest {
         E2e.shell("cmd location set-location-enabled $enabled")
     }
 
+    /** [Screens.waitFor], closing Google Play services' location dialog whenever it covers the app meanwhile. */
+    private fun waitClosingDialog(what: String, timeoutMs: Long, condition: () -> Boolean) {
+        screens.waitFor(what, timeoutMs) {
+            closeLocationDialog()
+            condition()
+        }
+    }
+
+    /** Gives Google Play services a few seconds to open its location dialog after the switch, and closes it if it does. */
+    private fun closeLateDialog() {
+        val deadline = SystemClock.elapsedRealtime() + LATE_DIALOG_MS
+        while (SystemClock.elapsedRealtime() < deadline && !closeLocationDialog()) SystemClock.sleep(DIALOG_POLL_MS)
+    }
+
+    /** Taps Close on Google Play services' "No location access" dialog when it shows; true when it did. */
+    private fun closeLocationDialog(): Boolean {
+        val close = E2e.device.findObject(LOCATION_DIALOG_CLOSE) ?: return false
+        close.click()
+        E2e.device.wait(Until.gone(LOCATION_DIALOG_CLOSE), DIALOG_GONE_MS)
+        result["play_services_location_dialog_closed"] = true
+        return true
+    }
+
     private fun save() {
         E2e.writeResult(RESULT_FILE, result)
     }
@@ -166,12 +200,18 @@ class LocationOffTest {
          */
         val FAR_ZONE = PrivacyZone(id = "e2e-far-zone", label = "E2E zone 10 km north", lat = 13.0616, lon = 77.5946, radiusM = 100.0)
 
+        /** The Close button of the dialog Google Play services opens when location services are switched off. */
+        val LOCATION_DIALOG_CLOSE = By.pkg("com.google.android.gms").clazz("android.widget.Button").text(Pattern.compile("(?i)close"))
+
         const val MIN_TRACK_ROWS = 5L
         const val START_TIMEOUT_MS = 45_000L
         const val STOP_TIMEOUT_MS = 30_000L
         const val FIX_WAIT_MS = 60_000L
-        const val SWITCH_WAIT_MS = 20_000L
+        const val SWITCH_WAIT_MS = 30_000L
         const val NOTIFICATION_WAIT_MS = 15_000L
+        const val LATE_DIALOG_MS = 5_000L
+        const val DIALOG_POLL_MS = 250L
+        const val DIALOG_GONE_MS = 5_000L
 
         /** Inputs wait from 5 s after the last fix outside the zone. */
         const val HOLD_WAIT_MS = 30_000L

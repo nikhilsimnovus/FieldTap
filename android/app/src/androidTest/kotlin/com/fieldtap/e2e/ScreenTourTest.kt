@@ -33,7 +33,7 @@ class ScreenTourTest {
 
     @Test
     fun everyScreenAfterARecordedSession() {
-        variant.assertApplied()
+        variant.apply()
         val screens = Screens(compose, variant.group)
         val dirName = E2e.requireArgument("dir_name")
         val sessionName = runBlocking { E2e.graph.sessions.detail(dirName) }?.meta?.name

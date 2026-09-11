@@ -69,7 +69,7 @@ TRACK_AFTER_STOP_MS = 5_000
 HEARTBEAT_SLACK_MS = 7_000
 
 # Screens taken at every scroll position: NAME-p1.png, NAME-p2.png and so on (Screens.shotFull).
-FIRST_RUN_PAGED = ("01-disclosure", "02-permissions")
+FIRST_RUN_PAGED = ("01-disclosure", "01b-disclosure-notice", "02-permissions")
 TOUR_PAGED = ("03-live", "04-sessions", "05-session-detail", "06-readiness", "07-probe", "08-settings", "09-about")
 # Taken once: the Start dialog.
 TOUR_SINGLE = ("03b-start-dialog",)
