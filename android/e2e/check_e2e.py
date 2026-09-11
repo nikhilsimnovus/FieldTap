@@ -1,0 +1,613 @@
+#!/usr/bin/env python3
+"""Helpers and assertions for android/e2e/run_e2e.sh, the end-to-end proof of the Android app on an emulator.
+
+    check_e2e.py plan-walk [--seconds N]
+        The walking GPS track run_e2e.sh injects with "adb emu geo fix": one "lat,lon,alt" line per second.
+    check_e2e.py instrumentation RAW [--junit XML] [--name NAME]
+        Summarises "am instrument -w -r" output and writes it as JUnit XML. Exit 1 unless at least one test ran,
+        every test passed and the process did not crash.
+    check_e2e.py exit-reason DUMPSYS --pid PID
+        Prints the summary.stopped_by token that "dumpsys activity exit-info" implies for process PID, using the
+        app's own table (com.fieldtap.core.session.ExitReasons). Exit 1 when Android recorded no exit for PID.
+    check_e2e.py check --out DIR --repo REPO [--walk-seconds N]
+        Asserts what the sessions, screenshots and results of a run hold. Prints one PASS or FAIL line per check,
+        writes checks/results.json and exits 1 on any FAIL.
+
+Standard library only; Python 3.9 or newer.
+"""
+from __future__ import annotations
+
+import argparse
+import bisect
+import csv
+import hashlib
+import json
+import math
+import re
+import sys
+import xml.etree.ElementTree as ET
+import zipfile
+from collections import Counter
+from datetime import datetime
+from decimal import Decimal
+from pathlib import Path
+from typing import Optional
+
+# The walk: a 160 m by 120 m loop at walking pace, starting where probe.sh put its fixes.
+WALK_START = (12.9716, 77.5946)
+WALK_SPEED_MPS = 1.4
+WALK_LEGS = ((160.0, 0.0), (0.0, 120.0), (-160.0, 0.0), (0.0, -120.0))  # (north, east) metres
+METRES_PER_DEGREE = 111_320.0
+EARTH_RADIUS_M = 6_371_008.8
+
+# ApplicationExitInfo.REASON_* 0..16 as ExitReasons.token writes them; any other value is "unknown".
+EXIT_TOKENS = (
+    "unknown", "exit_self", "signaled", "low_memory", "crash", "crash_native", "anr",
+    "initialization_failure", "permission_change", "excessive_resource_usage", "user_requested",
+    "user_stopped", "dependency_died", "other", "freezer", "package_state_change", "package_updated",
+)
+
+BUNDLE = ("session.json", "kpi.csv", "track.csv", "events.csv", "traffic.csv", "cells.csv", "cellinfo.csv")
+KPI_COMMENT = re.compile(r"android-api age_ms=(\d+) src=(request|push)")
+HEX64 = re.compile(r"[0-9a-f]{64}")
+
+# SESSION-FORMAT.md: KPI rows at most 11000 ms old; positions from the nearest fix within 5.000 s.
+KPI_MAX_AGE_MS = 11_000
+JOIN_MS = 5_000
+# Track and measurement times are separate millisecond translations of the elapsed clock.
+ROUNDING_MS = 2
+# The emulator's modem reports a new cell-info measurement every 10.0 s (the probe's facts).
+MODEM_REPORT_S = 10
+# A fix matches the injected walk when it is this close to a point sent this close in time (after the clock offset).
+TRACK_MATCH_M = 10.0
+TRACK_MATCH_MS = 5_000
+# A kill lands within one 5 s heartbeat of the last one; slack for a busy emulator.
+HEARTBEAT_SLACK_MS = 7_000
+
+FIRST_RUN_SCREENS = ("01-disclosure", "01b-disclosure-limits", "02-permissions")
+TOUR_SCREENS = (
+    "03-live", "03b-start-dialog", "04-sessions", "05-session-detail", "05b-session-share",
+    "06-readiness", "07-probe", "08-settings", "09-about",
+)
+WALK_SCREENS = (
+    "01-disclosure", "02-permissions", "03-permissions-allowed", "04-live-serving-cell", "05-settings-tests",
+    "06-start-dialog", "08-mark-dialog", "09-marker-added", "10-recording", "11-stop-dialog", "12-sessions",
+    "13-session-detail", "14-zip-ready", "15-share-sheet",
+)
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+# ---------------------------------------------------------------------------------------------------- plan-walk
+
+def walk_point(second: int) -> tuple[float, float]:
+    """Latitude and longitude after [second] seconds of walking the loop."""
+    loop_m = sum(abs(north) + abs(east) for north, east in WALK_LEGS)
+    remaining = (second * WALK_SPEED_MPS) % loop_m
+    north_m = east_m = 0.0
+    for north, east in WALK_LEGS:
+        step = min(remaining, abs(north) + abs(east))
+        north_m += math.copysign(step, north) if north else 0.0
+        east_m += math.copysign(step, east) if east else 0.0
+        remaining -= step
+        if remaining <= 0:
+            break
+    lat = WALK_START[0] + north_m / METRES_PER_DEGREE
+    lon = WALK_START[1] + east_m / (METRES_PER_DEGREE * math.cos(math.radians(WALK_START[0])))
+    return lat, lon
+
+
+def cmd_plan_walk(args: argparse.Namespace) -> int:
+    for second in range(args.seconds):
+        lat, lon = walk_point(second)
+        sys.stdout.write("%.7f,%.7f,%.1f\n" % (lat, lon, 920.0 + 2.0 * math.sin(second / 60.0)))
+    return 0
+
+
+# ---------------------------------------------------------------------------------------------- instrumentation
+
+STATUS_WORDS = {0: "passed", -1: "error", -2: "failed", -3: "ignored", -4: "assumption failed"}
+
+
+def parse_instrumentation(text: str) -> tuple[list[dict], dict, Optional[int]]:
+    """The finished tests, the INSTRUMENTATION_RESULT fields and the INSTRUMENTATION_CODE of "am instrument -r"."""
+    tests: list[dict] = []
+    result: dict = {}
+    fields: dict = {}
+    last: Optional[tuple[dict, str]] = None
+    code: Optional[int] = None
+    for line in text.splitlines():
+        if line.startswith("INSTRUMENTATION_STATUS: "):
+            key, _, value = line[len("INSTRUMENTATION_STATUS: "):].partition("=")
+            fields[key] = value
+            last = (fields, key)
+        elif line.startswith("INSTRUMENTATION_STATUS_CODE: "):
+            status = int(line.split(":", 1)[1].strip())
+            # 1 starts a test and 2 streams output; every other code ends one.
+            if status not in (1, 2) and fields.get("test"):
+                tests.append({
+                    "class": fields.get("class", ""),
+                    "test": fields.get("test", ""),
+                    "status": status,
+                    "stack": fields.get("stack", "").strip(),
+                })
+            fields, last = {}, None
+        elif line.startswith("INSTRUMENTATION_RESULT: "):
+            key, _, value = line[len("INSTRUMENTATION_RESULT: "):].partition("=")
+            result[key] = value
+            last = (result, key)
+        elif line.startswith("INSTRUMENTATION_CODE: "):
+            code = int(line.split(":", 1)[1].strip())
+            last = None
+        elif last is not None:
+            target, key = last
+            target[key] += "\n" + line
+    return tests, result, code
+
+
+def cmd_instrumentation(args: argparse.Namespace) -> int:
+    path = Path(args.raw)
+    text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+    tests, result, code = parse_instrumentation(text)
+    name = args.name or path.stem
+    crashed = "shortMsg" in result
+    failed = [t for t in tests if t["status"] not in (0, -3)]
+    ok = bool(tests) and not failed and not crashed and code == -1
+
+    print("%s: %s, %d test(s), %d failed%s" % (
+        name, "PASS" if ok else "FAIL", len(tests), len(failed), ", process crashed" if crashed else ""))
+    for test in tests:
+        print("  %s %s#%s" % (STATUS_WORDS.get(test["status"], str(test["status"])), test["class"], test["test"]))
+        if test["status"] not in (0, -3):
+            for line in test["stack"].splitlines()[:25]:
+                print("    " + line)
+    if crashed:
+        print("  " + result.get("shortMsg", "") + " " + result.get("longMsg", ""))
+    if not tests:
+        print("  no test finished; the last lines of the output:")
+        for line in text.splitlines()[-15:]:
+            print("    " + line)
+
+    if args.junit:
+        suite = ET.Element("testsuite", name=name, tests=str(len(tests)),
+                           failures=str(sum(1 for t in tests if t["status"] == -2)),
+                           errors=str(sum(1 for t in tests if t["status"] in (-1, -4)) + (1 if crashed else 0)),
+                           skipped=str(sum(1 for t in tests if t["status"] == -3)))
+        for test in tests:
+            case = ET.SubElement(suite, "testcase", classname=test["class"], name=test["test"])
+            first_line = test["stack"].splitlines()[0] if test["stack"] else ""
+            if test["status"] == -2:
+                ET.SubElement(case, "failure", message=first_line).text = test["stack"]
+            elif test["status"] in (-1, -4):
+                ET.SubElement(case, "error", message=first_line).text = test["stack"]
+            elif test["status"] == -3:
+                ET.SubElement(case, "skipped")
+        if crashed or not tests:
+            case = ET.SubElement(suite, "testcase", classname="instrumentation", name=name)
+            ET.SubElement(case, "error", message=result.get("shortMsg", "no test finished")).text = \
+                result.get("longMsg", "") or "\n".join(text.splitlines()[-15:])
+        ET.ElementTree(suite).write(args.junit, encoding="utf-8", xml_declaration=True)
+    return 0 if ok else 1
+
+
+# ---------------------------------------------------------------------------------------------------- exit-reason
+
+def exit_records(text: str) -> list[dict]:
+    """pid and reason of each ApplicationExitInfo in "dumpsys activity exit-info" output."""
+    records: list[dict] = []
+    current: Optional[dict] = None
+    for line in text.splitlines():
+        if re.search(r"ApplicationExitInfo #\d+", line):
+            current = {}
+            records.append(current)
+            continue
+        if current is None:
+            continue
+        for key in ("pid", "reason"):
+            if key not in current:
+                match = re.search(r"(?<![A-Za-z])%s=(-?\d+)" % key, line)
+                if match:
+                    current[key] = int(match.group(1))
+    return records
+
+
+def exit_token(text: str, pid: int) -> Optional[str]:
+    """The token of the newest exit record of [pid], or None when there is none."""
+    for record in exit_records(text):
+        if record.get("pid") == pid and "reason" in record:
+            reason = record["reason"]
+            return EXIT_TOKENS[reason] if 0 <= reason < len(EXIT_TOKENS) else "unknown"
+    return None
+
+
+def cmd_exit_reason(args: argparse.Namespace) -> int:
+    token = exit_token(Path(args.dumpsys).read_text(encoding="utf-8", errors="replace"), args.pid)
+    if token is None:
+        return 1
+    print(token)
+    return 0
+
+
+# ----------------------------------------------------------------------------------------------------------- check
+
+class Results:
+    """PASS and FAIL lines, kept for checks/results.json."""
+
+    def __init__(self) -> None:
+        self.items: list[dict] = []
+
+    def check(self, name: str, ok: object, detail: object = "") -> bool:
+        passed = bool(ok)
+        text = "" if detail is None or detail == "" else str(detail)
+        if len(text) > 600:
+            text = text[:600] + "..."
+        self.items.append({"check": name, "ok": passed, "detail": text})
+        print("%s %s%s" % ("PASS" if passed else "FAIL", name, ": " + text if text else ""))
+        return passed
+
+    @property
+    def failures(self) -> list[dict]:
+        return [item for item in self.items if not item["ok"]]
+
+
+def read_csv(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    with path.open(newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
+def read_json(path: Path) -> dict:
+    with path.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def utc_ms(value: str) -> int:
+    return round(datetime.fromisoformat(value).timestamp() * 1000)
+
+
+def epoch_ms(value: str) -> int:
+    return int(Decimal(value) * 1000)
+
+
+def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
+
+
+def exit_status(out: Path, name: str) -> Optional[int]:
+    path = out / "validate" / (name + ".exit")
+    try:
+        return int(path.read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def android_string(repo: Path, name: str) -> Optional[str]:
+    """A string resource of the app, as the UI shows it."""
+    for path in sorted((repo / "android/app/src/main/res/values").glob("strings*.xml")):
+        for element in ET.parse(path).getroot().iter("string"):
+            if element.get("name") == name:
+                return (element.text or "").replace("\\'", "'")
+    return None
+
+
+def consent_version(repo: Path) -> Optional[str]:
+    for path in sorted((repo / "android/core/src/main/kotlin/com/fieldtap/core/privacy").glob("*.kt")):
+        match = re.search(r'version\s*=\s*"([^"]+)"', path.read_text(encoding="utf-8"))
+        if match:
+            return match.group(1)
+    return None
+
+
+def acceptable_positions(fixes: list[tuple[int, str, str]], times: list[int], t: int) -> set:
+    """What a row measured at [t] may carry: the nearest fix within 5 s, earlier on a tie, or blank without one."""
+    low = bisect.bisect_left(times, t - JOIN_MS - ROUNDING_MS)
+    high = bisect.bisect_right(times, t + JOIN_MS + ROUNDING_MS)
+    window = fixes[low:high]
+    if not window:
+        return {None}
+    best = min(abs(fix[0] - t) for fix in window)
+    allowed = {(fix[1], fix[2]) for fix in window if abs(fix[0] - t) <= best + ROUNDING_MS}
+    if best >= JOIN_MS - ROUNDING_MS:
+        allowed.add(None)
+    return allowed
+
+
+def check_walk(out: Path, repo: Path, walk_seconds: int, r: Results) -> None:
+    result_path = out / "device" / "walk-result.json"
+    if not r.check("walk: the test wrote its result", result_path.is_file(), result_path):
+        return
+    result = read_json(result_path)
+    r.check("walk: the disclosure showed before any permission prompt", result.get("disclosure_before_prompt") is True,
+            "location %s, notifications %s" % (result.get("location_permission"), result.get("notification_permission")))
+    dir_name = result.get("dir_name")
+    session = out / "sessions" / str(dir_name)
+    if not r.check("walk: the session was pulled", dir_name and (session / "session.json").is_file(), session):
+        return
+    r.check("walk: fieldtap validate --upload exit 0", exit_status(out, dir_name) == 0, exit_status(out, dir_name))
+
+    meta = read_json(session / "session.json")
+    kpi = read_csv(session / "kpi.csv")
+    track = read_csv(session / "track.csv")
+    events = read_csv(session / "events.csv")
+    traffic = read_csv(session / "traffic.csv")
+    cells = read_csv(session / "cells.csv")
+    cellinfo = read_csv(session / "cellinfo.csv")
+    summary = meta.get("summary") or {}
+
+    # session.json
+    r.check("session.json: summary.stopped_by is user", summary.get("stopped_by") == "user", summary.get("stopped_by"))
+    r.check("session.json: capabilities.layer3 is false", (meta.get("capabilities") or {}).get("layer3") is False,
+            meta.get("capabilities"))
+    transport = meta.get("transport") or {}
+    r.check("session.json: an app session", meta.get("format") == "fieldtap-session/1"
+            and transport.get("transport") == "android-api" and transport.get("app") == "5gto6G FieldTap",
+            "format %s, transport %s" % (meta.get("format"), transport))
+    r.check("session.json: the name typed in the Start dialog", meta.get("name") == result.get("session_name"), meta.get("name"))
+    started = utc_ms(meta["started_utc"])
+    stopped = utc_ms(meta["stopped_utc"]) if meta.get("stopped_utc") else None
+    duration_s = (stopped - started) / 1000.0 if stopped is not None else 0.0
+    r.check("session.json: recorded for the whole walk", stopped is not None and walk_seconds - 2 <= duration_s <= walk_seconds + 120,
+            "%.1f s for a %d s walk" % (duration_s, walk_seconds))
+    collection = meta.get("collection") or {}
+    fresh = collection.get("fresh_samples")
+    r.check("collection: fresh_samples", isinstance(fresh, int) and fresh >= 1 and len(kpi) <= 2 * fresh,
+            "fresh_samples %s, kpi rows %d" % (fresh, len(kpi)))
+    repeats = collection.get("repeats_dropped")
+    r.check("collection: repeats_dropped", isinstance(repeats, int) and repeats >= 0, repeats)
+    median = collection.get("median_fresh_interval_ms")
+    r.check("collection: median_fresh_interval_ms", isinstance(median, int) and median > 0, median)
+    for key in ("short_interval_pct", "screen_on_pct", "wifi_connected_pct", "charging_pct"):
+        value = collection.get(key)
+        r.check("collection: %s is a share" % key,
+                isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 100, value)
+    gaps = collection.get("gaps")
+    gap_events = [e for e in events if e["kind"] == "sampling_gap"]
+    r.check("collection: one gap per sampling_gap event", isinstance(gaps, list) and len(gaps) == len(gap_events),
+            "%s gaps, %d events" % (len(gaps) if isinstance(gaps, list) else gaps, len(gap_events)))
+    privacy = meta.get("privacy") or {}
+    version = consent_version(repo)
+    r.check("session.json: privacy", privacy.get("data_class") == "kpi" and privacy.get("location_precision") == "full"
+            and privacy.get("zone_pauses") == 0 and privacy.get("consent_version") == version
+            and HEX64.fullmatch(privacy.get("consent_sha256") or ""), "%s (consent in the app: %s)" % (privacy, version))
+
+    # kpi.csv
+    minimum = walk_seconds // MODEM_REPORT_S - 3
+    r.check("kpi.csv: fresh rows for the walk", len(kpi) >= minimum,
+            "%d rows, at least %d expected from a %d s modem report interval" % (len(kpi), minimum, MODEM_REPORT_S))
+    comments = [KPI_COMMENT.fullmatch(row["comment"]) for row in kpi]
+    r.check("kpi.csv: every comment gives the sample's age and source", all(comments),
+            [line for line, match in enumerate(comments, 2) if not match][:5])
+    ages = [int(match.group(1)) for match in comments if match]
+    r.check("kpi.csv: no sample older than %d ms" % KPI_MAX_AGE_MS, all(age <= KPI_MAX_AGE_MS for age in ages),
+            "oldest %s ms" % (max(ages) if ages else None))
+    keys = [(row["rat"], row["pci"], row["time_epoch"]) for row in kpi]
+    duplicated = sorted(key for key, count in Counter(keys).items() if count > 1)
+    r.check("kpi.csv: no modem timestamp twice for the same cell", not duplicated, duplicated[:5])
+    fresh_serving = {
+        (row["rat"], row["pci"], row["time_epoch"]) for row in cellinfo
+        if row["stale"] == "0" and (row["connection_status"] in ("1", "2") or (row["connection_status"] == "" and row["registered"] == "1"))
+    }
+    not_fresh = [key for key in keys if key not in fresh_serving]
+    r.check("kpi.csv: every row is a fresh serving-cell measurement in cellinfo.csv", not not_fresh, not_fresh[:5])
+    measurements = [(row["rat"], row["pci"], row["arfcn"], row["cell_id"], row["timestamp_ms"]) for row in cellinfo if row["stale"] == "0"]
+    logged_twice = sorted(key for key, count in Counter(measurements).items() if count > 1)
+    r.check("cellinfo.csv: a measurement is fresh only once", not logged_twice, logged_twice[:5])
+    rsrp = sorted({row["rsrp_dbm"] for row in kpi if row["rsrp_dbm"]}, key=float)
+    r.check("kpi.csv: RSRP follows the signal-profile changes", len(rsrp) >= 3, rsrp)
+
+    fixes = sorted((utc_ms(row["time_utc"]), row["lat"], row["lon"]) for row in track)
+    fix_times = [fix[0] for fix in fixes]
+    positioned = [row for row in kpi if row["lat"] and row["lon"]]
+    r.check("kpi.csv: rows carry lat and lon", positioned, "%d of %d rows" % (len(positioned), len(kpi)))
+    halves = [line for line, row in enumerate(kpi, 2) if bool(row["lat"]) != bool(row["lon"])]
+    r.check("kpi.csv: lat and lon are filled together", not halves, halves[:5])
+    wrong = []
+    for line, row in enumerate(kpi, 2):
+        position = (row["lat"], row["lon"]) if row["lat"] else None
+        allowed = acceptable_positions(fixes, fix_times, epoch_ms(row["time_epoch"]))
+        if position not in allowed:
+            wrong.append("line %d: %s, expected one of %s" % (line, position, sorted(allowed, key=str)[:2]))
+    r.check("kpi.csv: each position is the nearest fix within 5 s", not wrong, wrong[:3])
+
+    # track.csv against the walk the host injected
+    offset_path = out / "checks" / "clock-offset-ms.txt"
+    offset = int(offset_path.read_text().strip()) if offset_path.is_file() else 0
+    injected = sorted((int(row["host_ms"]) + offset, float(row["lat"]), float(row["lon"]))
+                      for row in read_csv(out / "checks" / "injected-track.csv"))
+    injected_times = [point[0] for point in injected]
+    r.check("track.csv: about one fix a second", len(track) >= 0.8 * duration_s,
+            "%d fixes in %.0f s, %d points injected" % (len(track), duration_s, len(injected)))
+    unmatched = []
+    for line, row in enumerate(track, 2):
+        t, lat, lon = utc_ms(row["time_utc"]), float(row["lat"]), float(row["lon"])
+        low = bisect.bisect_left(injected_times, t - TRACK_MATCH_MS)
+        high = bisect.bisect_right(injected_times, t + TRACK_MATCH_MS)
+        best = min((distance_m(lat, lon, p[1], p[2]) for p in injected[low:high]), default=math.inf)
+        if best > TRACK_MATCH_M:
+            unmatched.append("line %d: %s m from the walk" % (line, "no point in time" if best == math.inf else "%.1f" % best))
+    r.check("track.csv: every fix lies on the injected walk (%.0f m, %d s)" % (TRACK_MATCH_M, TRACK_MATCH_MS // 1000),
+            track and not unmatched, "%d of %d unmatched %s" % (len(unmatched), len(track), unmatched[:3]))
+    walked = sum(distance_m(float(a["lat"]), float(a["lon"]), float(b["lat"]), float(b["lon"])) for a, b in zip(track, track[1:]))
+    r.check("track.csv: the route covers the walk", walked >= 0.5 * WALK_SPEED_MPS * duration_s,
+            "%.0f m walked, %.0f m injected in that time" % (walked, WALK_SPEED_MPS * duration_s))
+    r.check("track.csv: providers", set(row["provider"] for row in track) <= {"gps", "fused", "network"},
+            dict(Counter(row["provider"] for row in track)))
+
+    # events.csv
+    serving = [e for e in events if e["kind"] == "serving_cell"]
+    r.check("events.csv: serving_cell with its PCI and ARFCN", serving and all(e["pci"] and e["arfcn"] for e in serving),
+            [(e["time_utc"], e["rat"], e["pci"], e["arfcn"]) for e in serving][:4])
+    markers = [e for e in events if e["kind"] == "marker"]
+    r.check("events.csv: the marker with its note", len(markers) == 1 and markers[0]["detail"] == result.get("marker_note")
+            and markers[0]["rat"] == "-" and markers[0]["severity"] == "info"
+            and stopped is not None and started <= utc_ms(markers[0]["time_utc"]) <= stopped,
+            [(m["time_utc"], m["detail"]) for m in markers])
+    r.check("events.csv: no session_interrupted in a stopped session", not any(e["kind"] == "session_interrupted" for e in events))
+
+    # traffic.csv
+    pings = [row for row in traffic if row["test"] == "ping"]
+    downloads = [row for row in traffic if row["test"] == "download"]
+    r.check("traffic.csv: ping rows to %s" % result.get("ping_target"),
+            pings and all(row["target"] == result.get("ping_target") for row in pings),
+            [(row["time_utc"], row["ok"], row["loss_pct"], row["rtt_avg_ms"], row["error"]) for row in pings][:6])
+    r.check("traffic.csv: a ping got replies", any(row["ok"] == "1" and row["rtt_avg_ms"] and float(row["loss_pct"]) < 100 for row in pings))
+    r.check("traffic.csv: download rows from the download URL",
+            downloads and all(row["target"] == result.get("download_url") for row in downloads),
+            [(row["time_utc"], row["ok"], row["bytes"], row["http_code"], row["mbps"], row["error"]) for row in downloads][:4])
+    r.check("traffic.csv: a 1 MB download completed",
+            any(row["ok"] == "1" and row["http_code"] == "200" and row["bytes"] == "1000000" and float(row["mbps"] or 0) > 0
+                for row in downloads))
+    failed_tests = [row for row in traffic if row["ok"] != "1"]
+    failure_events = [e for e in events if e["kind"] == "test_failed"]
+    r.check("traffic.csv: each failed test has an error and a test_failed event",
+            all(row["error"] for row in failed_tests) and len(failure_events) == len(failed_tests),
+            "%d failed rows, %d test_failed events" % (len(failed_tests), len(failure_events)))
+
+    # cells.csv and summary.plmns
+    samples = sum(int(row["samples"]) for row in cells)
+    r.check("cells.csv: its samples account for every kpi row", samples == len(kpi), "%d samples, %d kpi rows" % (samples, len(kpi)))
+    by_plmn: dict = {}
+    for row in cells:
+        if row["plmn"] and int(row["samples"]):
+            by_plmn[row["plmn"]] = by_plmn.get(row["plmn"], 0) + int(row["samples"])
+    plmns = {key: value for key, value in (summary.get("plmns") or {}).items() if value}
+    r.check("session.json: summary.plmns matches cells.csv", plmns == by_plmn, "session.json %s, cells.csv %s" % (plmns, by_plmn))
+
+    # report.html
+    report = session / "report.html"
+    html = report.read_text(encoding="utf-8", errors="replace") if report.is_file() else ""
+    r.check("report.html: rendered", "<html" in html.lower(), report)
+    r.check("report.html: no Procedures section", html and "<h2>Procedures</h2>" not in html)
+    r.check("report.html: no Call flow section", html and "<h2>Call flow</h2>" not in html)
+
+    # the exported zip
+    zip_name = result.get("zip_name")
+    zip_path = out / "device" / str(zip_name)
+    if r.check("export: the zip was pulled", zip_name and zip_path.is_file(), zip_path):
+        digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+        r.check("export: the SHA-256 shown in the app is the zip's",
+                digest == result.get("zip_sha256_ui") == result.get("zip_sha256_file"),
+                "file %s, shown %s" % (digest, result.get("zip_sha256_ui")))
+        with zipfile.ZipFile(zip_path) as archive:
+            names = tuple(archive.namelist())
+        r.check("export: the seven files in bundle order", names == BUNDLE, names)
+        r.check("export: fieldtap validate on the zip exit 0", exit_status(out, zip_name) == 0, exit_status(out, zip_name))
+    r.check("export: the share sheet opened", result.get("share_sheet") is True)
+
+
+def check_recovered(out: Path, repo: Path, r: Results) -> None:
+    listing = out / "checks" / "recovered.txt"
+    killed = {}
+    if listing.is_file():
+        for line in listing.read_text().splitlines():
+            parts = line.split()
+            if len(parts) == 4:
+                killed[parts[0]] = parts
+    title = android_string(repo, "live_recovered_title") or "Session interrupted"
+    for scenario in ("force_stop", "kill_9"):
+        if not r.check("%s: a recording session was killed" % scenario, scenario in killed, sorted(killed)):
+            continue
+        _, dir_name, pid, kill_ms = killed[scenario]
+        session = out / "sessions" / dir_name
+        if not r.check("%s: the session was pulled" % scenario, (session / "session.json").is_file(), session):
+            continue
+        meta = read_json(session / "session.json")
+        events = read_csv(session / "events.csv")
+        dump = out / "checks" / ("exit-info-%s.txt" % scenario)
+        expected = exit_token(dump.read_text(encoding="utf-8", errors="replace"), int(pid)) if dump.is_file() else None
+        r.check("%s: Android recorded an exit for pid %s" % (scenario, pid), expected is not None, expected)
+        stopped_by = (meta.get("summary") or {}).get("stopped_by")
+        r.check("%s: summary.stopped_by is that exit reason" % scenario, expected is not None and stopped_by == expected,
+                "stopped_by %s, Android's reason %s" % (stopped_by, expected))
+        interrupted = [e for e in events if e["kind"] == "session_interrupted"]
+        r.check("%s: one session_interrupted event, written last" % scenario,
+                len(interrupted) == 1 and events and events[-1]["kind"] == "session_interrupted",
+                [(e["time_utc"], e["cause"]) for e in interrupted])
+        if interrupted:
+            event = interrupted[0]
+            r.check("%s: session_interrupted carries the exit reason" % scenario,
+                    event["cause"] == stopped_by and event["severity"] == "error" and event["rat"] == "-",
+                    "cause %s, severity %s" % (event["cause"], event["severity"]))
+            r.check("%s: stopped_utc is the event's time" % scenario, event["time_utc"] == meta.get("stopped_utc"),
+                    "%s and %s" % (event["time_utc"], meta.get("stopped_utc")))
+        if meta.get("stopped_utc"):
+            before_kill = int(kill_ms) - utc_ms(meta["stopped_utc"])
+            r.check("%s: stopped at the last heartbeat before the kill" % scenario, -1_000 <= before_kill <= HEARTBEAT_SLACK_MS,
+                    "%d ms before the kill" % before_kill)
+        else:
+            r.check("%s: stopped_utc is set" % scenario, False)
+        r.check("%s: capabilities.layer3 is false" % scenario, (meta.get("capabilities") or {}).get("layer3") is False)
+        r.check("%s: fieldtap validate --upload exit 0" % scenario, exit_status(out, dir_name) == 0, exit_status(out, dir_name))
+        if scenario == "kill_9":
+            ui = out / "device" / "recovery-kill_9.json"
+            ui_result = read_json(ui) if ui.is_file() else {}
+            r.check("kill_9: Live named the interrupted session after the relaunch",
+                    ui_result.get("banner") is True and ui_result.get("stopped_by") == stopped_by, ui_result or ui)
+        else:
+            window = out / "recovery" / "force_stop-relaunch.xml"
+            text = window.read_text(encoding="utf-8", errors="replace") if window.is_file() else ""
+            r.check("force_stop: Live named the interrupted session after the relaunch",
+                    'text="%s"' % title in text and dir_name in text, window)
+
+
+def is_png(path: Path) -> bool:
+    return path.is_file() and path.stat().st_size > 1_000 and path.read_bytes()[:8] == PNG_SIGNATURE
+
+
+def check_screenshots(out: Path, r: Results) -> None:
+    base = out / "device" / "screenshots"
+    for variant in ("light", "dark", "font130"):
+        missing = [name for name in FIRST_RUN_SCREENS + TOUR_SCREENS if not is_png(base / variant / (name + ".png"))]
+        r.check("screenshots: every screen in %s" % variant, not missing, "missing %s" % missing if missing else "")
+    walk_result = out / "device" / "walk-result.json"
+    expected = list(WALK_SCREENS)
+    if walk_result.is_file() and read_json(walk_result).get("prestart_sheet") is True:
+        expected.append("07-prestart-sheet")
+    missing = [name for name in expected if not is_png(base / "walk" / (name + ".png"))]
+    r.check("screenshots: every step of the walk", not missing, "missing %s" % missing if missing else "")
+    r.check("screenshots: Live after the kill -9 relaunch", is_png(base / "recovery" / "16-live-recovered-kill_9.png"))
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    out, repo = Path(args.out), Path(args.repo)
+    r = Results()
+    check_walk(out, repo, args.walk_seconds, r)
+    check_recovered(out, repo, r)
+    check_screenshots(out, r)
+    failures = r.failures
+    print("%d checks, %d failed" % (len(r.items), len(failures)))
+    (out / "checks").mkdir(parents=True, exist_ok=True)
+    (out / "checks" / "results.json").write_text(json.dumps({"checks": r.items, "failed": len(failures)}, indent=2) + "\n",
+                                                 encoding="utf-8")
+    return 1 if failures else 0
+
+
+def main(argv: Optional[list] = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    commands = parser.add_subparsers(dest="command", required=True)
+    plan = commands.add_parser("plan-walk")
+    plan.add_argument("--seconds", type=int, default=3600)
+    plan.set_defaults(func=cmd_plan_walk)
+    instrumentation = commands.add_parser("instrumentation")
+    instrumentation.add_argument("raw")
+    instrumentation.add_argument("--junit")
+    instrumentation.add_argument("--name")
+    instrumentation.set_defaults(func=cmd_instrumentation)
+    reason = commands.add_parser("exit-reason")
+    reason.add_argument("dumpsys")
+    reason.add_argument("--pid", type=int, required=True)
+    reason.set_defaults(func=cmd_exit_reason)
+    check = commands.add_parser("check")
+    check.add_argument("--out", required=True)
+    check.add_argument("--repo", required=True)
+    check.add_argument("--walk-seconds", type=int, default=180)
+    check.set_defaults(func=cmd_check)
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
