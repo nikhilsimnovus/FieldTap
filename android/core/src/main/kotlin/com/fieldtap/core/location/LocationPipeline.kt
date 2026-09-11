@@ -3,13 +3,14 @@ package com.fieldtap.core.location
 import com.fieldtap.core.input.FixSample
 import com.fieldtap.core.privacy.PrivacyZone
 import com.fieldtap.core.privacy.PrivacyZoneGate
+import com.fieldtap.core.privacy.ZonePlacement
 import com.fieldtap.format.EventRow
 import com.fieldtap.format.LatLon
 import com.fieldtap.format.TrackRow
 
 /** What one fix produced. */
 data class LocationStep(
-    /** The track.csv row, or null when the fix was rejected or is inside a privacy zone. */
+    /** The track.csv row, or null when the fix was rejected, is inside a privacy zone, or may be inside one. */
     val track: TrackRow?,
     /**
      * Events to write now: `privacy_zone` (always written, paused or not), and `gps_restored`
@@ -18,22 +19,33 @@ data class LocationStep(
     val events: List<EventRow>,
     /** True when this fix moved logging into or out of a privacy zone. */
     val pauseChanged: Boolean,
+    /**
+     * True when this fix was accepted and shows the phone outside every zone: whatever was held until now was
+     * taken outside them and may be written.
+     */
+    val confirmsOutside: Boolean = false,
 )
 
 /**
  * Everything location the session recorder needs. Single-threaded: session dispatcher only.
  *
  * Pause rule (privacy zones applied at write time): logging is paused from the first accepted fix
- * inside a zone until the first accepted fix outside every zone. Without any fix yet, logging is not
- * paused. While paused nothing is written to any file except the `privacy_zone` events. A fix inside
- * a zone is never added to the join buffer or the track.
+ * inside a zone until the first accepted fix outside every zone. While paused nothing is written to any file
+ * except the `privacy_zone` events. A fix inside a zone, or one whose accuracy reaches into a zone, is never
+ * added to the join buffer or the track.
+ *
+ * Hold rule, when the session has zones: [holding] says that no fix yet shows where the inputs arriving now are
+ * taken (before the first fix, after a fix near a zone, after a fix that may be inside one). The recorder keeps
+ * those inputs back. The next fix outside every zone ([LocationStep.confirmsOutside]) lets them be written; a
+ * fix inside a zone, or a hold that outlasts its limit ([onTick] then pauses), drops them. A session without
+ * zones never holds.
  *
  * Owner: workstream `location-privacy-core`.
  */
 interface LocationPipeline {
     fun onFix(fix: FixSample): LocationStep
 
-    /** `gps_lost` when due; the recorder drops it while paused. */
+    /** `gps_lost` when due, and the `privacy_zone` pause that ends an overlong hold; the recorder drops gps events while paused. */
     fun onTick(nowWallMs: Long, nowElapsedMs: Long): List<EventRow>
 
     fun join(measurementElapsedMs: Long, nowElapsedMs: Long): JoinResult
@@ -42,7 +54,16 @@ interface LocationPipeline {
 
     val paused: Boolean
 
-    /** `privacy.zone_pauses`: how many times logging paused. */
+    /** True while inputs must wait for a fix that shows where they were taken; never while [paused]. */
+    val holding: Boolean get() = false
+
+    /** True while [paused] because no fix showed where the phone is, rather than because a fix was inside a zone. */
+    val pausedWithoutFix: Boolean get() = false
+
+    /** How long inputs have been held at [nowElapsedMs]; null when not [holding]. */
+    fun holdAgeMs(nowElapsedMs: Long): Long? = null
+
+    /** `privacy.zone_pauses`: how many times logging paused inside a zone. */
     val zonePauses: Int
 
     /** The newest accepted fix outside every zone, for the notification and Live screen. */
@@ -56,10 +77,13 @@ interface LocationPipeline {
  * For each fix, in this order:
  * 1. [FixSelector] rejects mock (unless [allowMockFixes]), 0,0, out-of-range, out-of-order and
  *    redundant fallback fixes. A rejected fix produces nothing and changes no state.
- * 2. [PrivacyZoneGate] decides the pause and yields the `privacy_zone` event, if any.
+ * 2. [PrivacyZoneGate] places the fix, decides the pause and the hold, and yields the `privacy_zone` event, if any.
  * 3. [GpsEventDeriver] sees every accepted fix, inside a zone or not; its `gps_restored` is kept only
  *    when logging is not paused after this fix.
- * 4. Only a fix outside every zone becomes a track row, a join candidate and [lastFix].
+ * 4. Only a fix outside every zone ([ZonePlacement.NEAR] or [ZonePlacement.CLEAR]) becomes a track row, a join
+ *    candidate and [lastFix]; it is the fix that [LocationStep.confirmsOutside].
+ *
+ * [onTick] returns `gps_lost` when due, then the gate's pause for a hold older than [holdLimitMs].
  *
  * The zones are copied at construction: a session keeps the zones it started with.
  *
@@ -71,9 +95,10 @@ interface LocationPipeline {
 class DefaultLocationPipeline(
     zones: List<PrivacyZone>,
     private val allowMockFixes: Boolean = false,
+    holdLimitMs: Long = PrivacyZoneGate.HOLD_LIMIT_MS,
 ) : LocationPipeline {
     private val selector = FixSelector(allowMock = allowMockFixes)
-    private val gate = PrivacyZoneGate(zones.toList())
+    private val gate = PrivacyZoneGate(zones.toList(), holdLimitMs)
     private val joiner = FixJoiner()
     private val gpsEvents = GpsEventDeriver()
     private var newestOutside: FixSample? = null
@@ -90,16 +115,18 @@ class DefaultLocationPipeline(
             gpsEvent != null && !paused -> listOf(gpsEvent)
             else -> emptyList()
         }
-        if (paused) return LocationStep(track = null, events = events, pauseChanged = zoneEvent != null)
+        val outside = !paused && (gate.lastPlacement == ZonePlacement.NEAR || gate.lastPlacement == ZonePlacement.CLEAR)
+        if (!outside) return LocationStep(track = null, events = events, pauseChanged = zoneEvent != null)
 
         joiner.add(fix)
         newestOutside = fix
-        return LocationStep(track = TrackRows.of(fix), events = events, pauseChanged = zoneEvent != null)
+        return LocationStep(track = TrackRows.of(fix), events = events, pauseChanged = zoneEvent != null, confirmsOutside = true)
     }
 
     override fun onTick(nowWallMs: Long, nowElapsedMs: Long): List<EventRow> {
-        val lost = gpsEvents.onTick(nowWallMs, nowElapsedMs) ?: return emptyList()
-        return listOf(lost)
+        val lost = gpsEvents.onTick(nowWallMs, nowElapsedMs)
+        val pause = gate.onTick(nowWallMs, nowElapsedMs)
+        return listOfNotNull(lost, pause)
     }
 
     override fun join(measurementElapsedMs: Long, nowElapsedMs: Long): JoinResult =
@@ -108,6 +135,12 @@ class DefaultLocationPipeline(
     override fun joinFinal(measurementElapsedMs: Long): LatLon? = joiner.joinFinal(measurementElapsedMs)
 
     override val paused: Boolean get() = gate.paused
+
+    override val holding: Boolean get() = gate.holding
+
+    override val pausedWithoutFix: Boolean get() = gate.pausedWithoutFix
+
+    override fun holdAgeMs(nowElapsedMs: Long): Long? = gate.holdAgeMs(nowElapsedMs)
 
     override val zonePauses: Int get() = gate.pauses
 

@@ -101,6 +101,8 @@ data class LiveState(
     val signal: SignalSnapshot? = null,
     val lastFix: FixSample? = null,
     val gnss: GnssSnapshot? = null,
+    /** False while location services are switched off, when Android returns no cell information and no fixes; null before Android said. */
+    val locationEnabled: Boolean? = null,
     val listeners: Map<RadioListener, ListenerOutcome> = emptyMap(),
     val nowElapsedMs: Long = 0,
 )
@@ -153,7 +155,7 @@ class LiveStateReducer {
             is ListenerReport -> state.copy(listeners = state.listeners + (input.listener to input.outcome))
             is FixSample -> onFix(state, input)
             is GnssSnapshot -> state.copy(gnss = input)
-            is LocationAvailability -> state
+            is LocationAvailability -> state.copy(locationEnabled = input.locationEnabled)
         }
         return aged(next, nowElapsedMs)
     }

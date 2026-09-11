@@ -308,17 +308,26 @@ class SessionRecorderTest {
     }
 
     @Test
-    fun enteringAZoneWritesTheRowsMeasuredBeforeItFirst() = runTest {
+    fun enteringAZoneWritesOnlyTheRowsMeasuredByTheLastFixOutsideIt() = runTest {
         val rig = Rig()
         val run = start(rig)
-        val measured = START_ELAPSED_MS + 300
-        val cell = cellInfoCandidate(measured, seenUtcMs = START_WALL_MS + 400, timeEpochMs = START_WALL_MS + 300)
-        val kpi = kpiCandidate(measured, timeEpochMs = START_WALL_MS + 300)
-        rig.radio.steps.addLast(RadioStep(listOf(cell), listOf(kpi), emptyList()))
-        send(rig, RecorderCommand.Measurement(answer(START_WALL_MS + 400, START_ELAPSED_MS + 400)))
+        val before = START_ELAPSED_MS + 300
+        val after = START_ELAPSED_MS + 700
+        val cellBefore = cellInfoCandidate(before, seenUtcMs = START_WALL_MS + 400, timeEpochMs = START_WALL_MS + 300)
+        val kpiBefore = kpiCandidate(before, timeEpochMs = START_WALL_MS + 300)
+        val cellAfter = cellInfoCandidate(after, seenUtcMs = START_WALL_MS + 800, timeEpochMs = START_WALL_MS + 700)
+        val kpiAfter = kpiCandidate(after, timeEpochMs = START_WALL_MS + 700)
+        rig.radio.steps.addLast(RadioStep(listOf(cellBefore), listOf(kpiBefore), emptyList()))
+        rig.radio.steps.addLast(RadioStep(listOf(cellAfter), listOf(kpiAfter), emptyList()))
+        rig.location.lastFixSample = fix(elapsedMs = START_ELAPSED_MS + 500, wallMs = START_WALL_MS + 500)
+        send(
+            rig,
+            RecorderCommand.Measurement(answer(START_WALL_MS + 400, START_ELAPSED_MS + 400)),
+            RecorderCommand.Measurement(answer(START_WALL_MS + 800, START_ELAPSED_MS + 800)),
+        )
         assertTrue(rig.files.rowsAndEvents.isEmpty())
 
-        val inside = fix(elapsedMs = START_ELAPSED_MS + 900, wallMs = START_WALL_MS + 900)
+        val inside = fix(elapsedMs = START_ELAPSED_MS + 1_500, wallMs = START_WALL_MS + 1_500)
         val paused = event(inside.observedWallMs, EventKind.PRIVACY_ZONE, PrivacyZoneGate.PAUSED_TITLE)
         rig.location.joinFinalPosition = { P1 }
         rig.location.onFixStep = {
@@ -327,16 +336,229 @@ class SessionRecorderTest {
         }
         send(rig, RecorderCommand.Measurement(inside))
 
+        // Measured by the last fix outside the zone: written with its position. Measured after it, between that fix
+        // and the one inside the zone: it may have been measured inside, so it is dropped.
         assertEquals(
             listOf(
-                FileCall.CellInfo(cell.row.copy(position = P1)),
-                FileCall.Kpi(kpi.row.copy(position = P1)),
+                FileCall.CellInfo(cellBefore.row.copy(position = P1)),
+                FileCall.Kpi(kpiBefore.row.copy(position = P1)),
                 FileCall.Event(paused),
             ),
             rig.files.rowsAndEvents,
         )
-        assertEquals(listOf(measured, measured), rig.location.joinFinalCalls)
-        assertEquals(listOf(kpi.copy(row = kpi.row.copy(position = P1))), rig.radio.kpiWritten)
+        assertEquals(listOf(before, before), rig.location.joinFinalCalls)
+        assertEquals(listOf(kpiBefore.copy(row = kpiBefore.row.copy(position = P1))), rig.radio.kpiWritten)
+        stop(rig, run)
+    }
+
+    @Test
+    fun aZoneEnteredBeforeAnyFixOutsideWritesNoneOfTheRowsWaitingForAPosition() = runTest {
+        val rig = Rig()
+        val run = start(rig)
+        val measured = START_ELAPSED_MS + 300
+        rig.radio.steps.addLast(
+            RadioStep(
+                listOf(cellInfoCandidate(measured, seenUtcMs = START_WALL_MS + 400, timeEpochMs = START_WALL_MS + 300)),
+                listOf(kpiCandidate(measured, timeEpochMs = START_WALL_MS + 300)),
+                emptyList(),
+            ),
+        )
+        send(rig, RecorderCommand.Measurement(answer(START_WALL_MS + 400, START_ELAPSED_MS + 400)))
+        val inside = fix(elapsedMs = START_ELAPSED_MS + 900, wallMs = START_WALL_MS + 900)
+        val paused = event(inside.observedWallMs, EventKind.PRIVACY_ZONE, PrivacyZoneGate.PAUSED_TITLE)
+        rig.location.joinFinalPosition = { P1 }
+        rig.location.onFixStep = {
+            rig.location.paused = true
+            LocationStep(track = null, events = listOf(paused), pauseChanged = true)
+        }
+
+        send(rig, RecorderCommand.Measurement(inside))
+
+        assertEquals(listOf(FileCall.Event(paused)), rig.files.rowsAndEvents)
+        assertTrue(rig.radio.kpiWritten.isEmpty())
+        stop(rig, run)
+    }
+
+    @Test
+    fun aCachedCellListIsNeitherHandledNorWritten() = runTest {
+        val rig = Rig()
+        val run = start(rig)
+        val measured = START_ELAPSED_MS - 5_000
+        rig.radio.steps.addLast(
+            RadioStep(listOf(cellInfoCandidate(measured, seenUtcMs = START_WALL_MS + 100, timeEpochMs = START_WALL_MS - 5_000)), emptyList(), emptyList()),
+        )
+
+        send(rig, RecorderCommand.Measurement(answer(START_WALL_MS + 100, START_ELAPSED_MS + 100).copy(cached = true)))
+        passSeconds(rig, 7)
+
+        assertTrue(rig.radio.cellInfoCalls.isEmpty())
+        assertTrue(rig.files.rowsAndEvents.isEmpty())
+        stop(rig, run)
+    }
+
+    @Test
+    fun whileHoldingInputsWaitForAFixThatShowsThePhoneOutsideEveryZone() = runTest {
+        val rig = Rig()
+        val run = start(rig)
+        rig.location.holding = true
+        val measured = START_ELAPSED_MS + 300
+        val cell = cellInfoCandidate(measured, seenUtcMs = START_WALL_MS + 400, timeEpochMs = START_WALL_MS + 300)
+        val kpi = kpiCandidate(measured, timeEpochMs = START_WALL_MS + 300)
+        val serving = event(START_WALL_MS + 300, EventKind.SERVING_CELL, "Serving cell", EventRat.LTE)
+        val lost = event(START_WALL_MS + 450, EventKind.SERVICE_LOST, "Service lost", EventRat.LTE)
+        val failure = SessionEvents.testFailed(START_WALL_MS + 500, TrafficTest.PING, "no cellular network")
+        val ping = pingRow(START_WALL_MS + 500)
+        rig.radio.steps.addLast(RadioStep(listOf(cell), listOf(kpi), listOf(serving)))
+        rig.radio.serviceEvents = listOf(lost)
+        rig.location.resolved[measured] = P1
+
+        send(
+            rig,
+            RecorderCommand.Measurement(answer(START_WALL_MS + 400, START_ELAPSED_MS + 400)),
+            RecorderCommand.Measurement(serviceState(START_WALL_MS + 450)),
+            RecorderCommand.Traffic(TrafficRecord(ping, failure)),
+            RecorderCommand.Mark("held back", START_WALL_MS + 600),
+        )
+        passSeconds(rig, 7)
+        // Nothing is handled yet, not even by the pipelines: the next fix decides.
+        assertTrue(rig.files.rowsAndEvents.isEmpty())
+        assertTrue(rig.radio.cellInfoCalls.isEmpty())
+        assertTrue(rig.radio.serviceCalls.isEmpty())
+
+        val outside = fix(elapsedMs = START_ELAPSED_MS + 7_900, wallMs = START_WALL_MS + 7_900)
+        val track = trackRow(outside)
+        rig.location.onFixStep = { sample ->
+            rig.location.holding = false
+            rig.location.lastFixSample = sample
+            LocationStep(track = track, events = emptyList(), pauseChanged = false, confirmsOutside = true)
+        }
+        send(rig, RecorderCommand.Measurement(outside))
+
+        assertEquals(
+            listOf(
+                FileCall.Event(serving),
+                FileCall.Event(lost),
+                FileCall.Traffic(ping),
+                FileCall.Event(failure),
+                FileCall.Event(SessionEvents.marker(START_WALL_MS + 600, "held back")),
+                FileCall.Track(track),
+                FileCall.CellInfo(cell.row.copy(position = P1)),
+                FileCall.Kpi(kpi.row.copy(position = P1)),
+            ),
+            rig.files.rowsAndEvents,
+        )
+        assertEquals(listOf(true), rig.radio.cellInfoCalls.map { it.second })
+        assertEquals(listOf(true), rig.radio.serviceCalls)
+        stop(rig, run)
+    }
+
+    @Test
+    fun whileHoldingAFixInsideAZoneDropsEverythingHeld() = runTest {
+        val rig = Rig()
+        val run = start(rig)
+        rig.location.holding = true
+        val measured = START_ELAPSED_MS + 300
+        rig.radio.steps.addLast(
+            RadioStep(
+                listOf(cellInfoCandidate(measured, seenUtcMs = START_WALL_MS + 400, timeEpochMs = START_WALL_MS + 300)),
+                listOf(kpiCandidate(measured, timeEpochMs = START_WALL_MS + 300)),
+                listOf(event(START_WALL_MS + 300, EventKind.SERVING_CELL, "Serving cell", EventRat.LTE)),
+            ),
+        )
+        rig.radio.serviceEvents = listOf(event(START_WALL_MS + 450, EventKind.SERVICE_LOST, "Service lost", EventRat.LTE))
+        rig.location.resolved[measured] = P1
+        send(
+            rig,
+            RecorderCommand.Measurement(answer(START_WALL_MS + 400, START_ELAPSED_MS + 400)),
+            RecorderCommand.Measurement(serviceState(START_WALL_MS + 450)),
+            RecorderCommand.Traffic(TrafficRecord(pingRow(START_WALL_MS + 500), null)),
+            RecorderCommand.Mark("inside after all", START_WALL_MS + 600),
+        )
+
+        val inside = fix(elapsedMs = START_ELAPSED_MS + 900, wallMs = START_WALL_MS + 900)
+        val paused = event(inside.observedWallMs, EventKind.PRIVACY_ZONE, PrivacyZoneGate.PAUSED_TITLE)
+        rig.location.onFixStep = {
+            rig.location.holding = false
+            rig.location.paused = true
+            LocationStep(track = null, events = listOf(paused), pauseChanged = true)
+        }
+        send(rig, RecorderCommand.Measurement(inside))
+        passSeconds(rig, 7)
+
+        assertEquals(listOf(FileCall.Event(paused)), rig.files.rowsAndEvents)
+        // The pipelines learn what was held, so de-duplication and the latest state stay current, but nothing is written.
+        assertEquals(listOf(false), rig.radio.cellInfoCalls.map { it.second })
+        assertEquals(listOf(false), rig.radio.serviceCalls)
+        assertTrue(rig.radio.kpiWritten.isEmpty())
+        stop(rig, run)
+    }
+
+    @Test
+    fun aHoldThatLastsTooLongPausesOnATickAndDropsTheRowsItCannotPlace() = runTest {
+        val rig = Rig()
+        val run = start(rig)
+        val early = START_ELAPSED_MS + 50
+        val late = START_ELAPSED_MS + 300
+        val earlyRow = cellInfoCandidate(early, seenUtcMs = START_WALL_MS + 400, timeEpochMs = START_WALL_MS + 50)
+        rig.radio.steps.addLast(RadioStep(listOf(earlyRow), emptyList(), emptyList()))
+        rig.radio.steps.addLast(
+            RadioStep(listOf(cellInfoCandidate(late, seenUtcMs = START_WALL_MS + 450, timeEpochMs = START_WALL_MS + 300)), emptyList(), emptyList()),
+        )
+        send(
+            rig,
+            RecorderCommand.Measurement(answer(START_WALL_MS + 400, START_ELAPSED_MS + 400)),
+            RecorderCommand.Measurement(answer(START_WALL_MS + 450, START_ELAPSED_MS + 450)),
+        )
+        // A fix near a zone at 100 ms: from now on inputs wait for the next one, which never comes.
+        rig.location.lastFixSample = fix(elapsedMs = START_ELAPSED_MS + 100, wallMs = START_WALL_MS + 100)
+        rig.location.holding = true
+        rig.radio.steps.addLast(RadioStep(listOf(cellInfoCandidate(START_ELAPSED_MS + 600, START_WALL_MS + 700, START_WALL_MS + 600)), emptyList(), emptyList()))
+        send(rig, RecorderCommand.Measurement(answer(START_WALL_MS + 700, START_ELAPSED_MS + 700)))
+
+        val pausedWithoutFix = event(START_WALL_MS + 1_000, EventKind.PRIVACY_ZONE, PrivacyZoneGate.PAUSED_NO_FIX_TITLE)
+        var fired = false
+        rig.location.joinFinalPosition = { P1 }
+        rig.location.onTickStep = { _, _ ->
+            if (fired) {
+                emptyList()
+            } else {
+                fired = true
+                rig.location.holding = false
+                rig.location.paused = true
+                rig.location.pausedWithoutFix = true
+                listOf(pausedWithoutFix)
+            }
+        }
+        passSeconds(rig, 2)
+
+        assertEquals(listOf(FileCall.CellInfo(earlyRow.row.copy(position = P1)), FileCall.Event(pausedWithoutFix)), rig.files.rowsAndEvents)
+        assertEquals(listOf(early), rig.location.joinFinalCalls)
+        assertEquals(listOf(true, true, false), rig.radio.cellInfoCalls.map { it.second })
+        val snapshot = rig.recorder.snapshot.value
+        assertTrue(snapshot.paused)
+        assertTrue(snapshot.waitingForLocation)
+        stop(rig, run)
+    }
+
+    @Test
+    fun theSnapshotSaysWhenLocationIsOffAndWhenTheSessionWaitsForAFix() = runTest {
+        val rig = Rig()
+        val run = start(rig)
+        assertTrue(rig.recorder.snapshot.value.locationEnabled)
+        send(rig, RecorderCommand.Measurement(LocationAvailability(false, true, emptySet(), START_WALL_MS + 100, START_ELAPSED_MS + 100)))
+        assertFalse(rig.recorder.snapshot.value.locationEnabled)
+        assertTrue(rig.files.rowsAndEvents.isEmpty())
+
+        rig.location.holding = true
+        rig.location.holdAge = 5_000
+        passSeconds(rig, 1)
+        assertFalse("a hold of a few seconds is normal near a zone", rig.recorder.snapshot.value.waitingForLocation)
+        rig.location.holdAge = 5_001
+        passSeconds(rig, 1)
+        assertTrue(rig.recorder.snapshot.value.waitingForLocation)
+
+        send(rig, RecorderCommand.Measurement(LocationAvailability(true, true, setOf(FixProvider.GPS), START_WALL_MS + 2_100, START_ELAPSED_MS + 2_100)))
+        assertTrue(rig.recorder.snapshot.value.locationEnabled)
         stop(rig, run)
     }
 
@@ -424,7 +646,7 @@ class SessionRecorderTest {
         // One final join per pending row: the answer's cellinfo row and its KPI row.
         assertEquals(listOf(measured, measured), rig.location.joinFinalCalls)
         assertEquals(listOf(kpi.copy(row = kpi.row.copy(position = P1))), rig.radio.kpiWritten)
-        assertEquals(SessionOutcome(DIR_NAME, START_WALL_MS, stoppedAt, "user", interrupted = false, freshSamples = 1), outcome)
+        assertEquals(SessionOutcome(DIR_NAME, START_WALL_MS, stoppedAt, "user", interrupted = false, freshSamples = 1, name = identity().name), outcome)
         assertEquals(outcome, rig.recorder.outcome.value)
         assertTrue(rig.recorder.snapshot.value.stopping)
     }
@@ -517,7 +739,8 @@ class SessionRecorderTest {
         val tail = rig.files.calls.takeLast(3)
         assertTrue(tail[0] is FileCall.Snapshot)
         assertEquals(FileCall.Close, tail[1])
-        assertEquals(FileCall.Heartbeat(HeartbeatRecord(START_WALL_MS + 3_000, START_ELAPSED_MS + 3_000, PID)), tail[2])
+        // The stop token goes with the time, so recovery closes the session as the user's stop, whatever later ends the process.
+        assertEquals(FileCall.Heartbeat(HeartbeatRecord(START_WALL_MS + 3_000, START_ELAPSED_MS + 3_000, PID, stoppedBy = "user")), tail[2])
     }
 
     @Test

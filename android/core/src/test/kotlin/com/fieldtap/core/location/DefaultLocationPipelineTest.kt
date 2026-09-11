@@ -5,6 +5,7 @@ import com.fieldtap.core.privacy.PrivacyZone
 import com.fieldtap.core.privacy.PrivacyZoneGate
 import com.fieldtap.format.EventKind
 import com.fieldtap.format.EventRat
+import com.fieldtap.format.FixProvider
 import com.fieldtap.format.LatLon
 import com.fieldtap.format.Severity
 import org.junit.Assert.assertEquals
@@ -141,14 +142,47 @@ class DefaultLocationPipelineTest {
     }
 
     @Test
-    fun beforeAnyFixLoggingIsNotPaused() {
+    fun beforeAnyFixLoggingIsNotPausedButWithZonesWritesWait() {
         val pipeline = DefaultLocationPipeline(listOf(zone))
         assertFalse(pipeline.paused)
+        assertTrue("nothing shows yet whether the phone is in the zone", pipeline.holding)
         assertEquals(0, pipeline.zonePauses)
         assertNull(pipeline.lastFix())
         assertTrue(pipeline.onTick(nowWallMs = 1L, nowElapsedMs = 999_999_999L).isEmpty())
         assertEquals(JoinResult.Pending, pipeline.join(measurementElapsedMs = 0, nowElapsedMs = 6_499))
         assertEquals(JoinResult.Resolved(null), pipeline.join(measurementElapsedMs = 0, nowElapsedMs = 6_500))
+
+        assertFalse("without zones nothing ever waits", DefaultLocationPipeline(emptyList()).holding)
+    }
+
+    @Test
+    fun aFixWhoseAccuracyReachesIntoTheZoneIsNeitherATrackRowNorAJoinCandidate() {
+        val pipeline = DefaultLocationPipeline(listOf(zone))
+        val far = fix(elapsedMs = startElapsedMs, lat = 38.8800, lon = -77.0300)
+        val farStep = pipeline.onFix(far)
+        assertTrue(farStep.confirmsOutside)
+        assertNotNull(farStep.track)
+        assertFalse(pipeline.holding)
+
+        // A network fix 180 m from the centre, good to 150 m, more than 3 s after the last GPS fix.
+        val coarse = fix(
+            elapsedMs = startElapsedMs + 10_000,
+            lat = 38.8900 + 180.0 / metresPerDegree,
+            lon = -77.0300,
+            provider = FixProvider.NETWORK,
+            accuracyM = 150.0,
+        )
+        assertEquals(LocationStep(track = null, events = emptyList(), pauseChanged = false), pipeline.onFix(coarse))
+        assertFalse(pipeline.paused)
+        assertTrue(pipeline.holding)
+        assertEquals(far, pipeline.lastFix())
+        assertEquals(JoinResult.Resolved(null), pipeline.join(startElapsedMs + 10_000, nowElapsedMs = startElapsedMs + 20_000))
+
+        assertEquals(listOf(EventKind.GPS_LOST), pipeline.onTick(1L, coarse.observedElapsedMs + 60_000).map { it.kind })
+        val paused = pipeline.onTick(2L, coarse.observedElapsedMs + 60_001)
+        assertEquals(listOf(PrivacyZoneGate.PAUSED_NO_FIX_TITLE), paused.map { it.title })
+        assertTrue(pipeline.paused)
+        assertTrue(pipeline.pausedWithoutFix)
     }
 
     @Test

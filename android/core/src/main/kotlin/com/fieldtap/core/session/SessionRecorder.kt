@@ -215,6 +215,13 @@ data class RecorderSnapshot(
     val trackRows: Long,
     val hasRecentFix: Boolean,
     val stopping: Boolean,
+    /**
+     * True while nothing is written because no location fix shows where the phone is: the session has privacy zones,
+     * and inputs have been held back for more than a few seconds, or logging paused because no fix came.
+     */
+    val waitingForLocation: Boolean = false,
+    /** False while location services are switched off: Android then returns no cell information and no fixes. */
+    val locationEnabled: Boolean = true,
 )
 
 data class RecorderConfig(
@@ -240,28 +247,40 @@ data class RecorderConfig(
  * - When [SessionFiles.create] fails, [run] closes the files and rethrows: nothing was recorded, and the
  *   caller removes the empty directory.
  * - Measurement(CellInfoAnswer): `radio.onCellInfo(answer, writing = !location.paused)`; rows go to a
- *   FIFO of pending rows; events are appended at once.
+ *   FIFO of pending rows; events are appended at once. A `cached` answer (Android's `getAllCellInfo` list,
+ *   read for the Live screen) is ignored: it is not a measurement of this session.
  * - Pending rows are released in order, on every command, while `location.join(...)` is Resolved for
  *   the head row; each released row gets its position, is appended, and each KPI row is reported with
- *   `radio.onKpiWritten`.
+ *   `radio.onKpiWritten`. While `location.holding`, only rows measured by the newest fix outside every zone
+ *   are released.
+ * - While `location.holding` (the session has privacy zones and no fix yet shows where the phone is), cell-info
+ *   answers, service, data and display snapshots, traffic results and marks are kept back, in arrival order,
+ *   instead of being handled. The next fix that confirms the phone outside every zone handles them as if they
+ *   had just arrived; a pause (a fix inside a zone, or a hold that lasted too long) lets the pipelines learn them
+ *   with `writing` false and writes nothing of them.
  * - Measurement(FixSample): `location.onFix`; its track row appended; its privacy_zone events always
  *   appended; its gps events appended only when not paused. On a pause change to "not paused",
  *   `radio.onResume` events are appended, stamped with the fix's observed time. On a pause change to
- *   "paused", the rows still pending are released first with `location.joinFinal` (they were measured
- *   before the zone and join only fixes from outside it), so nothing is left to write during the pause.
- * - Service, data and display snapshots: to radio with `writing = !paused`, events appended. Signal,
- *   GNSS, availability, listener reports and request failures: snapshot only.
+ *   "paused", from a fix or from a tick, the pending rows measured by the newest fix outside every zone are
+ *   written with `location.joinFinal` and the later ones, which may have been measured inside the zone, are
+ *   dropped, so nothing is left to write during the pause.
+ * - Service, data and display snapshots: to radio with `writing = !paused`, events appended. Location
+ *   availability: [RecorderSnapshot.locationEnabled]. Signal, GNSS, listener reports and request failures:
+ *   snapshot only.
  * - Traffic: row and failure event appended unless paused. Mark: [SessionEvents.marker] unless paused.
  * - While paused nothing but privacy_zone events is appended, whatever the pipelines return.
- * - Tick: `radio.onTick`, `location.onTick` (events unless paused), pending rows released, then
- *   [WriteSchedule] actions in order: flush, sync, snapshot (session.json + cells.csv from radio and
- *   location), heartbeat, storage check (stop with [StopCause.STORAGE_FULL] when [StorageStatus.mustStop];
- *   a storage lambda that throws IOException or SecurityException does not stop the session).
- * - [snapshot] is updated after every command.
- * - Stop: release every pending row with `location.joinFinal`, sync the CSVs, write the final snapshot
+ * - Tick: `radio.onTick`, `location.onTick` (privacy_zone events always, the others unless paused), pending
+ *   rows released, then [WriteSchedule] actions in order: flush, sync, snapshot (session.json + cells.csv from
+ *   radio and location), heartbeat, storage check (stop with [StopCause.STORAGE_FULL] when
+ *   [StorageStatus.mustStop]; a storage lambda that throws IOException or SecurityException does not stop the
+ *   session).
+ * - [snapshot] is updated after every command; it reads only the pipelines' cheap counters.
+ * - Stop: release every pending row with `location.joinFinal` (while holding, only those measured by the newest
+ *   fix outside every zone, and nothing held; while paused, none), sync the CSVs, write the final snapshot
  *   with `stopped_utc` = the wall clock now (never before `started_utc`) and `stopped_by` = the cause's
  *   token, close the files. Each finalization step runs even when an earlier one failed; when the final
- *   session.json could not be written a heartbeat with the stop time is left behind for launch recovery.
+ *   session.json could not be written a heartbeat with the stop time and the stop token is left behind, so
+ *   recovery closes the session as this stop.
  * - An IOException from the files stops the session with [StopCause.STORAGE_FULL], the only stop token
  *   for a write failure. Any other exception from a pipeline finalizes with [ExitReasons.CRASH] and is
  *   rethrown; [outcome] then holds the result.
@@ -284,6 +303,10 @@ class SessionRecorder(
 
     // Everything below is read and written only inside run(), on the session dispatcher.
     private val pending = ArrayDeque<PendingRow>()
+
+    /** Commands kept back while the location pipeline is holding, in arrival order. */
+    private val held = ArrayDeque<RecorderCommand>()
+    private var locationEnabled = true
     private var schedule = WriteSchedule(config.writePolicy, 0L)
     private var startElapsedMs = 0L
     private var newestPrimary: ClassifiedCell? = null
@@ -383,9 +406,8 @@ class SessionRecorder(
     /** Handles one command; returns the stop token when the session must stop now. */
     private fun process(command: RecorderCommand): String? {
         when (command) {
-            is RecorderCommand.Measurement -> onInput(command.input)
-            is RecorderCommand.Traffic -> onTraffic(command.record)
-            is RecorderCommand.Mark -> onMark(command)
+            is RecorderCommand.Measurement -> onInput(command)
+            is RecorderCommand.Traffic, is RecorderCommand.Mark -> holdOrApply(command)
             is RecorderCommand.Stop -> return command.cause.token
             RecorderCommand.Tick -> return onTick()
         }
@@ -393,31 +415,49 @@ class SessionRecorder(
         return null
     }
 
-    private fun onInput(input: MeasurementInput) {
-        when (input) {
-            is CellInfoAnswer -> onCellInfo(input)
+    private fun onInput(command: RecorderCommand.Measurement) {
+        when (val input = command.input) {
             is FixSample -> onFix(input)
-            is ServiceStateSnapshot -> {
-                val writing = !location.paused
-                val events = radio.onServiceState(input, writing)
-                if (writing) appendEvents(events)
-            }
-            is DataStateSnapshot -> {
-                val writing = !location.paused
-                val events = radio.onDataState(input, writing)
-                if (writing) appendEvents(events)
-            }
-            is DisplayInfoSnapshot -> {
-                val writing = !location.paused
-                val events = radio.onDisplayInfo(input, writing)
-                if (writing) appendEvents(events)
-            }
-            is SignalSnapshot, is GnssSnapshot, is LocationAvailability, is ListenerReport, is CellInfoRequestFailed -> Unit
+            is CellInfoAnswer -> if (!input.cached) holdOrApply(command)
+            is ServiceStateSnapshot, is DataStateSnapshot, is DisplayInfoSnapshot -> holdOrApply(command)
+            is LocationAvailability -> locationEnabled = input.locationEnabled
+            is SignalSnapshot, is GnssSnapshot, is ListenerReport, is CellInfoRequestFailed -> Unit
         }
     }
 
-    private fun onCellInfo(answer: CellInfoAnswer) {
-        val writing = !location.paused
+    /** Keeps [command] back while the location pipeline is holding, else handles it now. */
+    private fun holdOrApply(command: RecorderCommand) {
+        if (!location.holding) {
+            apply(command)
+            return
+        }
+        held.addLast(command)
+        // A bound no real hold reaches (a hold ends within its limit): past it the oldest input is learnt, never written.
+        while (held.size > MAX_HELD_COMMANDS) apply(held.removeFirst(), writing = false)
+    }
+
+    /** Handles every command kept back so far, in order: written unless logging is paused now. */
+    private fun applyHeld() {
+        while (held.isNotEmpty()) apply(held.removeFirst())
+    }
+
+    /** One cell-info answer, radio snapshot, traffic result or mark; with [writing] false the pipelines learn it and nothing is written. */
+    private fun apply(command: RecorderCommand, writing: Boolean = !location.paused) {
+        when (command) {
+            is RecorderCommand.Measurement -> when (val input = command.input) {
+                is CellInfoAnswer -> onCellInfo(input, writing)
+                is ServiceStateSnapshot -> radio.onServiceState(input, writing).let { if (writing) appendEvents(it) }
+                is DataStateSnapshot -> radio.onDataState(input, writing).let { if (writing) appendEvents(it) }
+                is DisplayInfoSnapshot -> radio.onDisplayInfo(input, writing).let { if (writing) appendEvents(it) }
+                else -> Unit
+            }
+            is RecorderCommand.Traffic -> if (writing) onTraffic(command.record)
+            is RecorderCommand.Mark -> if (writing) onMark(command)
+            is RecorderCommand.Stop, RecorderCommand.Tick -> Unit
+        }
+    }
+
+    private fun onCellInfo(answer: CellInfoAnswer, writing: Boolean) {
         val step = radio.onCellInfo(answer, writing)
         rememberServing()
         if (!writing) return
@@ -428,9 +468,14 @@ class SessionRecorder(
 
     private fun onFix(fix: FixSample) {
         val wasPaused = location.paused
+        val newestOutsideMs = location.lastFix()?.elapsedMs
         val step = location.onFix(fix)
         val pausedNow = location.paused
-        if (!wasPaused && pausedNow) releaseAllFinal()
+        if (!wasPaused && pausedNow) {
+            enterPause(newestOutsideMs)
+        } else if (step.confirmsOutside) {
+            applyHeld()
+        }
         for (event in step.events) {
             if (event.kind == EventKind.PRIVACY_ZONE || !pausedNow) appendEvent(event)
         }
@@ -457,15 +502,20 @@ class SessionRecorder(
         val nowElapsed = clock.elapsedRealtimeMillis()
         val nowWall = clock.wallMillis()
         radio.onTick(nowElapsed)
-        val writing = !location.paused
-        val gpsEvents = location.onTick(nowWall, nowElapsed)
-        if (writing) appendEvents(gpsEvents)
+        val wasPaused = location.paused
+        val newestOutsideMs = location.lastFix()?.elapsedMs
+        val locationEvents = location.onTick(nowWall, nowElapsed)
+        val pausedNow = location.paused
+        if (!wasPaused && pausedNow) enterPause(newestOutsideMs)
+        for (event in locationEvents) {
+            if (event.kind == EventKind.PRIVACY_ZONE || !pausedNow) appendEvent(event)
+        }
         releasePending(nowElapsed)
-        refreshTotals()
         val due = schedule.due(nowElapsed)
         if (WriteAction.FLUSH in due) files.flush()
         if (WriteAction.SYNC in due) files.sync()
         if (WriteAction.SNAPSHOT in due) {
+            refreshTotals()
             val cells = radio.cells()
             files.writeSnapshot(meta(stoppedUtcMs = null, stoppedBy = ExitReasons.RECORDING), cells)
             lastCells = cells
@@ -477,8 +527,11 @@ class SessionRecorder(
 
     private fun releasePending(nowElapsedMs: Long) {
         if (location.paused) return
+        // While holding, a row measured after the newest fix outside every zone may have been measured inside one.
+        val measuredByMs = if (location.holding) location.lastFix()?.elapsedMs ?: return else Long.MAX_VALUE
         while (pending.isNotEmpty()) {
             val head = pending.first()
+            if (head.measurementElapsedMs > measuredByMs) return
             val position = when (val joined = location.join(head.measurementElapsedMs, nowElapsedMs)) {
                 JoinResult.Pending -> return
                 is JoinResult.Resolved -> joined.position
@@ -492,6 +545,26 @@ class SessionRecorder(
         while (pending.isNotEmpty()) {
             val head = pending.removeFirst()
             write(head, location.joinFinal(head.measurementElapsedMs))
+        }
+    }
+
+    /**
+     * Logging has just paused. What was held is learnt by the pipelines and never written. Of the rows still waiting
+     * for a position, those measured by [newestOutsideMs], the newest fix outside every zone before the pause, are
+     * written with what the track knows; later ones may have been measured inside the zone and are dropped.
+     */
+    private fun enterPause(newestOutsideMs: Long?) {
+        applyHeld()
+        writePendingMeasuredBy(newestOutsideMs)
+    }
+
+    /** Empties the pending rows: those measured at or before [newestOutsideMs] are written, the others dropped. */
+    private fun writePendingMeasuredBy(newestOutsideMs: Long?) {
+        while (pending.isNotEmpty()) {
+            val head = pending.removeFirst()
+            if (newestOutsideMs != null && head.measurementElapsedMs <= newestOutsideMs) {
+                write(head, location.joinFinal(head.measurementElapsedMs))
+            }
         }
     }
 
@@ -549,7 +622,16 @@ class SessionRecorder(
         stopping = true
         val stoppedUtcMs = maxOf(clock.wallMillis(), config.identity.startedUtcMs)
 
-        attempt { if (location.paused) pending.clear() else releaseAllFinal() }
+        attempt {
+            when {
+                location.paused -> pending.clear()
+                // Nothing shows where the held inputs and the latest rows were taken: only rows measured by the
+                // newest fix outside every zone are written.
+                location.holding -> writePendingMeasuredBy(location.lastFix()?.elapsedMs)
+                else -> releaseAllFinal()
+            }
+        }
+        held.clear()
         pending.clear()
         attempt { refreshTotals() }
         attempt { files.sync() }
@@ -557,7 +639,9 @@ class SessionRecorder(
         val finalSnapshotWritten = attempt { files.writeSnapshot(meta(stoppedUtcMs, stoppedBy), cells) }
         attempt { files.close() }
         if (!finalSnapshotWritten) {
-            attempt { files.writeHeartbeat(HeartbeatRecord(stoppedUtcMs, clock.elapsedRealtimeMillis(), config.pid)) }
+            attempt {
+                files.writeHeartbeat(HeartbeatRecord(stoppedUtcMs, clock.elapsedRealtimeMillis(), config.pid, stoppedBy = stoppedBy))
+            }
         }
 
         val result = SessionOutcome(
@@ -567,6 +651,7 @@ class SessionRecorder(
             stoppedBy = stoppedBy,
             interrupted = false,
             freshSamples = lastCollection.freshSamples,
+            name = config.identity.name,
         )
         finished = result
         mutableOutcome.value = result
@@ -602,6 +687,7 @@ class SessionRecorder(
         val nowElapsed = clock.elapsedRealtimeMillis()
         val primary = newestPrimary
         val fix = location.lastFix()
+        val counts = radio.sampleCounts()
         mutableSnapshot.value = RecorderSnapshot(
             dirName = config.session.dirName,
             startedUtcMs = config.identity.startedUtcMs,
@@ -610,12 +696,14 @@ class SessionRecorder(
             servingRsrpDbm = primary?.cell?.rsrp,
             newestSampleAgeMs = primary?.let { (nowElapsed - it.cell.timestampMs).coerceAtLeast(0L) },
             paused = location.paused,
-            freshSamples = lastCollection.freshSamples,
-            repeatsDropped = lastCollection.repeatsDropped,
+            freshSamples = counts.freshSamples,
+            repeatsDropped = counts.repeatsDropped,
             eventsWritten = eventsWritten,
             trackRows = trackRows,
             hasRecentFix = fix != null && nowElapsed - fix.elapsedMs <= RECENT_FIX_MS,
             stopping = stopping,
+            waitingForLocation = location.pausedWithoutFix || (location.holdAgeMs(nowElapsed) ?: 0L) > WAITING_NOTICE_MS,
+            locationEnabled = locationEnabled,
         )
     }
 
@@ -640,6 +728,12 @@ class SessionRecorder(
 
         /** A fix at most this old counts as recent: the GPS join's own limit. */
         const val RECENT_FIX_MS: Long = Schema.GPS_MATCH_MS
+
+        /** Inputs held back longer than this make the snapshot say the session is waiting for a location fix. */
+        const val WAITING_NOTICE_MS: Long = 5_000
+
+        /** More held commands than a minute's hold could gather; the oldest beyond it are learnt and never written. */
+        const val MAX_HELD_COMMANDS: Int = 10_000
     }
 }
 

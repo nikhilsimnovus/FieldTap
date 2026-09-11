@@ -258,10 +258,12 @@ class LiveStateReducerTest {
         )
         assertEquals(BOOT0 + 80, state.nowElapsedMs)
 
-        val unchanged = reducer.reduce(state, LocationAvailability(true, true, setOf(FixProvider.GPS), WALL0 + 90, BOOT0 + 90))
-        assertEquals(state.copy(nowElapsedMs = BOOT0 + 90), unchanged)
-        val failed = reducer.reduce(unchanged, CellInfoRequestFailed(1, "modem busy", WALL0 + 95, BOOT0 + 95))
-        assertEquals(unchanged.copy(nowElapsedMs = BOOT0 + 95), failed)
+        // Location switched off: the screen must be able to say why no new measurement comes.
+        val locationOff = reducer.reduce(state, LocationAvailability(false, true, setOf(FixProvider.GPS), WALL0 + 90, BOOT0 + 90))
+        assertEquals(state.copy(nowElapsedMs = BOOT0 + 90, locationEnabled = false), locationOff)
+        val failed = reducer.reduce(locationOff, CellInfoRequestFailed(1, "modem busy", WALL0 + 95, BOOT0 + 95))
+        assertEquals(locationOff.copy(nowElapsedMs = BOOT0 + 95), failed)
+        assertEquals(true, reducer.reduce(failed, LocationAvailability(true, true, setOf(FixProvider.GPS), WALL0 + 99, BOOT0 + 99)).locationEnabled)
     }
 
     @Test

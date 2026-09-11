@@ -162,6 +162,11 @@ internal class FakeRadioPipeline : RadioPipeline {
 internal class FakeLocationPipeline : LocationPipeline {
     override var paused: Boolean = false
     override var zonePauses: Int = 0
+    override var holding: Boolean = false
+    override var pausedWithoutFix: Boolean = false
+    var holdAge: Long? = null
+
+    override fun holdAgeMs(nowElapsedMs: Long): Long? = holdAge
 
     val resolved: HashMap<Long, LatLon?> = HashMap()
     var joinFinalPosition: (Long) -> LatLon? = { null }
@@ -169,6 +174,9 @@ internal class FakeLocationPipeline : LocationPipeline {
     var onFixStep: (FixSample) -> LocationStep = { LocationStep(track = null, events = emptyList(), pauseChanged = false) }
     val fixes: MutableList<FixSample> = mutableListOf()
     var tickEvents: List<EventRow> = emptyList()
+
+    /** What [onTick] returns; by default [tickEvents]. A test replaces it to change the pause state on a tick. */
+    var onTickStep: (Long, Long) -> List<EventRow> = { _, _ -> tickEvents }
     val tickCalls: MutableList<Pair<Long, Long>> = mutableListOf()
     var lastFixSample: FixSample? = null
 
@@ -179,7 +187,7 @@ internal class FakeLocationPipeline : LocationPipeline {
 
     override fun onTick(nowWallMs: Long, nowElapsedMs: Long): List<EventRow> {
         tickCalls += nowWallMs to nowElapsedMs
-        return tickEvents
+        return onTickStep(nowWallMs, nowElapsedMs)
     }
 
     override fun join(measurementElapsedMs: Long, nowElapsedMs: Long): JoinResult =
