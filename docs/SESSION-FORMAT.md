@@ -381,8 +381,8 @@ The kinds the app writes (`events.app_kinds` in `columns.json`):
 | `service_restored` | `lte`, `nr` | `ok` | yes | In service again. |
 | `data_state` | `-` | `info`, `warn` | no | The mobile data connection changed; detail like `connected, LTE`. `warn` when it disconnected. |
 | `nr_display` | `nr` | `info` | no | The 5G icon changed (`TelephonyDisplayInfo` override network type); detail like `override NR_NSA, network LTE`. An indicator, not a measurement. |
-| `gps_lost` | `-` | `warn` | no | No fix for more than 5 s. |
-| `gps_restored` | `-` | `ok` | no | Fixes again. |
+| `gps_lost` | `-` | `warn` | no | No fix for more than 5 s (detail `no fix for more than 5 s`), or location services were switched off (detail `Location services turned off`, at the time of the switch). |
+| `gps_restored` | `-` | `ok` | no | Fixes again, after either. |
 | `sampling_gap` | `-` | `warn` | no | No fresh sample for more than twice the interval in force when the gap began. Written when the gap ends; detail like `no fresh cell info for 14.0 s`; `cause` is the reason. Also listed in `collection.gaps`. |
 | `marker` | `-` | `info` | no | The user tapped Mark. `detail` is the note, blank if none. |
 | `test_failed` | `-` | `error` | no | A ping or download failed; the title names the test, the detail gives the error. The result is also in `traffic.csv` with `ok` 0. |

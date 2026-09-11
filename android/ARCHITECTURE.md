@@ -230,7 +230,7 @@ The KDoc of each stub is the full contract. This section is the summary an imple
 | `data_state` | `RadioEventDeriver.onDataState` | Observed | `Mobile data ...` (`connected, LTE`), warn on disconnect |
 | `nr_display` | `RadioEventDeriver.onDisplayInfo` | Observed | `5G icon on` / `5G icon off` (`override NR_NSA, network LTE`) |
 | `sampling_gap` | `SamplingGap.toEvent` | Ending answer's arrival | `Sampling gap` (`no fresh cell info for 14.0 s`), cause = reason |
-| `gps_lost` / `gps_restored` | `GpsEventDeriver` | Tick / fix observed; held and dropped like any input (section 6.5) | `GPS lost` / `GPS restored` |
+| `gps_lost` / `gps_restored` | `GpsEventDeriver`, through `LocationPipeline.onTick`, `onLocationAvailability` and `onFix` | `gps_lost`: the tick more than 5 s after the last fix, or location services switched off, as observed (even before the first fix, and after a timed loss); `gps_restored`: the next fix measured after either. Held and dropped like any input (section 6.5) | `GPS lost` (`no fix for more than 5 s` / `Location services turned off`) / `GPS restored` |
 | `privacy_zone` | `PrivacyZoneGate` | Fix observed, or the tick that ends an overlong wait for a fix | `Logging paused in a privacy zone` / `Logging paused until the location is known` (`no location fix showed the phone outside every privacy zone`) / `Logging resumed`, never a place |
 | `marker` | `SessionEvents.marker` | Tap | `Marker` (the note) |
 | `test_failed` | `SessionEvents.testFailed` via `TrafficRecords` | Test start | `Ping failed` / `Download failed` (error) |
@@ -277,7 +277,10 @@ row before them by at most the sample age (at most 11 s). `fieldtap validate` do
   a fix counts in `zone_pauses` only once a fix inside a zone confirms it. Every `privacy_zone` event carries a fix's or
   a tick's time, never one computed from a distance. A session without zones never holds.
 - Live says a marker tapped while inputs are held is kept until the location is known, and says so again if a pause
-  drops it (`RecorderSnapshot.holdingInputs`, `markersDropped`, `SessionOutcome.markersDropped`).
+  drops it (`RecorderSnapshot.holdingInputs`, `markersDropped`, `SessionOutcome.markersDropped`). The notification says the
+  same for a few seconds (`SessionRuntime.markNotice`), and the Session detail screen says how many markers the session
+  dropped, from the note the recorder leaves beside the heartbeat (section 6.7), so a drop at Stop or with Live closed is
+  still said.
 - While paused, nothing is written to any file except the `privacy_zone` events. That includes
   kpi, cellinfo, track, traffic rows and markers, radio events and statistics. A fix inside a zone never
   enters the join buffer, so no row gets a position from inside a zone. When logging pauses, pending rows
@@ -305,6 +308,7 @@ row before them by at most the sample age (at most 11 s). `fieldtap validate` do
 | cells.csv | Rewritten atomically every 60 s and at stop | May hold only its header early on. |
 | session.json | Created at start; rewritten atomically every 60 s, when a privacy-zone pause is counted, and at stop | `.tmp`, sync, atomic rename. While open: `stopped_utc` null and `summary.stopped_by` `recording`. `stopped_utc` is never before a time a written row carries. |
 | `<filesDir>/session-state/<dir>.heartbeat` | Every 5 s, deleted at close | `v1 <wallMs> <elapsedMs> <pid>`; `v2 <wallMs> <elapsedMs> <pid> <stop token>` when the recorder stopped the session but could not write its final session.json (section 6.8). Outside the session directory. |
+| `<filesDir>/session-state/<dir>.markers-dropped` | When the session drops a marker, and at stop | The count in decimal and a line feed (`MarkersDroppedNote`): markers accepted and then dropped by a pause or by Stop, which the Session detail screen reads. Outside the session directory, kept after close, deleted with the session; a note that cannot be written stops nothing. |
 
 - Root: `<getExternalFilesDir(null)>/sessions/`, pullable at `/sdcard/Android/data/<applicationId>/files/sessions`.
 - Directory `SessionDirName.of(startedUtcMs, name)`. On a collision within the same second,
@@ -454,16 +458,20 @@ directly while an activity of the app is resumed.
 ### The end-to-end proof
 
 `android/e2e/run_e2e.sh` proves the app on an emulator, through its UI, in the emulator job of
-`.github/workflows/android.yml` (API 36, the target, and API 31, the minSdk). The instrumented tests are in
+`.github/workflows/android.yml` (API 36, the target, and API 31, the minSdk). The API 36 legs run on a Pixel 7 screen
+(`profile: pixel_7`, 1080 x 2400 px at 420 dpi, 411 x 914 dp), where the design is judged, and `check_e2e.py` checks every
+screenshot was taken at that size; API 31 keeps the emulator's default 320 x 640 dp screen as the robustness check. The
+instrumented tests are in
 `app/src/androidTest/kotlin/com/fieldtap/e2e/`: Compose UI testing drives the app, UiAutomator answers Android's permission
 dialogs and the share sheet. Each test writes screenshots and a result JSON to `<externalFilesDir>/e2e/`, which the host
 pulls after every run. `android/e2e/check_e2e.py` asserts what the files hold.
 
 | Step | Driven by | Must hold |
 | --- | --- | --- |
-| First run, in light, dark and font scale 1.3 (`cmd uimode night`, `font_scale`, each after `pm clear`) | `FirstRunScreensTest` | The disclosure shows before any permission prompt; nothing is granted before Allow |
-| The walk: consent, permissions in Android's dialog, Live, Settings (ping `10.0.2.2`, 1 MB download), Start through the pre-start sheet, a marker, Stop after 180 s, Build zip, Share | `EndToEndWalkTest`, while the host sends `adb emu geo fix` once a second and `adb emu gsm signal-profile` every 20 s | Live shows a serving cell with its age badge; leaving Settings with unsaved test edits asks first; walk mode keeps the screen on without overriding brightness; the zip's SHA-256 on screen is the file's; the share sheet opens |
-| Every screen in the three variants | `ScreenTourTest` | Live (its first screen, the trend and the cells below it, and in landscape with the session buttons beside the content), Start dialog, Sessions, detail and Share card, Readiness, Probe, Settings, About |
+| First run, in each variant: light, dark, font scale 1.3, and on API 36 landscape (`cmd uimode night`, `font_scale`, `user_rotation`, each after `pm clear`) | `FirstRunScreensTest` | The disclosure shows before any permission prompt; nothing is granted before Allow; each screen at every scroll position |
+| The walk: consent, permissions in Android's dialog, Live, Settings (ping `10.0.2.2`, 1 MB download), Start through the pre-start sheet, a marker on Live and one from the notification's Mark, Stop after 180 s, Build zip, Share | `EndToEndWalkTest`, while the host sends `adb emu geo fix` once a second and `adb emu gsm signal-profile` every 20 s | Live shows a serving cell with its age badge; leaving Settings with unsaved test edits asks first; walk mode keeps the screen on without overriding brightness; the notification says `Marker 2 added at` its time, then its usual text again; the zip's SHA-256 on screen is the file's; the share sheet opens |
+| Every screen in each variant | `ScreenTourTest` | Live (and, upright, Live turned with the session buttons beside the content), Start dialog, Sessions, detail, Readiness, Probe, Settings, About, each at every scroll position (`Screens.shotFull`: `NAME-p1.png`, `NAME-p2.png` and on) |
+| Location services off mid-session, with a privacy zone 10 km from the walk | `LocationOffTest`, switching with `cmd location set-location-enabled` | `gps_lost` with `Location services turned off` at the switch; Live and the notification say location is off; a marker tapped while inputs wait for a fix is said to wait, then, when no fix came for 60 s, is dropped and said so on Live, in the notification and on Session detail; the first fix after location is back resumes logging and writes `gps_restored`; no fix while off |
 | Process death | The host: START through the automation hook, `am force-stop` (relaunch with `am start`) and `run-as <pkg> kill -9` (relaunch by `RecoveryUiTest`) | The session is closed with a `session_interrupted` event whose cause is the exit reason `dumpsys activity exit-info` gives for the killed pid, at the last heartbeat; Live names it |
 | The signed, minified release build | The release job, on its own emulators at API 36 and API 31: Gradle signs `app-release.apk` with a key made in the job, and `android/e2e/release_smoke.sh` drives it with only `uiautomator dump` and `input tap` on the app's strings, while the host sends `adb emu geo fix` once a second | Installed with `adb install -r`, it is the version `app/build.gradle.kts` sets, not debuggable and without the hook; the disclosure shows first, About shows the version, a session with tests records 90 s and stops; `fieldtap validate --upload` and `fieldtap report` pass; the files hold GPS fixes, positioned measurements, test rows, the release's version and `stopped_by` user, plus kpi rows and `serving_cell` on API 36; no crash |
 | The files | `python -m fieldtap validate DIR --upload`, `python -m fieldtap report DIR`, `fieldtap validate` on the zip, `check_e2e.py` | Every session validates; kpi rows are fresh serving-cell measurements in cellinfo.csv, never a modem timestamp twice for a cell, positioned from the nearest fix within 5 s; track fixes lie on the injected walk; serving_cell and the marker with its note; ping and download rows; `stopped_by` user, `layer3` false, collection statistics; cells.csv agrees with `summary.plmns`; the report has no Procedures or Call flow section |
@@ -692,6 +700,11 @@ Changes agreed at integration:
   - `RecorderSnapshot.holdingInputs` and `markersDropped`; `SessionOutcome.markersDropped`.
   - `Csv.RecordReader`, the streaming form of `Csv.records`, used by `SessionRebuild`.
   - `TelephonyValues.combinedState`, `hasPacketDomain` and `emergencyOnly(wwanDataRegistered)` (section 7).
+- The lead's decisions of 2026-09-11 changed these shapes, each with a default so existing callers and fakes compile:
+  - `LocationPipeline.onLocationAvailability` and `GpsEventDeriver.onLocationServices` (section 6.3).
+  - `SessionFiles.writeMarkersDropped`, `FileSessionFiles(markersDroppedFile)`, `SessionPaths.markersDropped`,
+    `MarkersDroppedNote`, `SessionStore.markersDropped` and `SessionDetail.markersDropped` (section 6.7).
+  - `SessionRuntime.markNotice` and `NotificationModel.Recording.notice`, with `MarkNotice`.
 
 Inside owned files, an implementer may add private or internal helpers, new files in owned packages, and
 tests. Public API added for one's own use is fine; public API another workstream needs goes through the
@@ -747,7 +760,9 @@ orchestrator.
 | The sampling-gap threshold uses the interval in force when the previous fresh sample was measured | Only this reproduces the golden 14.0 s `screen_off` gap: the answer that delivered the previous fresh sample already reports the screen off. |
 | A cells.csv row may lack `pci` or `dl_earfcn` | SESSION-FORMAT.md: the cells must account for every row of kpi.csv, and `plausible` says which rows are incomplete. |
 | The hub replays the newest service, data and display state to each new collector, and nothing else | Android delivers them once, at registration, and a session starts after the Live screen registered. Answers and fixes are timed by their arrival, so they are never replayed. |
-| Location switched off during a session is shown on Live and in the notification, not written to the files | Writing it needs a new event token, and tokens are the lead's (decision 4). |
+| Location switched off during a session is written as `gps_lost` with the detail `Location services turned off`, at the switch, and `gps_restored` at the next fix measured after it; no new event token | The lead's decision of 2026-09-11. A fix, not the switch, restores GPS: location can come back on indoors without one. A switch while GPS was already lost is written too, because it says why no fix comes. With privacy zones the event is held and dropped like any gps event. |
+| A marker a session dropped is counted in a note beside the heartbeat that the Session detail screen reads; for 6 s after a marker the notification says which one was added and when (`Marker 3 added at 10:05`), that it waits for a fix, or that markers were dropped | The lead's decision of 2026-09-11. The session format has no place for a marker that was never written, and a drop at Stop or with Live closed was said nowhere. Markers are numbered by the taps a session accepted, from Live and the notification alike. The note survives a kill and goes when the session is deleted. The notification never shows a marker's note, because it shows on the lock screen. |
+| The API 36 emulator legs run on a Pixel 7 screen and take every screen in light, dark, font scale 1.3 and landscape at every scroll position; API 31 keeps the 320 dp screen | The lead's decision of 2026-09-11: the design is judged at a current phone's size, and the smallest screen stays as the robustness check without a third emulator leg. The walk, the location-off test and the recovery run once per leg, upright. |
 | The release build runs R8 with resource shrinking and no keep rules; CI's release job signs it with a key made in the job and drives it through a session on both emulators | 28 MB became 3.8 MB. A class R8 removed wrongly then fails on the emulator, not on a phone, and the driving uses nothing inside the APK, so the APK tested is the one a phone installs. |
 | Release signing reads the keystore and its password from the environment or `~/.gradle/gradle.properties`, never from the repository; with none set the release APK is unsigned, and a partial setting fails the build | The key stays on the release PC and its offline backups, CI needs no secret, and a release meant to be signed is never left unsigned without notice. |
 | Version 1.0.0, versionCode 1, for the first signed release | About and every `session.json` show it; each later APK that installs over it needs a higher versionCode. |

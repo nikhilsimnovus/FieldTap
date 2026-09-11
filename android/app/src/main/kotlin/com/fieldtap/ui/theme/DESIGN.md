@@ -163,7 +163,8 @@ shape argument), `Button`, `TextButton`, `Snackbar`.
 | `LiveState.service`, `data`, `display`, `lastFix` | `StatusChip`s |
 | `SessionStatus` Idle, Starting, Recording, Stopping | `SessionButtonState`; `Formats.elapsed(snapshot.elapsedMs)` |
 | `RecorderSnapshot.paused` | `StatusBanner(tone = StatusTone.INFO)`; Mark disabled |
-| `RecorderSnapshot.holdingInputs`, `markersDropped` | Mark confirms "Marker kept until your location is known"; a rise in `markersDropped` is said in the snackbar |
+| `RecorderSnapshot.holdingInputs`, `markersDropped` | Mark confirms "Marker kept until your location is known"; a rise in `markersDropped` is said in the snackbar, and for a few seconds in the notification |
+| `SessionDetail.markersDropped` | A WARNING `StatusBanner` with the Flag icon at the top of Session detail: "2 markers were not saved: …" |
 | `ReadinessItem.level` OK, ADVICE, BLOCKER | `ChecklistRow(tone = SUCCESS, WARNING, ERROR)`, with a fix button unless `target` is NONE |
 | Problems found by Start | `ReadinessProblem(blocking = level == BLOCKER)`; the refusals NO_CONSENT, NO_PRECISE_LOCATION, LOCATION_OFF and STORAGE_FULL are blocking too |
 | `SessionSummary.recording`, `readable`, `stoppedBy` | `SessionRowStatus` RECORDING, UNREADABLE, INTERRUPTED (when `stoppedBy` is an Android exit reason), else COMPLETED |
