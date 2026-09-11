@@ -11,6 +11,9 @@
 #      "adb emu geo fix" once a second and cycles "adb emu gsm signal-profile": consent, permissions, a serving
 #      cell with its age on Live, ping 10.0.2.2 and a 1 MB download, a session with a marker stopped after
 #      WALK_SECONDS, its detail, and its zip exported and shared.
+#      The LTE and NR checks (a serving cell on Live, kpi rows, serving_cell events) apply when the modem reports an
+#      LTE or NR cell, which API 36 must. A modem reporting only other cells, like the API 31 emulator's single GSM
+#      cell, instead gets a session checked to hold no kpi row and Live checked to say so.
 #   3. Every screen in light, dark and font scale 1.3 (ScreenTourTest).
 #   4. Process death: a session started through the debug automation hook is killed with "am force-stop" and
 #      relaunched with "am start"; another is killed with "kill -9" and relaunched by RecoveryUiTest. Each must be
@@ -62,6 +65,7 @@ LOGCAT_PID=""
 WALK_DIR=""
 AUTOMATION_DIR=""
 API=""
+EXPECT_LTE_NR=true
 
 log() { printf '[e2e %s] %s\n' "$(date -u +%H:%M:%S)" "$*" | tee -a "$OUT/e2e.log" >&2; }
 fail() { FAILURES+=("$*"); log "FAIL: $*"; }
@@ -339,6 +343,35 @@ telephony_snapshot() {
     cut -c1-4000 | redact > "$OUT/checks/telephony-$1.txt" || true
 }
 
+# detect_lte_nr  sets EXPECT_LTE_NR to true when the modem reports an LTE or NR cell and to false when, for 30 s, it
+# reports only other cells (the API 31 emulator reports a single GSM cell). The API 36 emulator must report LTE or NR.
+detect_lte_nr() {
+  local i other=0
+  EXPECT_LTE_NR=true
+  for i in $(seq 60); do
+    telephony_snapshot radio
+    if grep -qE 'CellInfo(Lte|Nr):' "$OUT/checks/telephony-radio.txt"; then
+      log "the modem reports LTE or NR cells: the LTE and NR checks apply"
+      return 0
+    fi
+    if grep -qE 'mCellInfo=\[CellInfo' "$OUT/checks/telephony-radio.txt"; then other=$((other + 1)); fi
+    if [ "$other" -ge 15 ]; then
+      EXPECT_LTE_NR=false
+      break
+    fi
+    sleep 2
+  done
+  if [ "$EXPECT_LTE_NR" = true ]; then
+    fail "the modem reported no cell at all in 120 s, see checks/telephony-radio.txt"
+    return 1
+  fi
+  log "the modem reports only $(grep -oE 'CellInfo[A-Za-z]+' "$OUT/checks/telephony-radio.txt" | sort -u | tr '\n' ' ')cells: no LTE or NR checks"
+  if [ "${API:-0}" -ge 36 ]; then
+    fail "API $API must report an LTE or NR cell, see checks/telephony-radio.txt"
+    return 1
+  fi
+}
+
 # wait_dead PID  until the app's process PID is gone.
 wait_dead() {
   local i
@@ -364,7 +397,7 @@ walk() {
   dsh pm clear "$PKG" > /dev/null || fail "pm clear $PKG failed"
   set_variant light
   telephony_snapshot before-walk
-  instrument walk EndToEndWalkTest -e walk_seconds "$WALK_SECONDS" || true
+  instrument walk EndToEndWalkTest -e walk_seconds "$WALK_SECONDS" -e expect_lte_nr "$EXPECT_LTE_NR" || true
   telephony_snapshot after-walk
   WALK_DIR=$(json_get "$OUT/device/walk-result.json" dir_name)
   if [ -z "$WALK_DIR" ]; then
@@ -382,7 +415,7 @@ tour() {
   fi
   for variant in "${VARIANTS[@]}"; do
     set_variant "$variant"
-    instrument "tour-$variant" ScreenTourTest -e variant "$variant" -e dir_name "$WALK_DIR" || true
+    instrument "tour-$variant" ScreenTourTest -e variant "$variant" -e dir_name "$WALK_DIR" -e expect_lte_nr "$EXPECT_LTE_NR" || true
   done
   set_variant light
 }
@@ -484,7 +517,8 @@ checks() {
     echo "$status" > "$OUT/validate/$name.exit"
     [ "$status" -eq 0 ] || fail "fieldtap validate $name exited $status"
   done
-  if ! "$PYTHON" "$CHECKER" check --out "$OUT" --repo "$repo" --walk-seconds "$WALK_SECONDS" > "$OUT/checks/check.txt" 2>&1; then
+  if ! "$PYTHON" "$CHECKER" check --out "$OUT" --repo "$repo" --walk-seconds "$WALK_SECONDS" --expect-lte-nr "$EXPECT_LTE_NR" \
+    > "$OUT/checks/check.txt" 2>&1; then
     fail "check_e2e.py found problems, see checks/check.txt"
   fi
   cat "$OUT/checks/check.txt" >> "$OUT/e2e.log"
@@ -537,6 +571,8 @@ main() {
   install_apks || exit 1
   measure_clock_offset
   start_feeders || exit 1
+  detect_lte_nr || true
+  echo "expect_lte_nr=$EXPECT_LTE_NR" >> "$OUT/checks/device.txt"
   first_runs
   walk || true
   tour || true

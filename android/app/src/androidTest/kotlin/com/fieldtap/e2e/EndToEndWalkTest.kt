@@ -43,7 +43,8 @@ import org.junit.runner.RunWith
  *
  * 1. The disclosure shows before any permission prompt; consent is accepted.
  * 2. Precise location (and notifications from Android 13) are allowed in Android's own dialog.
- * 3. Live shows a serving cell with its age badge.
+ * 3. Live shows a serving cell with its age badge, or, with `-e expect_lte_nr false` (a modem that reports no LTE or NR
+ *    cell, as on the API 31 emulator), says Android reports no LTE or NR serving cell.
  * 4. Settings: ping `10.0.2.2` (the emulator drops ICMP beyond its NAT) and a 1 MB download.
  * 5. A session with tests starts, through the pre-start sheet's "Start anyway" when it shows.
  * 6. A marker with a note; recording for `-e walk_seconds` (default 180).
@@ -71,17 +72,19 @@ class EndToEndWalkTest {
         result["ping_target"] = PING_TARGET
         result["download_url"] = DOWNLOAD_URL
         result["walk_ms"] = walkMs
+        val expectLteNr = E2e.expectLteNr()
+        result["expect_lte_nr"] = expectLteNr
         save()
 
         acceptDisclosureFirst()
         allowPermissions()
-        screens.awaitServingCell()
-        screens.shot("04-live-serving-cell")
+        screens.awaitLiveRadio(expectLteNr)
+        screens.shot("04-live-radio")
         saveTestSettings()
         val dirName = startSession()
         val recordingSinceMs = SystemClock.elapsedRealtime()
         addMarker(recordingSinceMs)
-        keepRecording(recordingSinceMs, walkMs)
+        keepRecording(recordingSinceMs, walkMs, expectLteNr)
         stopSession(dirName, recordingSinceMs)
         exportAndShare(dirName)
     }
@@ -129,7 +132,10 @@ class EndToEndWalkTest {
      */
     private fun allow(@StringRes cardTitle: Int, permissions: List<String>, vararg buttons: String): String {
         val inCard = hasParent(hasAnyChild(hasText(E2e.string(cardTitle))))
-        screens.click(hasText(E2e.string(R.string.permissions_action_allow)) and hasClickAction() and inCard)
+        val allowButton = hasText(E2e.string(R.string.permissions_action_allow)) and hasClickAction() and inCard
+        // A card lower on the screen can sit under the Continue bar, where a tap would land on the bar instead.
+        screens.scrollTo(allowButton)
+        screens.click(allowButton)
         val how = if (PermissionDialogs.answer(*buttons)) {
             "dialog"
         } else {
@@ -227,7 +233,7 @@ class EndToEndWalkTest {
     }
 
     /** Keeps the session recording until [walkMs] after it started, failing at once if it stops by itself. */
-    private fun keepRecording(recordingSinceMs: Long, walkMs: Long) {
+    private fun keepRecording(recordingSinceMs: Long, walkMs: Long, expectLteNr: Boolean) {
         var midwayShot = false
         while (true) {
             val elapsedMs = SystemClock.elapsedRealtime() - recordingSinceMs
@@ -236,7 +242,7 @@ class EndToEndWalkTest {
             assertTrue("The session stopped by itself after ${elapsedMs / 1_000} s: $status", status is SessionStatus.Recording)
             E2e.dismissNotRespondingDialog()
             if (!midwayShot && elapsedMs >= walkMs / 2) {
-                screens.awaitServingCell()
+                screens.awaitLiveRadio(expectLteNr)
                 screens.shot("10-recording")
                 midwayShot = true
             }

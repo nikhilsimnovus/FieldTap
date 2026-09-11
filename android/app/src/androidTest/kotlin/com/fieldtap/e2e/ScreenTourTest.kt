@@ -38,7 +38,7 @@ class ScreenTourTest {
         val sessionName = runBlocking { E2e.graph.sessions.detail(dirName) }?.meta?.name
             ?: throw AssertionError("Session $dirName is missing or unreadable")
 
-        screens.awaitServingCell()
+        screens.awaitLiveRadio(E2e.expectLteNr())
         screens.shot("03-live")
         screens.click(hasText(E2e.string(R.string.live_start)) and hasClickAction())
         screens.awaitText(R.string.live_start_dialog_title)

@@ -78,6 +78,15 @@ object E2e {
     fun argument(name: String): String? =
         InstrumentationRegistry.getArguments().getString(name)?.trim()?.takeIf { it.isNotEmpty() }
 
+    /**
+     * `-e expect_lte_nr true|false`: whether the emulator's modem reports LTE or NR cells, as android/e2e/run_e2e.sh read
+     * from the telephony registry. The API 36 emulator does; the API 31 emulator reports only a GSM cell. Absent means
+     * true, so the full LTE and NR checks are the default.
+     */
+    fun expectLteNr(): Boolean = argument("expect_lte_nr")?.let { value ->
+        requireNotNull(value.toBooleanStrictOrNull()) { "expect_lte_nr must be true or false, not $value" }
+    } ?: true
+
     /** An argument the test cannot run without. */
     fun requireArgument(name: String): String = checkNotNull(argument(name)) { "Pass -e $name VALUE to am instrument" }
 
@@ -345,6 +354,18 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
                 Log.w(E2e.TAG, "Could not save the Live state", io)
             }
             throw e
+        }
+    }
+
+    /**
+     * Waits until Live shows what the emulator's modem provides: with [expectLteNr], a serving cell and its age
+     * ([awaitServingCell]); without, the hero tile saying Android reports no LTE or NR serving cell.
+     */
+    fun awaitLiveRadio(expectLteNr: Boolean, timeoutMs: Long = SERVING_CELL_WAIT_MS) {
+        if (expectLteNr) {
+            awaitServingCell(timeoutMs)
+        } else {
+            await(hasDescriptionMatching(Regex(Regex.escape(E2e.string(R.string.live_no_lte_nr_badge)))), timeoutMs)
         }
     }
 

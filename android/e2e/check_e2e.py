@@ -70,7 +70,7 @@ TOUR_SCREENS = (
     "06-readiness", "07-probe", "08-settings", "09-about",
 )
 WALK_SCREENS = (
-    "01-disclosure", "02-permissions", "03-permissions-allowed", "04-live-serving-cell", "05-settings-tests",
+    "01-disclosure", "02-permissions", "03-permissions-allowed", "04-live-radio", "05-settings-tests",
     "06-start-dialog", "08-mark-dialog", "09-marker-added", "10-recording", "11-stop-dialog", "12-sessions",
     "13-session-detail", "14-zip-ready", "15-share-sheet",
 )
@@ -315,7 +315,62 @@ def acceptable_positions(fixes: list[tuple[int, str, str]], times: list[int], t:
     return allowed
 
 
-def check_walk(out: Path, repo: Path, walk_seconds: int, r: Results) -> None:
+def positions_not_joined(rows: list[dict], fixes: list[tuple[int, str, str]], times: list[int]) -> list[str]:
+    """Rows of kpi.csv or cellinfo.csv whose lat and lon are not the nearest fix within 5 s of their time_epoch."""
+    wrong = []
+    for line, row in enumerate(rows, 2):
+        position = (row["lat"], row["lon"]) if row["lat"] else None
+        allowed = acceptable_positions(fixes, times, epoch_ms(row["time_epoch"]))
+        if position not in allowed:
+            wrong.append("line %d: %s, expected one of %s" % (line, position, sorted(allowed, key=str)[:2]))
+    return wrong
+
+
+def check_kpi(kpi: list[dict], cellinfo: list[dict], fixes: list, fix_times: list[int], walk_seconds: int, r: Results) -> None:
+    """kpi.csv of a walk whose modem reports LTE or NR cells."""
+    minimum = walk_seconds // MODEM_REPORT_S - 3
+    r.check("kpi.csv: fresh rows for the walk", len(kpi) >= minimum,
+            "%d rows, at least %d expected from a %d s modem report interval" % (len(kpi), minimum, MODEM_REPORT_S))
+    comments = [KPI_COMMENT.fullmatch(row["comment"]) for row in kpi]
+    r.check("kpi.csv: every comment gives the sample's age and source", all(comments),
+            [line for line, match in enumerate(comments, 2) if not match][:5])
+    ages = [int(match.group(1)) for match in comments if match]
+    r.check("kpi.csv: no sample older than %d ms" % KPI_MAX_AGE_MS, all(age <= KPI_MAX_AGE_MS for age in ages),
+            "oldest %s ms" % (max(ages) if ages else None))
+    keys = [(row["rat"], row["pci"], row["time_epoch"]) for row in kpi]
+    duplicated = sorted(key for key, count in Counter(keys).items() if count > 1)
+    r.check("kpi.csv: no modem timestamp twice for the same cell", not duplicated, duplicated[:5])
+    fresh_serving = {
+        (row["rat"], row["pci"], row["time_epoch"]) for row in cellinfo
+        if row["stale"] == "0" and (row["connection_status"] in ("1", "2") or (row["connection_status"] == "" and row["registered"] == "1"))
+    }
+    not_fresh = [key for key in keys if key not in fresh_serving]
+    r.check("kpi.csv: every row is a fresh serving-cell measurement in cellinfo.csv", not not_fresh, not_fresh[:5])
+    rsrp = sorted({row["rsrp_dbm"] for row in kpi if row["rsrp_dbm"]}, key=float)
+    r.check("kpi.csv: RSRP follows the signal-profile changes", len(rsrp) >= 3, rsrp)
+    positioned = [row for row in kpi if row["lat"] and row["lon"]]
+    r.check("kpi.csv: rows carry lat and lon", positioned, "%d of %d rows" % (len(positioned), len(kpi)))
+    halves = [line for line, row in enumerate(kpi, 2) if bool(row["lat"]) != bool(row["lon"])]
+    r.check("kpi.csv: lat and lon are filled together", not halves, halves[:5])
+    wrong = positions_not_joined(kpi, fixes, fix_times)
+    r.check("kpi.csv: each position is the nearest fix within 5 s", not wrong, wrong[:3])
+
+
+def check_without_lte_nr(kpi: list[dict], cells: list[dict], cellinfo: list[dict], fixes: list, fix_times: list[int],
+                         r: Results) -> None:
+    """A walk whose modem reports no LTE or NR cell: nothing may pass for a measurement, and the raw log stays whole."""
+    rats = dict(Counter(row["rat"] for row in cellinfo))
+    r.check("cellinfo.csv: logs the cells Android reports, none LTE or NR",
+            cellinfo and not any(row["rat"] in ("lte", "nr") for row in cellinfo), "%d rows, %s" % (len(cellinfo), rats))
+    r.check("kpi.csv: no rows without an LTE or NR serving cell", not kpi, "%d rows" % len(kpi))
+    r.check("cells.csv: no serving cells without an LTE or NR serving cell", not cells, "%d rows" % len(cells))
+    positioned = [row for row in cellinfo if row["lat"] and row["lon"]]
+    r.check("cellinfo.csv: rows carry lat and lon", positioned, "%d of %d rows" % (len(positioned), len(cellinfo)))
+    wrong = positions_not_joined(cellinfo, fixes, fix_times)
+    r.check("cellinfo.csv: each position is the nearest fix within 5 s", not wrong, wrong[:3])
+
+
+def check_walk(out: Path, repo: Path, walk_seconds: int, expect_lte_nr: bool, r: Results) -> None:
     result_path = out / "device" / "walk-result.json"
     if not r.check("walk: the test wrote its result", result_path.is_file(), result_path):
         return
@@ -373,44 +428,18 @@ def check_walk(out: Path, repo: Path, walk_seconds: int, r: Results) -> None:
             and privacy.get("zone_pauses") == 0 and privacy.get("consent_version") == version
             and HEX64.fullmatch(privacy.get("consent_sha256") or ""), "%s (consent in the app: %s)" % (privacy, version))
 
-    # kpi.csv
-    minimum = walk_seconds // MODEM_REPORT_S - 3
-    r.check("kpi.csv: fresh rows for the walk", len(kpi) >= minimum,
-            "%d rows, at least %d expected from a %d s modem report interval" % (len(kpi), minimum, MODEM_REPORT_S))
-    comments = [KPI_COMMENT.fullmatch(row["comment"]) for row in kpi]
-    r.check("kpi.csv: every comment gives the sample's age and source", all(comments),
-            [line for line, match in enumerate(comments, 2) if not match][:5])
-    ages = [int(match.group(1)) for match in comments if match]
-    r.check("kpi.csv: no sample older than %d ms" % KPI_MAX_AGE_MS, all(age <= KPI_MAX_AGE_MS for age in ages),
-            "oldest %s ms" % (max(ages) if ages else None))
-    keys = [(row["rat"], row["pci"], row["time_epoch"]) for row in kpi]
-    duplicated = sorted(key for key, count in Counter(keys).items() if count > 1)
-    r.check("kpi.csv: no modem timestamp twice for the same cell", not duplicated, duplicated[:5])
-    fresh_serving = {
-        (row["rat"], row["pci"], row["time_epoch"]) for row in cellinfo
-        if row["stale"] == "0" and (row["connection_status"] in ("1", "2") or (row["connection_status"] == "" and row["registered"] == "1"))
-    }
-    not_fresh = [key for key in keys if key not in fresh_serving]
-    r.check("kpi.csv: every row is a fresh serving-cell measurement in cellinfo.csv", not not_fresh, not_fresh[:5])
+    # kpi.csv, cells.csv and cellinfo.csv, by what the modem reports
+    r.check("walk: the test ran with the host's LTE and NR expectation", result.get("expect_lte_nr") is expect_lte_nr,
+            "test %s, host %s" % (result.get("expect_lte_nr"), expect_lte_nr))
+    fixes = sorted((utc_ms(row["time_utc"]), row["lat"], row["lon"]) for row in track)
+    fix_times = [fix[0] for fix in fixes]
     measurements = [(row["rat"], row["pci"], row["arfcn"], row["cell_id"], row["timestamp_ms"]) for row in cellinfo if row["stale"] == "0"]
     logged_twice = sorted(key for key, count in Counter(measurements).items() if count > 1)
     r.check("cellinfo.csv: a measurement is fresh only once", not logged_twice, logged_twice[:5])
-    rsrp = sorted({row["rsrp_dbm"] for row in kpi if row["rsrp_dbm"]}, key=float)
-    r.check("kpi.csv: RSRP follows the signal-profile changes", len(rsrp) >= 3, rsrp)
-
-    fixes = sorted((utc_ms(row["time_utc"]), row["lat"], row["lon"]) for row in track)
-    fix_times = [fix[0] for fix in fixes]
-    positioned = [row for row in kpi if row["lat"] and row["lon"]]
-    r.check("kpi.csv: rows carry lat and lon", positioned, "%d of %d rows" % (len(positioned), len(kpi)))
-    halves = [line for line, row in enumerate(kpi, 2) if bool(row["lat"]) != bool(row["lon"])]
-    r.check("kpi.csv: lat and lon are filled together", not halves, halves[:5])
-    wrong = []
-    for line, row in enumerate(kpi, 2):
-        position = (row["lat"], row["lon"]) if row["lat"] else None
-        allowed = acceptable_positions(fixes, fix_times, epoch_ms(row["time_epoch"]))
-        if position not in allowed:
-            wrong.append("line %d: %s, expected one of %s" % (line, position, sorted(allowed, key=str)[:2]))
-    r.check("kpi.csv: each position is the nearest fix within 5 s", not wrong, wrong[:3])
+    if expect_lte_nr:
+        check_kpi(kpi, cellinfo, fixes, fix_times, walk_seconds, r)
+    else:
+        check_without_lte_nr(kpi, cells, cellinfo, fixes, fix_times, r)
 
     # track.csv against the walk the host injected
     offset_path = out / "checks" / "clock-offset-ms.txt"
@@ -438,8 +467,12 @@ def check_walk(out: Path, repo: Path, walk_seconds: int, r: Results) -> None:
 
     # events.csv
     serving = [e for e in events if e["kind"] == "serving_cell"]
-    r.check("events.csv: serving_cell with its PCI and ARFCN", serving and all(e["pci"] and e["arfcn"] for e in serving),
-            [(e["time_utc"], e["rat"], e["pci"], e["arfcn"]) for e in serving][:4])
+    if expect_lte_nr:
+        r.check("events.csv: serving_cell with its PCI and ARFCN", serving and all(e["pci"] and e["arfcn"] for e in serving),
+                [(e["time_utc"], e["rat"], e["pci"], e["arfcn"]) for e in serving][:4])
+    else:
+        r.check("events.csv: no serving_cell without an LTE or NR serving cell", not serving,
+                [(e["time_utc"], e["rat"]) for e in serving][:4])
     markers = [e for e in events if e["kind"] == "marker"]
     r.check("events.csv: the marker with its note", len(markers) == 1 and markers[0]["detail"] == result.get("marker_note")
             and markers[0]["rat"] == "-" and markers[0]["severity"] == "info"
@@ -574,7 +607,9 @@ def check_screenshots(out: Path, r: Results) -> None:
 def cmd_check(args: argparse.Namespace) -> int:
     out, repo = Path(args.out), Path(args.repo)
     r = Results()
-    check_walk(out, repo, args.walk_seconds, r)
+    expect_lte_nr = args.expect_lte_nr == "true"
+    print("expect LTE and NR cells: %s" % expect_lte_nr)
+    check_walk(out, repo, args.walk_seconds, expect_lte_nr, r)
     check_recovered(out, repo, r)
     check_screenshots(out, r)
     failures = r.failures
@@ -604,6 +639,8 @@ def main(argv: Optional[list] = None) -> int:
     check.add_argument("--out", required=True)
     check.add_argument("--repo", required=True)
     check.add_argument("--walk-seconds", type=int, default=180)
+    check.add_argument("--expect-lte-nr", choices=("true", "false"), default="true",
+                       help="false when the modem reports no LTE or NR cell (run_e2e.sh reads it from the registry)")
     check.set_defaults(func=cmd_check)
     args = parser.parse_args(argv)
     return args.func(args)
