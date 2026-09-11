@@ -2,15 +2,18 @@ package com.fieldtap.e2e
 
 import android.os.Build
 import android.os.SystemClock
+import android.view.WindowManager
 import androidx.annotation.StringRes
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasAnyChild
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasParent
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
@@ -18,6 +21,7 @@ import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
@@ -80,6 +84,7 @@ class EndToEndWalkTest {
         allowPermissions()
         screens.awaitLiveRadio(expectLteNr)
         screens.shot("04-live-radio")
+        checkWalkMode()
         saveTestSettings()
         val dirName = startSession()
         val recordingSinceMs = SystemClock.elapsedRealtime()
@@ -176,6 +181,43 @@ class EndToEndWalkTest {
         assertEquals(SESSION_BUDGET_MB * 1_000_000L, tests.sessionBudgetBytes)
         screens.back()
         screens.awaitText(R.string.live_title)
+    }
+
+    /**
+     * Walk mode keeps the screen on and leaves its brightness to the phone: a window brightness overrides adaptive
+     * brightness, and a fixed dim level is unreadable outdoors. Turned off again, the screen may sleep.
+     */
+    private fun checkWalkMode() {
+        val walkMode = isToggleable() and hasText(E2e.string(R.string.live_walk_mode))
+        screens.scrollTo(walkMode)
+        if (screens.isOn(walkMode)) screens.click(walkMode)
+        screens.click(walkMode)
+        compose.onAllNodes(walkMode).onFirst().assertIsOn()
+        compose.waitForIdle()
+        var keepsScreenOn = false
+        var brightness = 0f
+        compose.runOnUiThread {
+            val attributes = compose.activity.window.attributes
+            keepsScreenOn = attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0
+            brightness = attributes.screenBrightness
+        }
+        screens.shot("04b-walk-mode")
+        screens.click(walkMode)
+        compose.onAllNodes(walkMode).onFirst().assertIsOff()
+        compose.waitForIdle()
+        var stillKeptOn = true
+        compose.runOnUiThread {
+            stillKeptOn = compose.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0
+        }
+        compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(0)
+        compose.waitForIdle()
+        result["walk_mode_keeps_screen_on"] = keepsScreenOn
+        result["walk_mode_brightness_override"] = brightness != WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        result["walk_mode_clears_keep_screen_on"] = !stillKeptOn
+        save()
+        assertTrue("Walk mode did not keep the screen on", keepsScreenOn)
+        assertEquals("Walk mode set the window brightness", WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE, brightness, 0f)
+        assertFalse("Turning walk mode off left the screen kept on", stillKeptOn)
     }
 
     /** Starts the session from the Start dialog, through the pre-start sheet when it shows; returns its directory. */

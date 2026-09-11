@@ -78,6 +78,31 @@ jobs:
           fi
           echo "OK: ${release_apk##*/} has no com.fieldtap.debug entry; ${debug_apk##*/} has the hook"
 
+      # R8 shrinks the release build, so a class or resource it removed wrongly shows only when that build runs. The
+      # emulator job installs and launches it. It is signed here with a key made for this run and deleted at once: no
+      # keystore or password is kept anywhere.
+      - name: Sign the minified release APK for the emulator smoke test
+        run: |
+          test -s app/build/outputs/mapping/release/mapping.txt || { echo "R8 did not run: no mapping.txt"; exit 1; }
+          build_tools="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -n 1)"
+          pass="$(openssl rand -hex 24)"
+          keytool -genkeypair -keystore "$RUNNER_TEMP/smoke.jks" -storetype PKCS12 -storepass "$pass" -keypass "$pass" \
+            -alias smoke -keyalg RSA -keysize 2048 -validity 2 -dname "CN=FieldTap CI smoke test" > /dev/null
+          mkdir -p "$RUNNER_TEMP/release"
+          "${build_tools}apksigner" sign --ks "$RUNNER_TEMP/smoke.jks" --ks-pass "pass:$pass" --ks-key-alias smoke \
+            --out "$RUNNER_TEMP/release/app-release-smoke.apk" app/build/outputs/apk/release/app-release-unsigned.apk
+          rm -f "$RUNNER_TEMP/smoke.jks"
+          "${build_tools}apksigner" verify "$RUNNER_TEMP/release/app-release-smoke.apk"
+          echo "release APK: $(stat -c %s app/build/outputs/apk/release/app-release-unsigned.apk) bytes after R8"
+
+      - name: Upload the release APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-apk
+          path: ${{ runner.temp }}/release/app-release-smoke.apk
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload APKs
         uses: actions/upload-artifact@v7
         with:
@@ -119,6 +144,11 @@ jobs:
           name: apks
           path: ${{ runner.temp }}/apks
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-apk
+          path: ${{ runner.temp }}/release-apk
+
       # fieldtap validate and fieldtap report, and android/e2e/check_e2e.py (standard library only).
       - uses: actions/setup-python@v7
         with:
@@ -137,6 +167,8 @@ jobs:
           APK_DIR: ${{ runner.temp }}/apks
           E2E_OUT: ${{ runner.temp }}/e2e
           PROBE_OUT: ${{ runner.temp }}/emulator-probe
+          RELEASE_APK_DIR: ${{ runner.temp }}/release-apk
+          RELEASE_OUT: ${{ runner.temp }}/release-smoke
           PYTHON: python
           WALK_SECONDS: "180"
         with:
@@ -152,6 +184,7 @@ jobs:
           script: |
             bash android/e2e/run_e2e.sh
             bash android/e2e/probe.sh
+            bash android/e2e/release_smoke.sh
 
       - name: Summary
         if: always()
@@ -205,6 +238,15 @@ jobs:
             ${{ runner.temp }}/e2e/checks/
             ${{ runner.temp }}/e2e/device/*.json
           if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload release smoke test output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-smoke-api${{ matrix.api }}
+          path: ${{ runner.temp }}/release-smoke
+          if-no-files-found: ignore
           retention-days: 30
 
       - name: Upload probe output

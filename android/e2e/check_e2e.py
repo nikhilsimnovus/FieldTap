@@ -374,6 +374,56 @@ def check_without_lte_nr(kpi: list[dict], cells: list[dict], cellinfo: list[dict
     r.check("cellinfo.csv: each position is the nearest fix within 5 s", not wrong, wrong[:3])
 
 
+FIVE_G_SHOWN = re.compile(r"TelephonyDisplayInfo \{network=NR[,}]|overrideNetwork=(NR_NSA|NR_NSA_MMWAVE|NR_ADVANCED)[,}]")
+
+
+def five_g_icon_shown(snapshot: Path):
+    """From a telephony_snapshot: True when the registry's display info shows the 5G icon, False when not, None when unknown."""
+    if not snapshot.is_file():
+        return None
+    line = next((line for line in snapshot.read_text(encoding="utf-8", errors="replace").splitlines()
+                 if "mTelephonyDisplayInfo=TelephonyDisplayInfo" in line), None)
+    return None if line is None else bool(FIVE_G_SHOWN.search(line))
+
+
+def check_gaps_inside(label: str, meta: dict, r: Results) -> None:
+    """No collection.gaps entry begins before the session: a sample measured before the start is no gap reference."""
+    started = utc_ms(meta["started_utc"])
+    gaps = (meta.get("collection") or {}).get("gaps") or []
+    early = [gap for gap in gaps if utc_ms(gap["start_utc"]) < started]
+    r.check("%s: no sampling gap begins before the session started" % label, not early, early[:3])
+
+
+def check_counts_from_rows(label: str, meta: dict, kpi: list, cellinfo: list, cells: list, events: list, r: Results) -> None:
+    """summary.plmns, cells.csv and collection agree with the rows the session holds, however early it was killed."""
+    serving = {}
+    for row in cellinfo:
+        if row["stale"] == "0" and row["connection_status"] in ("1", "2"):
+            serving.setdefault((row["rat"], row["pci"], row["time_epoch"]), row["plmn"])
+    by_plmn = Counter()
+    placed = 0
+    for row in kpi:
+        key = (row["rat"], row["pci"], row["time_epoch"])
+        if key in serving:
+            placed += 1
+            if serving[key]:
+                by_plmn[serving[key]] += 1
+    plmns = {key: value for key, value in ((meta.get("summary") or {}).get("plmns") or {}).items() if value}
+    r.check("%s: summary.plmns counts the kpi.csv rows the session holds" % label, plmns == dict(by_plmn),
+            "session.json %s, kpi.csv %s" % (plmns, dict(by_plmn)))
+    samples = sum(int(row["samples"]) for row in cells)
+    r.check("%s: cells.csv accounts for every kpi.csv row" % label, samples == placed,
+            "cells.csv %d samples, %d kpi.csv rows of a serving cell" % (samples, placed))
+    collection = meta.get("collection") or {}
+    fresh = collection.get("fresh_samples") or 0
+    r.check("%s: collection.fresh_samples counts the fresh answers the session holds" % label, fresh >= (1 if kpi else 0),
+            "fresh_samples %s, kpi rows %d" % (fresh, len(kpi)))
+    gap_events = [e for e in events if e["kind"] == "sampling_gap"]
+    gaps = collection.get("gaps") or []
+    r.check("%s: collection has one gap per sampling_gap event" % label, len(gaps) == len(gap_events),
+            "%d gaps, %d events" % (len(gaps), len(gap_events)))
+
+
 def check_walk(out: Path, repo: Path, walk_seconds: int, expect_lte_nr: bool, r: Results) -> None:
     result_path = out / "device" / "walk-result.json"
     if not r.check("walk: the test wrote its result", result_path.is_file(), result_path):
@@ -426,6 +476,19 @@ def check_walk(out: Path, repo: Path, walk_seconds: int, expect_lte_nr: bool, r:
     gap_events = [e for e in events if e["kind"] == "sampling_gap"]
     r.check("collection: one gap per sampling_gap event", isinstance(gaps, list) and len(gaps) == len(gap_events),
             "%s gaps, %d events" % (len(gaps) if isinstance(gaps, list) else gaps, len(gap_events)))
+    check_gaps_inside("walk", meta, r)
+    # Android delivers display info once, when the Live screen registered its listeners; the session starts later.
+    shown = five_g_icon_shown(out / "checks" / "telephony-before-walk.txt")
+    icon = [(e["time_utc"], e["title"]) for e in events if e["kind"] == "nr_display"]
+    if shown:
+        r.check("events.csv: the 5G icon the session started with (nr_display)", icon and icon[0][1] == "5G icon on", icon[:3])
+    elif shown is False:
+        r.check("events.csv: no 5G icon event while the phone shows none", not icon or icon[0][1] == "5G icon on", icon[:3])
+    r.check("walk mode: keeps the screen on, leaves brightness to the phone, and clears the flag when turned off",
+            result.get("walk_mode_keeps_screen_on") is True and result.get("walk_mode_brightness_override") is False
+            and result.get("walk_mode_clears_keep_screen_on") is True,
+            "keep screen on %s, brightness override %s, cleared %s" % (result.get("walk_mode_keeps_screen_on"),
+            result.get("walk_mode_brightness_override"), result.get("walk_mode_clears_keep_screen_on")))
     privacy = meta.get("privacy") or {}
     version = consent_version(repo)
     r.check("session.json: privacy", privacy.get("data_class") == "kpi" and privacy.get("location_precision") == "full"
@@ -558,6 +621,9 @@ def check_recovered(out: Path, repo: Path, r: Results) -> None:
             continue
         meta = read_json(session / "session.json")
         events = read_csv(session / "events.csv")
+        check_counts_from_rows(scenario, meta, read_csv(session / "kpi.csv"), read_csv(session / "cellinfo.csv"),
+                               read_csv(session / "cells.csv"), events, r)
+        check_gaps_inside(scenario, meta, r)
         dump = out / "checks" / ("exit-info-%s.txt" % scenario)
         expected = exit_token(dump.read_text(encoding="utf-8", errors="replace"), int(pid)) if dump.is_file() else None
         r.check("%s: Android recorded an exit for pid %s" % (scenario, pid), expected is not None, expected)
@@ -591,8 +657,9 @@ def check_recovered(out: Path, repo: Path, r: Results) -> None:
         else:
             window = out / "recovery" / "force_stop-relaunch.xml"
             text = window.read_text(encoding="utf-8", errors="replace") if window.is_file() else ""
+            name = meta.get("name") or dir_name
             r.check("force_stop: Live named the interrupted session after the relaunch",
-                    'text="%s"' % title in text and dir_name in text, window)
+                    'text="%s"' % title in text and name in text, window)
 
 
 def is_png(path: Path) -> bool:

@@ -30,6 +30,17 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    buildTypes {
+        release {
+            // R8 shrinks and optimises the release build: a far smaller download than the unshrunk 28 MB, and a faster
+            // cold start. CI installs and launches the minified APK on both emulators (android/e2e/release_smoke.sh), so
+            // a class R8 removed wrongly fails there instead of on a phone.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
     // Java 17 bytecode; with built-in Kotlin, Kotlin's jvmTarget follows targetCompatibility.
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
