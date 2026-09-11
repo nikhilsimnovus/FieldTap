@@ -288,6 +288,27 @@ internal object LocationValues {
     fun wallTimeOf(fixElapsedMs: Long, observedWallMs: Long, observedElapsedMs: Long): Long =
         observedWallMs - (observedElapsedMs - fixElapsedMs)
 
+    /** How far a fix time may run ahead of the callback that delivered it, for the step between two clocks' readings. */
+    const val FIX_CLOCK_TOLERANCE_MS: Long = 1_000
+
+    /** The oldest a delivered fix may be: far beyond Android's location batching and the 60 s GPS join buffer. */
+    const val MAX_FIX_AGE_MS: Long = 3_600_000
+
+    /**
+     * The fix time on the monotonic clock, in milliseconds. A `getElapsedRealtimeNanos()` that is not positive, runs more
+     * than [FIX_CLOCK_TOLERANCE_MS] ahead of the callback, or is more than [MAX_FIX_AGE_MS] older is not a time since
+     * boot: the API 31 emulator's GNSS reports wall-clock nanoseconds there, which put every fix 57 years ahead and left
+     * every measurement without a position. Such a fix takes the callback's elapsed time, the nearest instant the app can
+     * trust, so the track and the GPS join stay on one clock. A plausible time, even an old one, is kept as reported.
+     */
+    fun fixElapsedMillis(fixElapsedNanos: Long, observedElapsedMs: Long): Long {
+        val reported = elapsedMillis(fixElapsedNanos)
+        val plausible = reported > 0 &&
+            reported <= observedElapsedMs + FIX_CLOCK_TOLERANCE_MS &&
+            observedElapsedMs - reported <= MAX_FIX_AGE_MS
+        return if (plausible) reported else observedElapsedMs
+    }
+
     /** A float as the decimal it prints as, so 4.7f becomes 4.7 and not 4.699999809265137. */
     fun decimal(value: Float): Double = value.toString().toDouble()
 
@@ -309,7 +330,7 @@ internal object LocationValues {
         observedElapsedMs: Long,
     ): FixSample? {
         val provider = providerOf(providerName) ?: return null
-        val fixElapsedMs = elapsedMillis(fixElapsedNanos)
+        val fixElapsedMs = fixElapsedMillis(fixElapsedNanos, observedElapsedMs)
         return FixSample(
             elapsedMs = fixElapsedMs,
             wallMs = wallTimeOf(fixElapsedMs, observedWallMs, observedElapsedMs),

@@ -51,6 +51,42 @@ class LocationValuesTest {
     }
 
     @Test
+    fun aFixTimeThatIsNotTimeSinceBootTakesTheCallbacksTime() {
+        // The API 31 emulator reports wall-clock nanoseconds: 57 years ahead of the callback's elapsed time.
+        assertEquals(106_020L, LocationValues.fixElapsedMillis(fixElapsedNanos = 1_789_117_303_614_000_000L, observedElapsedMs = 106_020L))
+        // Just past the tolerance ahead, just past the maximum age, zero: the callback's time.
+        val tooFarAhead = (50_000L + LocationValues.FIX_CLOCK_TOLERANCE_MS + 1) * 1_000_000
+        assertEquals(50_000L, LocationValues.fixElapsedMillis(tooFarAhead, observedElapsedMs = 50_000L))
+        val tooOld = (4_000_000L - LocationValues.MAX_FIX_AGE_MS - 1) * 1_000_000
+        assertEquals(4_000_000L, LocationValues.fixElapsedMillis(tooOld, observedElapsedMs = 4_000_000L))
+        assertEquals(50_000L, LocationValues.fixElapsedMillis(0L, observedElapsedMs = 50_000L))
+        // Plausible times stay as reported: a second old, at the tolerance ahead, exactly the maximum age.
+        assertEquals(49_000L, LocationValues.fixElapsedMillis(49_000_000_000L, observedElapsedMs = 50_000L))
+        assertEquals(51_000L, LocationValues.fixElapsedMillis(51_000_000_000L, observedElapsedMs = 50_000L))
+        assertEquals(400_000L, LocationValues.fixElapsedMillis(400_000_000_000L, observedElapsedMs = 400_000L + LocationValues.MAX_FIX_AGE_MS))
+    }
+
+    @Test
+    fun aFixWithAnInvalidTimeIsStampedWhenItArrived() {
+        val fix = LocationValues.fix(
+            providerName = "gps",
+            fixElapsedNanos = 1_789_117_303_614_000_000L,
+            lat = 12.9725050,
+            lon = 77.5945983,
+            accuracyM = 5.0f,
+            altitudeM = 921.9,
+            speedMps = 0.0f,
+            mock = false,
+            observedWallMs = 1_789_117_303_700L,
+            observedElapsedMs = 106_020L,
+        )
+
+        requireNotNull(fix)
+        assertEquals(106_020L, fix.elapsedMs)
+        assertEquals(1_789_117_303_700L, fix.wallMs)
+    }
+
+    @Test
     fun floatsBecomeTheDecimalTheyPrintAs() {
         assertEquals(4.7, LocationValues.decimal(4.7f), 0.0)
         assertEquals(0.25, LocationValues.decimal(0.25f), 0.0)

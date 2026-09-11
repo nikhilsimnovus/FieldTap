@@ -13,7 +13,9 @@ import com.fieldtap.format.FixProvider
  * One `android.location.Location` from `LocationManager` (GPS, fused or network provider).
  *
  * - [elapsedMs]: `Location.getElapsedRealtimeMillis()`, the fix time on the monotonic clock; the
- *   GPS join uses only this.
+ *   GPS join uses only this. A reported time that is not positive, runs ahead of the callback, or is more than
+ *   an hour older is not a time since boot (the API 31 emulator reports wall-clock nanoseconds); the adapter
+ *   then uses the callback's elapsed time.
  * - [wallMs]: the same instant on the app's wall clock,
  *   `observedWallMs - (observedElapsedMs - elapsedMs)`. `track.csv` `time_utc` is this, not
  *   `Location.getTime()`, so track and measurement times share one clock.
