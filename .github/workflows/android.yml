@@ -1,5 +1,5 @@
-# Android CI: unit tests and the debug APK, then a probe of what a real emulator's
-# radio, location and networks provide (uploaded as the emulator-probe artifact).
+# Android CI: unit tests, lint and the APKs, then the end-to-end proof on emulators at API 36 and API 31
+# (android/e2e/run_e2e.sh), followed by a probe of what each emulator's radio, location and networks provide.
 name: Android
 
 on:
@@ -98,10 +98,19 @@ jobs:
             android/*/build/test-results/
           if-no-files-found: ignore
 
+  # The end-to-end proof, android/e2e/run_e2e.sh: the real UI from first run to a shared zip while a GPS walk and signal
+  # changes are fed, process death and recovery, screenshots of every screen in light, dark and font scale 1.3, and
+  # fieldtap validate and report on every session. API 36 is the version the app targets and must pass; API 31 is its
+  # minSdk. The capability probe runs after the proof has passed, on the same emulator.
   emulator:
+    name: emulator (API ${{ matrix.api }})
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [36, 31]
     steps:
       - uses: actions/checkout@v7
 
@@ -110,6 +119,11 @@ jobs:
           name: apks
           path: ${{ runner.temp }}/apks
 
+      # fieldtap validate and fieldtap report, and android/e2e/check_e2e.py (standard library only).
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
       # Exactly as the reactivecircus/android-emulator-runner README documents.
       - name: Enable KVM
         run: |
@@ -117,26 +131,16 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      # API 36 google_apis x86_64, or API 35 if Google stops offering that image.
-      - name: Choose system image
-        id: image
-        shell: bash
-        run: |
-          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          [ -x "$sdkmanager" ] || sdkmanager=sdkmanager
-          "$sdkmanager" --list > "$RUNNER_TEMP/sdk-list.txt" 2>&1 || true
-          grep -E 'system-images;android-3[56];google_apis;x86_64' "$RUNNER_TEMP/sdk-list.txt" || true
-          if grep -q 'system-images;android-36;google_apis;x86_64' "$RUNNER_TEMP/sdk-list.txt"; then api=36; else api=35; fi
-          echo "Using API $api"
-          echo "api=$api" >> "$GITHUB_OUTPUT"
-
-      - name: Probe the emulator
+      - name: End-to-end proof on API ${{ matrix.api }}
         uses: reactivecircus/android-emulator-runner@v2
         env:
           APK_DIR: ${{ runner.temp }}/apks
+          E2E_OUT: ${{ runner.temp }}/e2e
           PROBE_OUT: ${{ runner.temp }}/emulator-probe
+          PYTHON: python
+          WALK_SECONDS: "180"
         with:
-          api-level: ${{ steps.image.outputs.api }}
+          api-level: ${{ matrix.api }}
           target: google_apis
           arch: x86_64
           cores: 3
@@ -144,13 +148,70 @@ jobs:
           disk-size: 8G
           emulator-options: "-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none"
           disable-animations: true
-          script: bash android/e2e/probe.sh
+          # The runner runs each line on its own and stops at the first that fails.
+          script: |
+            bash android/e2e/run_e2e.sh
+            bash android/e2e/probe.sh
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          summary="$RUNNER_TEMP/e2e/summary.txt"
+          { echo "### End-to-end proof, API ${{ matrix.api }}"; echo '```'; cat "$summary" 2>/dev/null || echo "no summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sessions and reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-sessions-api${{ matrix.api }}
+          path: |
+            ${{ runner.temp }}/e2e/sessions/
+            ${{ runner.temp }}/e2e/device/*.zip
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-screenshots-api${{ matrix.api }}
+          path: |
+            ${{ runner.temp }}/e2e/device/screenshots/
+            ${{ runner.temp }}/e2e/device/failures/
+            ${{ runner.temp }}/e2e/recovery/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload logcat
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-logcat-api${{ matrix.api }}
+          path: ${{ runner.temp }}/e2e/logcat/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-reports-api${{ matrix.api }}
+          path: |
+            ${{ runner.temp }}/e2e/summary.txt
+            ${{ runner.temp }}/e2e/e2e.log
+            ${{ runner.temp }}/e2e/instrumentation/
+            ${{ runner.temp }}/e2e/validate/
+            ${{ runner.temp }}/e2e/checks/
+            ${{ runner.temp }}/e2e/device/*.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Upload probe output
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: emulator-probe
+          name: emulator-probe-api${{ matrix.api }}
           path: ${{ runner.temp }}/emulator-probe
-          if-no-files-found: warn
+          if-no-files-found: ignore
           retention-days: 30
