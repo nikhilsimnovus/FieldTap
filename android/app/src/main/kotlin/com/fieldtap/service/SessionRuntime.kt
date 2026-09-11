@@ -192,6 +192,8 @@ class SessionRuntime internal constructor(
     private var pendingStopCause: StopCause? = null
     private var soak: SoakRun? = null
     private var soakWatchdog: Job? = null
+    private val mutableMarkNotice = MutableStateFlow<MarkNotice?>(null)
+    private var markNoticeJob: Job? = null
 
     val state: StateFlow<SessionState> = mutableState.asStateFlow()
 
@@ -204,6 +206,13 @@ class SessionRuntime internal constructor(
     val lastOutcome: StateFlow<SessionOutcome?> = mutableLastOutcome.asStateFlow()
 
     val soakState: StateFlow<SoakState> = mutableSoak.asStateFlow()
+
+    /**
+     * What the session notification says about markers, for [MARK_NOTICE_MS] after each: the number and time of a marker
+     * just accepted, from the notification or from Live, that it waits for a location fix, or that markers were dropped.
+     * Null otherwise, and as soon as the session ends.
+     */
+    internal val markNotice: StateFlow<MarkNotice?> = mutableMarkNotice.asStateFlow()
 
     /**
      * Applies a lifecycle command from outside the runtime. Only [SessionCommand.Stop] is accepted, on the same
@@ -242,14 +251,24 @@ class SessionRuntime internal constructor(
         }
     }
 
-    /** [SessionControl.mark]: false, and nothing written, unless recording and outside a privacy zone. */
+    /**
+     * [SessionControl.mark]: false, and nothing written, unless recording and outside a privacy zone. An accepted marker
+     * takes the session's next number, counting from 1 whether it was marked on Live or from the notification, and
+     * [markNotice] says it was added at its time, or, while inputs wait for a location fix, that it is kept until one comes.
+     */
     fun mark(note: String?): Boolean = synchronized(lock) {
         val session = active
-        if (session == null || mutableState.value.phase != SessionPhase.RECORDING || session.recorder.snapshot.value.paused) {
+        val snapshot = session?.recorder?.snapshot?.value
+        if (session == null || snapshot == null || mutableState.value.phase != SessionPhase.RECORDING || snapshot.paused) {
             false
         } else {
             val text = note?.trim()?.takeIf { it.isNotEmpty() }
-            session.recorder.submit(RecorderCommand.Mark(text, clock.wallMillis()))
+            val wallMs = clock.wallMillis()
+            session.recorder.submit(RecorderCommand.Mark(text, wallMs))
+            session.marks++
+            // As Live says it: a pause may still drop a marker taken while inputs wait for a fix.
+            val waits = snapshot.holdingInputs || snapshot.waitingForLocation
+            showMarkNotice(if (waits) MarkNotice.Held(session.dirName, session.marks) else MarkNotice.Added(session.dirName, session.marks, wallMs))
             true
         }
     }
@@ -569,7 +588,21 @@ class SessionRuntime internal constructor(
         locked {
             if (active !== session) return
             mutableSnapshot.value = snapshot
+            if (snapshot.markersDropped > session.markersDroppedSaid) {
+                showMarkNotice(MarkNotice.Dropped(session.dirName, snapshot.markersDropped - session.markersDroppedSaid))
+                session.markersDroppedSaid = snapshot.markersDropped
+            }
             publishStatus()
+        }
+    }
+
+    /** Shows [notice] for [MARK_NOTICE_MS], unless a newer one replaces it first. Called under the lock. */
+    private fun showMarkNotice(notice: MarkNotice) {
+        mutableMarkNotice.value = notice
+        markNoticeJob?.cancel()
+        markNoticeJob = scope.launch {
+            delay(MARK_NOTICE_MS)
+            locked { if (mutableMarkNotice.value === notice) mutableMarkNotice.value = null }
         }
     }
 
@@ -659,6 +692,9 @@ class SessionRuntime internal constructor(
         startWatchdog = null
         session.cancelCollectors()
         mutableSnapshot.value = null
+        markNoticeJob?.cancel()
+        markNoticeJob = null
+        mutableMarkNotice.value = null
     }
 
     private fun discardQuietly(prepared: PreparedSession) {
@@ -808,6 +844,12 @@ class SessionRuntime internal constructor(
         var testsJob: Job? = null
         var runJob: Job? = null
 
+        /** Markers accepted so far: the number of the newest. */
+        var marks: Int = 0
+
+        /** The dropped-marker count a notice has already said. */
+        var markersDroppedSaid: Int = 0
+
         fun cancelCollectors() {
             snapshotJob?.cancel()
             inputJob?.cancel()
@@ -822,6 +864,9 @@ class SessionRuntime internal constructor(
     companion object {
         /** How long a start or soak waits for [SessionService] to report before it fails. */
         const val SERVICE_START_TIMEOUT_MS: Long = 10_000
+
+        /** How long the notification says what became of a marker; it is rebuilt at most every 2 s, so this shows at least 4 s. */
+        const val MARK_NOTICE_MS: Long = 6_000
 
         private const val SOAK_TICK_MS: Long = 1_000
         private const val SERVICE_DID_NOT_START = "service did not start"

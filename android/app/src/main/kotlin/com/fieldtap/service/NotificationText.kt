@@ -17,18 +17,39 @@ internal sealed interface NotificationModel {
 
     data object Starting : NotificationModel
 
-    data class Recording(val snapshot: RecorderSnapshot) : NotificationModel
+    data class Recording(val snapshot: RecorderSnapshot, val notice: MarkNotice? = null) : NotificationModel
 
     data class Soak(val elapsedMs: Long, val durationMs: Long) : NotificationModel
 
     companion object {
-        fun of(status: SessionStatus, soak: SoakState): NotificationModel = when (status) {
+        /** [notice] only on a recording session's notification; a session that is saving says so instead. */
+        fun of(status: SessionStatus, soak: SoakState, notice: MarkNotice? = null): NotificationModel = when (status) {
             is SessionStatus.Starting -> Starting
-            is SessionStatus.Recording -> Recording(status.snapshot)
+            is SessionStatus.Recording -> Recording(status.snapshot, notice)
             is SessionStatus.Stopping -> Recording(status.snapshot.copy(stopping = true))
             is SessionStatus.Idle -> if (soak is SoakState.Running) Soak(soak.elapsedMs, soak.durationMs) else None
         }
     }
+}
+
+/**
+ * What the session notification says about markers for a few seconds, instead of the state's own words. It never
+ * carries a marker's note: the notification shows on the lock screen.
+ *
+ * Owner: workstream `service-and-tests`.
+ */
+internal sealed interface MarkNotice {
+    /** The session it is about: a notice never shows on another session's notification. */
+    val dirName: String
+
+    /** Marker [number] of the session, counting from 1, was accepted at [wallMs] and is written. */
+    data class Added(override val dirName: String, val number: Int, val wallMs: Long) : MarkNotice
+
+    /** Marker [number] was accepted while inputs wait for a location fix: it is written once one shows where it was tapped. */
+    data class Held(override val dirName: String, val number: Int) : MarkNotice
+
+    /** [count] markers accepted earlier were just dropped: no fix showed they were tapped outside the privacy zones. */
+    data class Dropped(override val dirName: String, val count: Int) : MarkNotice
 }
 
 /** The first line of a recording notification. */
@@ -51,6 +72,10 @@ internal object NotificationText {
         snapshot.paused -> RecordingHeadline.PAUSED
         else -> RecordingHeadline.RECORDING
     }
+
+    /** The marker notice the text shows instead of the headline's words: [notice] about this session, unless it is saving. */
+    fun shownNotice(snapshot: RecorderSnapshot, notice: MarkNotice?): MarkNotice? =
+        notice?.takeIf { it.dirName == snapshot.dirName && headline(snapshot) != RecordingHeadline.SAVING }
 
     fun ratLabel(rat: ServingRat): String = when (rat) {
         ServingRat.LTE -> "LTE"

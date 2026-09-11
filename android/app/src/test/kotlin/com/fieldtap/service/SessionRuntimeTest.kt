@@ -308,6 +308,66 @@ class SessionRuntimeTest {
     }
 
     @Test
+    fun anAcceptedMarkerIsNumberedAndTheNotificationSaysSoForAFewSeconds() = runTest {
+        val h = RuntimeHarness(this)
+        val recorder = startRecording(h)
+        assertNull(h.runtime.markNotice.value)
+
+        assertTrue(h.runtime.mark("on Live"))
+        val first = MarkNotice.Added(recorder.dirName, number = 1, wallMs = WALL_BASE + testScheduler.currentTime)
+        assertEquals(first, h.runtime.markNotice.value)
+
+        advanceTimeBy(1_000)
+        assertTrue(h.serviceStarts(SessionService.ACTION_MARK))
+        val second = MarkNotice.Added(recorder.dirName, number = 2, wallMs = WALL_BASE + testScheduler.currentTime)
+        assertEquals("the notification's Mark counts on from Live's", second, h.runtime.markNotice.value)
+        assertEquals(listOf(first.wallMs, second.wallMs), recorder.commandsOf<RecorderCommand.Mark>().map { it.wallMs })
+
+        advanceTimeBy(SessionRuntime.MARK_NOTICE_MS - 1)
+        runCurrent()
+        assertEquals(second, h.runtime.markNotice.value)
+        advanceTimeBy(2)
+        runCurrent()
+        assertNull(h.runtime.markNotice.value)
+
+        recorder.setPaused(true)
+        assertFalse(h.runtime.mark("inside a zone"))
+        assertNull("a refused marker says nothing and takes no number", h.runtime.markNotice.value)
+        recorder.setPaused(false)
+        runCurrent()
+        assertTrue(h.runtime.mark(null))
+        assertEquals(MarkNotice.Added(recorder.dirName, number = 3, wallMs = WALL_BASE + testScheduler.currentTime), h.runtime.markNotice.value)
+    }
+
+    @Test
+    fun aMarkerTakenWhileInputsWaitForAFixIsSaidToWaitAndADropIsSaidToo() = runTest {
+        val h = RuntimeHarness(this)
+        val recorder = startRecording(h)
+        recorder.snapshot.value = recorder.snapshot.value.copy(holdingInputs = true)
+        runCurrent()
+
+        assertTrue(h.serviceStarts(SessionService.ACTION_MARK))
+        assertEquals(MarkNotice.Held(recorder.dirName, number = 1), h.runtime.markNotice.value)
+
+        recorder.snapshot.value = recorder.snapshot.value.copy(holdingInputs = false, paused = true, waitingForLocation = true, markersDropped = 1)
+        runCurrent()
+        assertEquals(MarkNotice.Dropped(recorder.dirName, count = 1), h.runtime.markNotice.value)
+
+        // The same count again says nothing new; a higher one says only what is new.
+        recorder.snapshot.value = recorder.snapshot.value.copy(elapsedMs = 90_000)
+        runCurrent()
+        assertEquals(MarkNotice.Dropped(recorder.dirName, count = 1), h.runtime.markNotice.value)
+        recorder.snapshot.value = recorder.snapshot.value.copy(markersDropped = 3)
+        runCurrent()
+        assertEquals(MarkNotice.Dropped(recorder.dirName, count = 2), h.runtime.markNotice.value)
+
+        h.runtime.stop()
+        runCurrent()
+        assertEquals(SessionStatus.Idle, h.runtime.status.value)
+        assertNull("the notice ends with the session", h.runtime.markNotice.value)
+    }
+
+    @Test
     fun anExternalCommandOtherThanStopIsIgnored() = runTest {
         val h = RuntimeHarness(this)
 

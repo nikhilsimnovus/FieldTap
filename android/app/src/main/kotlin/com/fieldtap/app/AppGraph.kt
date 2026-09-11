@@ -110,6 +110,8 @@ data class SessionDetail(
     val fileSizes: Map<SessionFile, Long>,
     /** Data rows per CSV (header excluded). */
     val rowCounts: Map<SessionFile, Int>,
+    /** Markers the session accepted and then dropped, because no location fix showed they were tapped outside its privacy zones. */
+    val markersDropped: Int = 0,
 )
 
 /**

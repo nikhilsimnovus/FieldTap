@@ -117,6 +117,16 @@ class FileSessionRepositoryTest {
     }
 
     @Test
+    fun detailSaysHowManyMarkersTheSessionDropped() {
+        copyGolden(GOLDEN_NAME)
+        assertEquals(0, runBlocking { repository().detail(GOLDEN_NAME) }?.markersDropped)
+
+        paths.markersDropped(GOLDEN_NAME).writeText("2\n")
+
+        assertEquals(2, runBlocking { repository().detail(GOLDEN_NAME) }?.markersDropped)
+    }
+
+    @Test
     fun aTornLastRowIsNotCounted() {
         val directory = copyGolden(GOLDEN_NAME)
         File(directory, SessionFile.EVENTS.fileName).appendText("2026-09-10T14:31:50.000+00:00,-,marker,info,Mar")

@@ -18,6 +18,7 @@ import androidx.lifecycle.lifecycleScope
 import com.fieldtap.R
 import com.fieldtap.app.FieldTapApplication
 import com.fieldtap.core.session.RecorderSnapshot
+import com.fieldtap.ui.common.DisplayTime
 import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
@@ -99,7 +100,7 @@ class SessionService : LifecycleService(), ServiceHost {
     }
 
     private suspend fun keepNotificationCurrent() {
-        combine(runtime.status, runtime.soakState) { status, soak -> NotificationModel.of(status, soak) }
+        combine(runtime.status, runtime.soakState, runtime.markNotice) { status, soak, notice -> NotificationModel.of(status, soak, notice) }
             .distinctUntilChanged()
             .conflate()
             .collect { model ->
@@ -112,7 +113,7 @@ class SessionService : LifecycleService(), ServiceHost {
         val notification = when (model) {
             NotificationModel.None -> return
             NotificationModel.Starting -> notifications.starting()
-            is NotificationModel.Recording -> notifications.recording(model.snapshot)
+            is NotificationModel.Recording -> notifications.recording(model.snapshot, model.notice)
             is NotificationModel.Soak -> notifications.soak(model.elapsedMs, model.durationMs)
         }
         notifications.post(notification)
@@ -139,6 +140,8 @@ class SessionService : LifecycleService(), ServiceHost {
  *   saving), text with the serving RAT, RSRP and the newest sample's age (or what the state means), a chronometer
  *   from the session start, and Mark and Stop. Mark shows only while recording, Stop unless saving; with location
  *   off a Location settings action comes first, because nothing is recorded until location is back on.
+ * - For a few seconds after a marker, from Mark here or on Live, the text says which marker was added and when ("Marker 3
+ *   added at 10:05"), that it waits for a location fix, or that markers were dropped ([MarkNotice]); never its note.
  * - Soak: elapsed against planned time, a progress bar, and Stop test.
  * - Tapping opens the app. Nothing on it names the session or a place, so it is safe on the lock screen.
  *
@@ -186,7 +189,7 @@ class SessionNotification(private val context: Context) {
         .setProgress(0, 0, true)
         .build()
 
-    fun recording(snapshot: RecorderSnapshot): Notification {
+    internal fun recording(snapshot: RecorderSnapshot, notice: MarkNotice? = null): Notification {
         val headline = NotificationText.headline(snapshot)
         val title = when (headline) {
             RecordingHeadline.RECORDING -> context.getString(R.string.notification_recording_title)
@@ -195,12 +198,17 @@ class SessionNotification(private val context: Context) {
             RecordingHeadline.LOCATION_OFF -> context.getString(R.string.notification_location_off_title)
             RecordingHeadline.SAVING -> context.getString(R.string.notification_saving_title)
         }
-        val text = when (headline) {
-            RecordingHeadline.RECORDING -> servingText(snapshot)
-            RecordingHeadline.PAUSED -> context.getString(R.string.notification_paused_text)
-            RecordingHeadline.WAITING_FOR_LOCATION -> context.getString(R.string.notification_waiting_text)
-            RecordingHeadline.LOCATION_OFF -> context.getString(R.string.notification_location_off_text)
-            RecordingHeadline.SAVING -> context.getString(R.string.notification_saving_text)
+        val shownNotice = NotificationText.shownNotice(snapshot, notice)
+        val text = if (shownNotice != null) {
+            noticeText(shownNotice)
+        } else {
+            when (headline) {
+                RecordingHeadline.RECORDING -> servingText(snapshot)
+                RecordingHeadline.PAUSED -> context.getString(R.string.notification_paused_text)
+                RecordingHeadline.WAITING_FOR_LOCATION -> context.getString(R.string.notification_waiting_text)
+                RecordingHeadline.LOCATION_OFF -> context.getString(R.string.notification_location_off_text)
+                RecordingHeadline.SAVING -> context.getString(R.string.notification_saving_text)
+            }
         }
         val builder = builder()
             .setContentTitle(title)
@@ -252,6 +260,13 @@ class SessionNotification(private val context: Context) {
     /** Removes the notification, for a service on its way out. */
     fun cancel() {
         NotificationManagerCompat.from(context).cancel(SessionService.NOTIFICATION_ID)
+    }
+
+    private fun noticeText(notice: MarkNotice): String = when (notice) {
+        is MarkNotice.Added ->
+            context.getString(R.string.notification_marker_added, notice.number, DisplayTime.time(notice.wallMs, locale = locale()))
+        is MarkNotice.Held -> context.getString(R.string.notification_marker_held, notice.number)
+        is MarkNotice.Dropped -> context.resources.getQuantityString(R.plurals.notification_markers_dropped, notice.count, notice.count)
     }
 
     private fun servingText(snapshot: RecorderSnapshot): String {

@@ -27,6 +27,17 @@
     <string name="notification_serving_no_rsrp_text">%1$s, RSRP unavailable · newest sample %2$s old</string>
     <string name="notification_no_serving_text">No serving cell reported yet</string>
 
+    <!-- Shown for a few seconds after a marker, instead of the text above. Never the marker's note. -->
+    <!-- %1$d is the marker's number in the session, counting from 1; %2$s the local time it was tapped, e.g. 10:05. -->
+    <string name="notification_marker_added">Marker %1$d added at %2$s</string>
+    <!-- %1$d is the marker's number in the session. -->
+    <string name="notification_marker_held">Marker %1$d kept until your location is known</string>
+    <!-- %1$d is how many markers were just dropped. -->
+    <plurals name="notification_markers_dropped">
+        <item quantity="one">%1$d marker was not saved: no location fix showed you outside your privacy zones</item>
+        <item quantity="other">%1$d markers were not saved: no location fix showed you outside your privacy zones</item>
+    </plurals>
+
     <string name="notification_soak_title">Readiness soak test</string>
     <!-- %1$s is the time elapsed and %2$s the planned duration, both as m:ss. -->
     <string name="notification_soak_text">%1$s of %2$s · keep the screen off</string>

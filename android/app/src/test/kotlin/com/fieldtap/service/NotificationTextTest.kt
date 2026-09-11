@@ -8,6 +8,7 @@ import com.fieldtap.core.soak.SoakResult
 import com.fieldtap.format.ServingRat
 import java.util.Locale
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class NotificationTextTest {
@@ -29,6 +30,33 @@ class NotificationTextTest {
         assertEquals(RecordingHeadline.WAITING_FOR_LOCATION, NotificationText.headline(snapshot().copy(waitingForLocation = true)))
         assertEquals(RecordingHeadline.WAITING_FOR_LOCATION, NotificationText.headline(snapshot(paused = true).copy(waitingForLocation = true)))
         assertEquals(RecordingHeadline.SAVING, NotificationText.headline(snapshot(stopping = true).copy(locationEnabled = false)))
+    }
+
+    @Test
+    fun aMarkerNoticeShowsOnItsOwnSessionUnlessItIsSaving() {
+        val recording = snapshot()
+        val added = MarkNotice.Added(recording.dirName, number = 3, wallMs = 1_789_050_612_000L)
+
+        assertEquals(added, NotificationText.shownNotice(recording, added))
+        assertEquals("said over location off too", added, NotificationText.shownNotice(recording.copy(locationEnabled = false), added))
+        assertNull(NotificationText.shownNotice(recording.copy(stopping = true), added))
+        assertNull(NotificationText.shownNotice(recording, added.copy(dirName = "20260910-150000_other")))
+        assertNull(NotificationText.shownNotice(recording, null))
+        val dropped = MarkNotice.Dropped(recording.dirName, count = 2)
+        assertEquals(dropped, NotificationText.shownNotice(snapshot(paused = true).copy(waitingForLocation = true), dropped))
+    }
+
+    @Test
+    fun theModelCarriesTheNoticeOnlyWhileRecording() {
+        val recording = snapshot()
+        val held = MarkNotice.Held(recording.dirName, number = 1)
+
+        assertEquals(NotificationModel.Recording(recording, held), NotificationModel.of(SessionStatus.Recording(recording), SoakState.Idle, held))
+        assertEquals(
+            NotificationModel.Recording(recording.copy(stopping = true)),
+            NotificationModel.of(SessionStatus.Stopping(recording), SoakState.Idle, held),
+        )
+        assertEquals(NotificationModel.None, NotificationModel.of(SessionStatus.Idle, SoakState.Idle, held))
     }
 
     @Test

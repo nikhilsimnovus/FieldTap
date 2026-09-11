@@ -27,8 +27,9 @@ import kotlinx.coroutines.withContext
  *
  * - [list]: every session directory, newest first, including unreadable ones (`readable` false) so they can
  *   be deleted; `recording` only for the running session.
- * - [detail]: the summary, the decoded session.json, the size of each of the seven files present and the
- *   data rows of each CSV (records ending in a line feed, header excluded; a torn last row is not counted).
+ * - [detail]: the summary, the decoded session.json, the size of each of the seven files present, the
+ *   data rows of each CSV (records ending in a line feed, header excluded; a torn last row is not counted), and the
+ *   markers the session dropped, from its note beside the heartbeat ([SessionStore.markersDropped]).
  * - [delete]: refuses the running session and any name that is not a session directory name; also removes
  *   that session's export zip.
  * - [export] deletes older zips (and stale temporary files) in [exportDir] first, so shared copies do not
@@ -80,6 +81,7 @@ class FileSessionRepository(
             meta = listing.meta,
             fileSizes = sizes,
             rowCounts = rows,
+            markersDropped = store.markersDropped(dirName),
         )
     }
 

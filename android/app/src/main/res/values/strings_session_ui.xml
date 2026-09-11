@@ -344,6 +344,11 @@
     <string name="detail_not_found_message">It may have been deleted.</string>
     <string name="detail_unreadable_message">session.json is missing or damaged. The measurement files may still be intact, and you can delete the session.</string>
     <string name="detail_recording_banner">This session is recording. Stop it on the Live screen before you share or delete it.</string>
+    <!-- %1$d markers the session accepted and then dropped. -->
+    <plurals name="detail_markers_dropped">
+        <item quantity="one">%1$d marker was not saved: no location fix showed it was tapped outside your privacy zones.</item>
+        <item quantity="other">%1$d markers were not saved: no location fix showed they were tapped outside your privacy zones.</item>
+    </plurals>
 
     <string name="detail_section_overview">Overview</string>
     <string name="detail_row_note">Note</string>

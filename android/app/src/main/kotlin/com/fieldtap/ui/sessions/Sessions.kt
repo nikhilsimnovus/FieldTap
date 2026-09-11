@@ -680,6 +680,17 @@ private fun DetailList(
                 )
             }
         }
+        // A marker the session accepted and dropped left no row to show it: said here, wherever Live was when it happened.
+        if (detail.markersDropped > 0) {
+            item(key = "markers-dropped") {
+                StatusBanner(
+                    message = pluralStringResource(R.plurals.detail_markers_dropped, detail.markersDropped, detail.markersDropped),
+                    tone = StatusTone.WARNING,
+                    icon = FieldTapIcons.Flag,
+                    modifier = Modifier.contentWidth(),
+                )
+            }
+        }
         item(key = "headline") { HeadlineStats(meta = meta, modifier = Modifier.contentWidth()) }
         item(key = "overview") { OverviewCard(detail = detail, meta = meta, modifier = Modifier.contentWidth()) }
         item(key = "collection") { CollectionCard(meta = meta, modifier = Modifier.contentWidth()) }

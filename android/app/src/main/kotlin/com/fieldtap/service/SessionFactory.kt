@@ -88,7 +88,11 @@ class DefaultSessionFactory(
             )
             val filesCreated = FilesCreatedSignal()
             val files = CreationReportingFiles(
-                delegate = FileSessionFiles(allocated.directory, sessionPaths.heartbeat(allocated.dirName)),
+                delegate = FileSessionFiles(
+                    directory = allocated.directory,
+                    heartbeatFile = sessionPaths.heartbeat(allocated.dirName),
+                    markersDroppedFile = sessionPaths.markersDropped(allocated.dirName),
+                ),
                 signal = filesCreated,
             )
             val recorder = SessionRecorder(
