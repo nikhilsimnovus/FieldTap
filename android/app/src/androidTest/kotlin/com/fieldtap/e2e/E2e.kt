@@ -190,6 +190,14 @@ object PermissionDialogs {
     private val CONTROLLER: Pattern = Pattern.compile("com\\.(google\\.)?android\\.permissioncontroller")
     private const val APPEAR_MS = 15_000L
     private const val BUTTON_MS = 3_000L
+    private const val GONE_MS = 5_000L
+    private const val TAP_ATTEMPTS = 3
+
+    /**
+     * How long the dialog is left to finish opening before a tap. Android drops touches on an activity whose open
+     * transition is still running ("Not sending touch gesture ... NO_INPUT_CHANNEL"), as it did on the API 36 emulator.
+     */
+    private const val SETTLE_MS = 1_500L
 
     /** "While using the app", offered for location. */
     const val LOCATION_WHILE_IN_USE: String = "permission_allow_foreground_only_button"
@@ -200,21 +208,28 @@ object PermissionDialogs {
     fun showing(): Boolean = E2e.device.hasObject(By.pkg(CONTROLLER))
 
     /**
-     * Waits for the dialog, which must appear, and taps the first of [buttonIds] it offers. Returns false when it offers
-     * none of them; the dialog is then still open.
+     * Waits for the dialog, which must appear, lets it finish opening, and taps the first of [buttonIds] it offers until
+     * the dialog closes, at most [TAP_ATTEMPTS] times. Returns true once the dialog has closed; false when it offers none
+     * of those buttons or stays open after every tap.
      */
     fun answer(vararg buttonIds: String): Boolean {
         val device = E2e.device
         check(device.wait(Until.hasObject(By.pkg(CONTROLLER)), APPEAR_MS) == true) { "Android's permission dialog did not appear" }
-        for (id in buttonIds) {
-            val selector = By.pkg(CONTROLLER).res(Pattern.compile(".*:id/" + Pattern.quote(id)))
-            val button = device.wait(Until.findObject(selector), BUTTON_MS) ?: continue
+        repeat(TAP_ATTEMPTS) { attempt ->
+            device.waitForIdle()
+            SystemClock.sleep(SETTLE_MS)
+            val button = buttonIds.firstNotNullOfOrNull { id ->
+                device.wait(Until.findObject(By.pkg(CONTROLLER).res(Pattern.compile(".*:id/" + Pattern.quote(id)))), BUTTON_MS)
+            } ?: return false
             button.click()
-            device.wait(Until.gone(By.pkg(CONTROLLER)), APPEAR_MS)
-            return true
+            if (device.wait(Until.gone(By.pkg(CONTROLLER)), GONE_MS) == true) return true
+            Log.w(E2e.TAG, "The permission dialog stayed open after tap ${attempt + 1} of $TAP_ATTEMPTS")
         }
         return false
     }
+
+    /** Waits until no permission dialog shows; false when one is still there after [timeoutMs]. */
+    fun awaitGone(timeoutMs: Long = APPEAR_MS): Boolean = E2e.device.wait(Until.gone(By.pkg(CONTROLLER)), timeoutMs) == true
 }
 
 /** A node whose text or editable text contains a match of [regex]. */
@@ -234,8 +249,17 @@ fun hasDescriptionMatching(regex: Regex): SemanticsMatcher = SemanticsMatcher("h
  * awaited and prints the semantics tree to logcat.
  */
 class Screens(private val compose: ComposeTestRule, private val group: String) {
-    fun exists(matcher: SemanticsMatcher, unmerged: Boolean = false): Boolean =
+    /**
+     * Whether a node matches. False, rather than an error, while no Compose hierarchy of the app can be reached: that is
+     * the case while an activity of another app, such as a permission dialog or the share sheet, covers the app, and a
+     * wait should then go on waiting.
+     */
+    fun exists(matcher: SemanticsMatcher, unmerged: Boolean = false): Boolean = try {
         compose.onAllNodes(matcher, useUnmergedTree = unmerged).fetchSemanticsNodes().isNotEmpty()
+    } catch (e: IllegalStateException) {
+        if (e.message?.startsWith(NO_HIERARCHY) != true) throw e
+        false
+    }
 
     /** Waits until [condition] holds; [what] names it in the failure. */
     fun waitFor(what: String, timeoutMs: Long = WAIT_MS, condition: () -> Boolean) {
@@ -303,10 +327,25 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
         click(hasText(E2e.string(label)) and hasClickAction())
     }
 
-    /** Waits until Live shows a serving cell and its hero tile says how old the sample is. */
+    /**
+     * Waits until Live shows a serving cell and its hero tile says how old the sample is. On a timeout the Live feed's
+     * state (cells, listeners, conditions) is written to logcat and to `e2e/failures/[group]/live-state.txt`, so the
+     * artifact says why no cell was chosen.
+     */
     fun awaitServingCell(timeoutMs: Long = SERVING_CELL_WAIT_MS) {
-        awaitText(R.string.live_section_serving, timeoutMs)
-        await(hasDescriptionMatching(ageBadge()), timeoutMs)
+        try {
+            awaitText(R.string.live_section_serving, timeoutMs)
+            await(hasDescriptionMatching(ageBadge()), timeoutMs)
+        } catch (e: AssertionError) {
+            val state = E2e.graph.live.state.value.toString()
+            Log.w(E2e.TAG, "No serving cell on Live; the feed's state: $state")
+            try {
+                File(E2e.outputDir("failures/$group"), "live-state.txt").writeText(state + "\n", Charsets.UTF_8)
+            } catch (io: IOException) {
+                Log.w(E2e.TAG, "Could not save the Live state", io)
+            }
+            throw e
+        }
     }
 
     /** Prints every window's semantics tree to logcat under [E2e.TAG]. */
@@ -328,6 +367,9 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
 
         /** The emulator's modem reports cell info every 10 s, and its first answer can take longer after boot. */
         const val SERVING_CELL_WAIT_MS: Long = 120_000
+
+        /** The start of Compose testing's message when no hierarchy of the app is reachable. */
+        private const val NO_HIERARCHY = "No compose hierarchies found"
 
         private const val PLACEHOLDER = "\u0000"
 

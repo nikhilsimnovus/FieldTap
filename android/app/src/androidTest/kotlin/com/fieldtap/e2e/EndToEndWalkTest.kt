@@ -137,6 +137,7 @@ class EndToEndWalkTest {
             if (PermissionDialogs.showing()) E2e.device.pressBack()
             "granted_by_instrumentation"
         }
+        assertTrue("Android's permission dialog is still open", PermissionDialogs.awaitGone())
         screens.await(hasText(E2e.string(R.string.permissions_status_allowed)) and inCard, PERMISSION_WAIT_MS)
         return how
     }

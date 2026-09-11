@@ -153,7 +153,7 @@ prepare_device() {
 
 start_logcat() {
   "${ADB[@]}" logcat -c < /dev/null || true
-  "${ADB[@]}" logcat -v threadtime -b main,system,crash,events < /dev/null > "$raw/logcat.txt" 2>&1 &
+  "${ADB[@]}" logcat -v threadtime -b main,system,crash,events,radio < /dev/null > "$raw/logcat.txt" 2>&1 &
   LOGCAT_PID=$!
 }
 
@@ -318,6 +318,27 @@ wait_closed() {
   return 1
 }
 
+# root_shell  restarts adbd as root; true once "adb shell" runs as uid 0.
+root_shell() {
+  timeout 60 "${ADB[@]}" root < /dev/null >> "$OUT/recovery/adb-root.txt" 2>&1 || return 1
+  timeout 60 "${ADB[@]}" wait-for-device < /dev/null || return 1
+  [ "$(dsh id -u 2> /dev/null)" = 0 ]
+}
+
+# unroot_shell  back to the shell user, as the rest of the run expects.
+unroot_shell() {
+  timeout 60 "${ADB[@]}" unroot < /dev/null >> "$OUT/recovery/adb-root.txt" 2>&1 || log "adb unroot failed"
+  timeout 60 "${ADB[@]}" wait-for-device < /dev/null || log "the device did not come back after adb unroot"
+  sleep 2
+}
+
+# telephony_snapshot NAME  what the modem reports now (cell info, service state, signal), redacted, for diagnosis.
+telephony_snapshot() {
+  dsh dumpsys telephony.registry 2> /dev/null |
+    grep -E '^[[:space:]]*(mServiceState|mSignalStrength|mCellInfo|mTelephonyDisplayInfo|mDataConnectionState)[[:space:]]*=' |
+    cut -c1-4000 | redact > "$OUT/checks/telephony-$1.txt" || true
+}
+
 # wait_dead PID  until the app's process PID is gone.
 wait_dead() {
   local i
@@ -342,7 +363,9 @@ first_runs() {
 walk() {
   dsh pm clear "$PKG" > /dev/null || fail "pm clear $PKG failed"
   set_variant light
+  telephony_snapshot before-walk
   instrument walk EndToEndWalkTest -e walk_seconds "$WALK_SECONDS" || true
+  telephony_snapshot after-walk
   WALK_DIR=$(json_get "$OUT/device/walk-result.json" dir_name)
   if [ -z "$WALK_DIR" ]; then
     fail "the walk recorded no session"
@@ -386,14 +409,26 @@ recovery() {
     fail "$PKG is not running before the $scenario kill"
     return 1
   fi
-  kill_ms=$(device_ms)
   case $scenario in
-    force_stop) dsh am force-stop "$PKG" > /dev/null || true ;;
-    # run-as runs as the debuggable app's own user, which may signal its own process.
-    kill_9) dsh run-as "$PKG" kill -9 "$pid" > /dev/null || true ;;
+    force_stop)
+      kill_ms=$(device_ms)
+      dsh am force-stop "$PKG" > "$OUT/recovery/$scenario-kill.txt" 2>&1 || true
+      ;;
+    kill_9)
+      # The shell user may not signal an app's process. adbd runs as root on userdebug images; where it cannot,
+      # run-as is the fallback, which SELinux allows on API 36 but denies on API 31 (runas_app to untrusted_app).
+      if root_shell; then
+        kill_ms=$(device_ms)
+        dsh kill -9 "$pid" > "$OUT/recovery/$scenario-kill.txt" 2>&1 || true
+        unroot_shell
+      else
+        kill_ms=$(device_ms)
+        dsh run-as "$PKG" kill -9 "$pid" > "$OUT/recovery/$scenario-kill.txt" 2>&1 || true
+      fi
+      ;;
   esac
   if ! wait_dead "$pid"; then
-    fail "$PKG pid $pid survived $scenario"
+    fail "$PKG pid $pid survived $scenario: $(tr '\n' ' ' < "$OUT/recovery/$scenario-kill.txt")"
     return 1
   fi
   sleep 2
