@@ -9,6 +9,42 @@ plugins {
 val fieldtapApplicationId: String = providers.gradleProperty("fieldtap.applicationId").orNull
     ?: error("fieldtap.applicationId is not set; define it in android/gradle.properties")
 
+// The release key never enters the repository (android/README.md, "Release key"). Its keystore and password come from
+// the environment or from ~/.gradle/gradle.properties; an environment variable wins over the property:
+//   FIELDTAP_RELEASE_STORE_FILE           fieldtap.release.storeFile           the PKCS12 keystore
+//   FIELDTAP_RELEASE_STORE_PASSWORD       fieldtap.release.storePassword       its password, or instead
+//   FIELDTAP_RELEASE_STORE_PASSWORD_FILE  fieldtap.release.storePasswordFile   a file whose first line is the password
+//   FIELDTAP_RELEASE_KEY_ALIAS            fieldtap.release.keyAlias            the key's alias, default 5gto6g-fieldtap
+// With none of them set, the release APK is built unsigned (app-release-unsigned.apk), as in CI's build job. Setting only
+// some of them fails the build, so a release meant to be signed is never silently left unsigned.
+class ReleaseKey(val storeFile: File, val password: String, val alias: String)
+
+fun releaseSetting(environmentVariable: String, gradleProperty: String): String? =
+    (providers.environmentVariable(environmentVariable).orNull ?: providers.gradleProperty(gradleProperty).orNull)
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+
+val releaseKey: ReleaseKey? = run {
+    val storePath = releaseSetting("FIELDTAP_RELEASE_STORE_FILE", "fieldtap.release.storeFile")
+    val inlinePassword = releaseSetting("FIELDTAP_RELEASE_STORE_PASSWORD", "fieldtap.release.storePassword")
+    val passwordPath = releaseSetting("FIELDTAP_RELEASE_STORE_PASSWORD_FILE", "fieldtap.release.storePasswordFile")
+    val alias = releaseSetting("FIELDTAP_RELEASE_KEY_ALIAS", "fieldtap.release.keyAlias") ?: "5gto6g-fieldtap"
+    if (storePath == null && inlinePassword == null && passwordPath == null) return@run null
+
+    val storeFile = storePath?.let { file(it) }
+        ?: throw GradleException("The release key is half configured: set FIELDTAP_RELEASE_STORE_FILE to the keystore")
+    if (!storeFile.isFile) throw GradleException("The release keystore does not exist: $storeFile")
+    val password = inlinePassword ?: passwordPath?.let { path ->
+        val passwordFile = file(path)
+        providers.fileContents(objects.fileProperty().fileValue(passwordFile)).asText.orNull
+            ?.lineSequence()?.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+            ?: throw GradleException("The release keystore password file is missing or empty: $passwordFile")
+    } ?: throw GradleException(
+        "The release key is half configured: set FIELDTAP_RELEASE_STORE_PASSWORD or FIELDTAP_RELEASE_STORE_PASSWORD_FILE",
+    )
+    ReleaseKey(storeFile, password, alias)
+}
+
 android {
     namespace = "com.fieldtap"
     compileSdk {
@@ -23,21 +59,37 @@ android {
         targetSdk {
             version = release(36)
         }
+        // Raise versionCode for every APK that installs over an older one: Android refuses a lower or equal code.
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0"
 
         // The instrumented end-to-end tests in src/androidTest; android/e2e/run_e2e.sh runs them on the CI emulator.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        releaseKey?.let { key ->
+            create("release") {
+                storeFile = key.storeFile
+                storePassword = key.password
+                keyAlias = key.alias
+                // A PKCS12 keystore has one password, for the store and for its key.
+                keyPassword = key.password
+            }
+        }
+    }
+
     buildTypes {
         release {
             // R8 shrinks and optimises the release build: a far smaller download than the unshrunk 28 MB, and a faster
-            // cold start. CI installs and launches the minified APK on both emulators (android/e2e/release_smoke.sh), so
-            // a class R8 removed wrongly fails there instead of on a phone.
+            // cold start. CI's release job signs the minified APK with a key made for the run and drives it on the API 36
+            // and API 31 emulators (android/e2e/release_smoke.sh), so a class R8 removed wrongly fails there, not on a phone.
             isMinifyEnabled = true
             isShrinkResources = true
+            isDebuggable = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Null, and so an unsigned APK, when no release key is configured.
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
