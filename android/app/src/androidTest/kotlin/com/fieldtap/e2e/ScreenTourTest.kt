@@ -40,11 +40,12 @@ class ScreenTourTest {
 
         screens.awaitLiveRadio(E2e.expectLteNr())
         screens.shot("03-live")
-        // Below the first screen: the trend, then the serving cell's details.
+        // Below the first screen: the trend, then the cells (the serving cell's card when Android reports one, and the
+        // neighbours, which every leg shows).
         screens.scrollTo(hasText(E2e.string(R.string.live_section_chart)))
         screens.shot("03c-live-trend")
-        screens.scrollTo(hasText(E2e.string(R.string.live_section_serving)))
-        screens.shot("03d-live-serving")
+        screens.scrollTo(hasText(E2e.string(R.string.live_section_neighbours)))
+        screens.shot("03d-live-cells")
         screens.scrollToTop()
         // A phone in landscape: two panes, with the session buttons beside them instead of under them.
         screens.inLandscape {
