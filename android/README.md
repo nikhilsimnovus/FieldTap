@@ -7,7 +7,7 @@ The `fieldtap` tools in this repository validate those files and render them as 
 
 | | |
 | --- | --- |
-| Version | 1.0.0 (versionCode 1), set in [`app/build.gradle.kts`](app/build.gradle.kts) and shown in About |
+| Version | 1.0.0 (versionCode 2), set in [`app/build.gradle.kts`](app/build.gradle.kts) and shown in About |
 | Application ID | `com.fieldtap` |
 | Android | 12 (API 31) or newer, on a phone with a SIM; built for Android 16 (target API 36) |
 | Price, account | Free; no account and no upload yet |
@@ -129,6 +129,9 @@ over an older one: Android refuses an update with the same or a lower code.
    adb install -r 5gto6g-fieldtap-1.0.0.apk
    ```
 
+   versionCode 2 installs over the first 1.0.0 (versionCode 1) and keeps its sessions: both are signed with the release
+   key. `adb shell dumpsys package com.fieldtap | grep versionCode` shows which one a phone has.
+
 3. `INSTALL_FAILED_UPDATE_INCOMPATIBLE` means the phone has a copy signed with another key, such as a debug build. Export
    the sessions you need first (below), then `adb uninstall com.fieldtap` and install again. **Uninstalling deletes every
    session on the phone.**
@@ -189,7 +192,7 @@ request that touches `android/`, `schema/`, `tests/fixtures/` or `fieldtap/`.
 | Job | What must hold |
 | --- | --- |
 | **build** | The unit tests of `:format`, `:core` and `:app`, lint, the debug, instrumented-test and release APKs. The release APK has no debug automation hook, and without a release key it comes out unsigned and minified. |
-| **emulator (API 36, API 31)** | [`e2e/run_e2e.sh`](e2e/run_e2e.sh) with the debug build, through the real UI. API 36 runs on a Pixel 7 screen (411 x 914 dp), where the design is judged; API 31 keeps the emulator's 320 x 640 dp screen as the robustness check. The first run (the disclosure before any permission prompt, then with its full notice open) and every screen, each at every scroll position, in light, dark, font scale 1.3 and, on API 36, landscape; a 180 s walk while the host feeds `adb emu geo fix` and signal profiles, with Settings, a marker on Live and one from the notification, whose text must confirm it, Stop, the zip built, its SHA-256 checked and shared; location services switched off mid-session with a privacy zone set, written as `gps_lost` and `gps_restored`, with a marker that waits for a fix, is dropped and is shown as not saved on Session detail; `am force-stop` and `kill -9` mid-session, each closed with Android's exit reason. Every session must pass `fieldtap validate --upload` and `fieldtap report`, and [`e2e/check_e2e.py`](e2e/check_e2e.py) checks what the files and screenshots hold. Then the capability probe records what the emulator's radio provides. |
+| **emulator (API 36, API 31)** | [`e2e/run_e2e.sh`](e2e/run_e2e.sh) with the debug build, through the real UI. API 36 runs on a Pixel 7 screen (411 x 914 dp), where the design is judged; API 31 keeps the emulator's 320 x 640 dp screen as the robustness check. The first run (the disclosure before any permission prompt, then with its full notice open) and every screen, each at every scroll position, in light, dark, font scale 1.3 and, on API 36, landscape; on the Pixel 7 screen upright, Live's trend chart must lie wholly on the first screen; the recording strip must stay on one line in every state at font scale 1.3 on a 360 dp width; a 180 s walk while the host feeds `adb emu geo fix` and signal profiles, with Settings, a marker on Live and one from the notification, whose text must confirm it, Stop, the zip built, its SHA-256 checked and shared; location services switched off mid-session with a privacy zone set, written as `gps_lost` and `gps_restored`, with a marker that waits for a fix, is dropped and is shown as not saved on Session detail; `am force-stop` and `kill -9` mid-session, each closed with Android's exit reason. Every session must pass `fieldtap validate --upload` and `fieldtap report`, and [`e2e/check_e2e.py`](e2e/check_e2e.py) checks what the files and screenshots hold. Then the capability probe records what the emulator's radio provides. |
 | **release build (API 36, API 31)** | On the same screens as the emulator job. The APK a phone gets: signed by Gradle with a key made in the job and deleted at once, checked with `apksigner` and `aapt2` (signed, minified, version, not debuggable, no hook), then driven by [`e2e/release_smoke.sh`](e2e/release_smoke.sh) with nothing but `uiautomator dump` and `input tap` on the app's own strings: install with `adb install -r`, the disclosure, Live with a serving cell, the version in About, a session with ping and download tests for 90 s while a GPS walk is fed, Stop. The pulled session must pass `fieldtap validate --upload` and `fieldtap report` and hold GPS fixes, positioned measurements, test rows, the release's version and `stopped_by` user, plus kpi rows and a `serving_cell` event on API 36; the app must not crash. This is the job that catches a class, keep rule or resource R8 got wrong. |
 
 Artifacts per run: `apks`; `e2e-sessions-api<N>` (sessions with `report.html`, the exported zip), `e2e-screenshots-api<N>`
@@ -197,6 +200,26 @@ Artifacts per run: `apks`; `e2e-sessions-api<N>` (sessions with `report.html`, t
 so on, top to bottom), `e2e-logcat-api<N>`, `e2e-reports-api<N>`, `emulator-probe-api<N>`; `release-smoke-api<N>` (summary, a screenshot and window
 dump per step, the session with `report.html`, logcat) and `release-apk-api<N>` (the throwaway-signed APK and its R8
 mapping). Download them with `gh run download RUN_ID -D DIR`. Logcat is redacted of anything shaped like an identifier.
+
+### Screenshots
+
+Every push leaves the app's screens at phone size in `e2e-screenshots-api36`, taken on the Pixel 7 screen (1080 x 2400
+px). The screens to look at first, in `light/`, `dark/` and `landscape/`:
+
+| Screen | File |
+| --- | --- |
+| Disclosure, before any permission prompt | `01-disclosure-p1.png` |
+| Live, idle, with the trend on the first screen | `03-live-p1.png` (`landscape/03-live-p1.png` turned) |
+| The Start dialog | `03b-start-dialog.png` |
+| Sessions | `04-sessions-p1.png` |
+| Session detail | `05-session-detail-p1.png` |
+| Settings, and its Test targets screen | `08-settings-p1.png`, `08b-test-targets-p1.png` |
+| About | `09-about-p1.png` |
+
+A screen that scrolls continues in `-p2.png` and on. The walk's own folder, `walk/`, holds the moments a session goes
+through, light and upright: `07-prestart-sheet.png` (the checks Start runs), `10-recording.png`, `13-session-detail.png`
+and `14-zip-ready.png`. `release-smoke-api36` has the same path through the signed, minified build, one screenshot per
+step.
 
 The emulator jobs run only in CI. `release_smoke.sh` also runs against a local emulator: with bash, adb and Python on the
 path, `RELEASE_APK=path/to/app-release.apk bash android/e2e/release_smoke.sh`.

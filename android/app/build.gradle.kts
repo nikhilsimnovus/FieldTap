@@ -60,7 +60,7 @@ android {
             version = release(36)
         }
         // Raise versionCode for every APK that installs over an older one: Android refuses a lower or equal code.
-        versionCode = 1
+        versionCode = 2
         versionName = "1.0.0"
 
         // The instrumented end-to-end tests in src/androidTest; android/e2e/run_e2e.sh runs them on the CI emulator.
