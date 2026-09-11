@@ -343,33 +343,70 @@ telephony_snapshot() {
     cut -c1-4000 | redact > "$OUT/checks/telephony-$1.txt" || true
 }
 
-# detect_lte_nr  sets EXPECT_LTE_NR to true when the modem reports an LTE or NR cell and to false when, for 30 s, it
-# reports only other cells (the API 31 emulator reports a single GSM cell). The API 36 emulator must report LTE or NR.
+# lte_nr_from_snapshot FILE  reads one telephony_snapshot: "true" when it lists an LTE or NR cell; "false" when it lists
+# only other cells; with no cell listed (the registry caches cell info only once something asked for it, so the API 31
+# emulator shows mCellInfo=null for a while), the service state's data radio technology while in service: LTE or NR
+# "true", any other known technology "false"; "unknown" otherwise.
+lte_nr_from_snapshot() {
+  local rat
+  if grep -qE 'CellInfo(Lte|Nr):' "$1"; then
+    echo true
+    return 0
+  fi
+  if grep -qE 'mCellInfo=\[CellInfo' "$1"; then
+    echo false
+    return 0
+  fi
+  if grep -qE 'm(Voice|Data)RegState=0\(IN_SERVICE\)' "$1"; then
+    rat=$(grep -oE 'getRilDataRadioTechnology=[0-9]+\([A-Za-z_0-9]+\)' "$1" | head -n 1 | sed -E 's/.*\((.*)\)/\1/')
+    case $rat in
+      LTE* | NR*)
+        echo true
+        return 0
+        ;;
+      "" | UNKNOWN | IWLAN) ;;
+      *)
+        echo false
+        return 0
+        ;;
+    esac
+  fi
+  echo unknown
+}
+
+# detect_lte_nr  sets EXPECT_LTE_NR from the telephony registry once five snapshots 2 s apart agree: true when the modem
+# reports LTE or NR, false when it reports another technology only (the API 31 emulator: a GSM cell on HSPA). The API 36
+# emulator must report LTE or NR.
 detect_lte_nr() {
-  local i other=0
+  local i answer last="" streak=0 basis
   EXPECT_LTE_NR=true
   for i in $(seq 60); do
     telephony_snapshot radio
-    if grep -qE 'CellInfo(Lte|Nr):' "$OUT/checks/telephony-radio.txt"; then
-      log "the modem reports LTE or NR cells: the LTE and NR checks apply"
-      return 0
-    fi
-    if grep -qE 'mCellInfo=\[CellInfo' "$OUT/checks/telephony-radio.txt"; then other=$((other + 1)); fi
-    if [ "$other" -ge 15 ]; then
-      EXPECT_LTE_NR=false
-      break
-    fi
+    answer=$(lte_nr_from_snapshot "$OUT/checks/telephony-radio.txt")
+    if [ "$answer" != unknown ] && [ "$answer" = "$last" ]; then streak=$((streak + 1)); else streak=1; fi
+    last=$answer
+    if [ "$answer" != unknown ] && [ "$streak" -ge 5 ]; then break; fi
     sleep 2
   done
-  if [ "$EXPECT_LTE_NR" = true ]; then
-    fail "the modem reported no cell at all in 120 s, see checks/telephony-radio.txt"
-    return 1
-  fi
-  log "the modem reports only $(grep -oE 'CellInfo[A-Za-z]+' "$OUT/checks/telephony-radio.txt" | sort -u | tr '\n' ' ')cells: no LTE or NR checks"
-  if [ "${API:-0}" -ge 36 ]; then
-    fail "API $API must report an LTE or NR cell, see checks/telephony-radio.txt"
-    return 1
-  fi
+  basis="cells: $(grep -oE 'CellInfo[A-Za-z]+' "$OUT/checks/telephony-radio.txt" | sort -u | tr '\n' ' ')data: $(grep -oE 'getRilDataRadioTechnology=[0-9]+\([A-Za-z_0-9]+\)' "$OUT/checks/telephony-radio.txt" | head -n 1)"
+  case $last in
+    true)
+      EXPECT_LTE_NR=true
+      log "the modem reports LTE or NR ($basis): the LTE and NR checks apply"
+      ;;
+    false)
+      EXPECT_LTE_NR=false
+      log "the modem reports no LTE or NR ($basis): a session without kpi rows is expected"
+      if [ "${API:-0}" -ge 36 ]; then
+        fail "API $API must report LTE or NR ($basis), see checks/telephony-radio.txt"
+        return 1
+      fi
+      ;;
+    *)
+      fail "the modem reported neither a cell nor a radio technology in 120 s, see checks/telephony-radio.txt"
+      return 1
+      ;;
+  esac
 }
 
 # wait_dead PID  until the app's process PID is gone.
