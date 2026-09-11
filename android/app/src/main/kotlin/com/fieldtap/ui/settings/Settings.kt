@@ -2,6 +2,7 @@ package com.fieldtap.ui.settings
 
 import android.app.Activity
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -56,6 +57,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -282,6 +284,9 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
  * Also "Instant cell updates", the only place the Phone permission is asked for (android/ARCHITECTURE.md decision 9),
  * walk mode's default, and withdrawing consent (decision 2). A zone's name never leaves this screen.
  *
+ * Switches save at once; the test fields save with Save. Leaving the screen, by the top bar or Back, with test edits
+ * that are not saved asks whether to discard them.
+ *
  * Owner: workstream `ui-setup`.
  */
 @Composable
@@ -310,6 +315,13 @@ fun SettingsScreen(
     var confirmPhoneOff by rememberSaveable { mutableStateOf(false) }
     var confirmWithdraw by rememberSaveable { mutableStateOf(false) }
     var editor by rememberSaveable(stateSaver = ZoneEditorStateSaver) { mutableStateOf<ZoneEditorState?>(null) }
+    // The test fields as typed, null until edited. Held here rather than in the card, so leaving can ask first.
+    var testsEdit by rememberSaveable(stateSaver = TestSettingsFormSaver) { mutableStateOf<TestSettingsForm?>(null) }
+    var confirmDiscard by rememberSaveable { mutableStateOf(false) }
+    val storedTests = state.settings?.tests
+    val unsavedTests = storedTests != null && testsEdit?.hasUnsavedChanges(storedTests) == true
+    val leave: () -> Unit = { if (unsavedTests) confirmDiscard = true else onBack() }
+    BackHandler(enabled = unsavedTests) { confirmDiscard = true }
 
     LifecycleResumeEffect(context) {
         phone = PhoneSnapshot.read(context, activity)
@@ -350,8 +362,10 @@ fun SettingsScreen(
         testsRejected = testProblems.isNotEmpty(),
         phone = phoneUi,
         preciseLocation = phone.preciseLocation,
-        onBack = onBack,
+        onBack = leave,
         onRetryLoad = viewModel::retryLoad,
+        testsForm = testsEdit,
+        onTestsFormChange = { form -> testsEdit = form },
         onSaveTests = viewModel::updateTests,
         onTestsDefaultOnChange = viewModel::setTestsDefaultOn,
         onWalkModeDefaultChange = viewModel::setWalkModeDefault,
@@ -459,6 +473,28 @@ fun SettingsScreen(
             text = { Text(text = stringResource(R.string.settings_consent_withdraw_body)) },
         )
     }
+    if (confirmDiscard) {
+        AlertDialog(
+            onDismissRequest = { confirmDiscard = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDiscard = false
+                        testsEdit = null
+                        onBack()
+                    },
+                ) {
+                    Text(text = stringResource(R.string.settings_discard_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDiscard = false }) { Text(text = stringResource(R.string.settings_discard_keep)) }
+            },
+            icon = { Icon(imageVector = FieldTapIcons.Warning, contentDescription = null) },
+            title = { Text(text = stringResource(R.string.settings_discard_title)) },
+            text = { Text(text = stringResource(R.string.settings_discard_body)) },
+        )
+    }
 }
 
 /** The Settings screen without its view model, dialogs or permission launcher, for previews. */
@@ -471,6 +507,8 @@ internal fun SettingsContent(
     preciseLocation: Boolean,
     onBack: () -> Unit,
     onRetryLoad: () -> Unit,
+    testsForm: TestSettingsForm?,
+    onTestsFormChange: (TestSettingsForm) -> Unit,
     onSaveTests: (TestSettings) -> Unit,
     onTestsDefaultOnChange: (Boolean) -> Unit,
     onWalkModeDefaultChange: (Boolean) -> Unit,
@@ -508,9 +546,11 @@ internal fun SettingsContent(
             item(key = "tests") {
                 TestsCard(
                     tests = settings.tests,
+                    edited = testsForm,
                     testsDefaultOn = settings.testsDefaultOn,
                     rejected = testsRejected,
                     onTestsDefaultOnChange = onTestsDefaultOnChange,
+                    onFormChange = onTestsFormChange,
                     onSave = onSaveTests,
                     modifier = Modifier.setupContentWidth(),
                 )
@@ -545,17 +585,19 @@ internal fun SettingsContent(
 @Composable
 private fun TestsCard(
     tests: TestSettings,
+    edited: TestSettingsForm?,
     testsDefaultOn: Boolean,
     rejected: Boolean,
     onTestsDefaultOnChange: (Boolean) -> Unit,
+    onFormChange: (TestSettingsForm) -> Unit,
     onSave: (TestSettings) -> Unit,
     modifier: Modifier,
 ) {
-    var form by rememberSaveable(tests, stateSaver = TestSettingsFormSaver) { mutableStateOf(TestSettingsForm.from(tests)) }
+    val form = edited ?: TestSettingsForm.from(tests)
     val parsed = form.parse(tests)
     val problems = (parsed as? TestSettingsParse.Invalid)?.problems.orEmpty()
     val defaults = TestSettingsForm.from(TestSettings())
-    val dirty = form != TestSettingsForm.from(tests)
+    val unsaved = form.hasUnsavedChanges(tests)
     val capMb = TestSettingsForm.parseWholeNumber(form.downloadCapMb) ?: 0L
     val secondsUnit = stringResource(R.string.settings_unit_seconds)
     val minutesUnit = stringResource(R.string.settings_unit_minutes)
@@ -582,7 +624,7 @@ private fun TestsCard(
         SetupSubheading(text = stringResource(R.string.settings_ping_heading))
         TestField(
             value = form.pingTarget,
-            onValueChange = { form = form.copy(pingTarget = it) },
+            onValueChange = { onFormChange(form.copy(pingTarget = it)) },
             label = stringResource(R.string.settings_ping_target),
             problem = problemText(problems, TestSettingsField.PING_TARGET, capMb),
             supportingText = stringResource(R.string.settings_ping_target_supporting),
@@ -590,7 +632,7 @@ private fun TestsCard(
         )
         TestField(
             value = form.pingIntervalS,
-            onValueChange = { form = form.copy(pingIntervalS = it) },
+            onValueChange = { onFormChange(form.copy(pingIntervalS = it)) },
             label = stringResource(R.string.settings_ping_interval),
             problem = problemText(problems, TestSettingsField.PING_INTERVAL, capMb),
             suffix = secondsUnit,
@@ -598,7 +640,7 @@ private fun TestsCard(
         )
         TestField(
             value = form.pingCount,
-            onValueChange = { form = form.copy(pingCount = it) },
+            onValueChange = { onFormChange(form.copy(pingCount = it)) },
             label = stringResource(R.string.settings_ping_count),
             problem = problemText(problems, TestSettingsField.PING_COUNT, capMb),
             keyboardType = KeyboardType.Number,
@@ -607,7 +649,7 @@ private fun TestsCard(
         SetupSubheading(text = stringResource(R.string.settings_download_heading))
         TestField(
             value = form.downloadUrl,
-            onValueChange = { form = form.copy(downloadUrl = it) },
+            onValueChange = { onFormChange(form.copy(downloadUrl = it)) },
             label = stringResource(R.string.settings_download_url),
             problem = problemText(problems, TestSettingsField.DOWNLOAD_URL, capMb),
             supportingText = stringResource(R.string.settings_download_url_supporting),
@@ -616,7 +658,7 @@ private fun TestsCard(
         if (hostLine != null) SetupParagraph(text = hostLine)
         TestField(
             value = form.downloadIntervalMin,
-            onValueChange = { form = form.copy(downloadIntervalMin = it) },
+            onValueChange = { onFormChange(form.copy(downloadIntervalMin = it)) },
             label = stringResource(R.string.settings_download_interval),
             problem = problemText(problems, TestSettingsField.DOWNLOAD_INTERVAL, capMb),
             suffix = minutesUnit,
@@ -624,7 +666,7 @@ private fun TestsCard(
         )
         TestField(
             value = form.downloadCapMb,
-            onValueChange = { form = form.copy(downloadCapMb = it) },
+            onValueChange = { onFormChange(form.copy(downloadCapMb = it)) },
             label = stringResource(R.string.settings_download_cap),
             problem = problemText(problems, TestSettingsField.DOWNLOAD_CAP, capMb),
             suffix = megabytesUnit,
@@ -632,7 +674,7 @@ private fun TestsCard(
         )
         TestField(
             value = form.sessionBudgetMb,
-            onValueChange = { form = form.copy(sessionBudgetMb = it) },
+            onValueChange = { onFormChange(form.copy(sessionBudgetMb = it)) },
             label = stringResource(R.string.settings_download_budget),
             problem = problemText(problems, TestSettingsField.SESSION_BUDGET, capMb),
             suffix = megabytesUnit,
@@ -640,13 +682,22 @@ private fun TestsCard(
             imeAction = ImeAction.Done,
         )
         if (rejected) StatusBanner(message = stringResource(R.string.settings_tests_rejected), tone = StatusTone.ERROR)
+        if (unsaved && !rejected) {
+            Text(
+                text = stringResource(R.string.settings_tests_unsaved),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.End,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(Spacing.Sm, Alignment.End),
             verticalArrangement = Arrangement.spacedBy(Spacing.Sm),
         ) {
             TextButton(
-                onClick = { form = defaults },
+                onClick = { onFormChange(defaults) },
                 enabled = form != defaults,
                 modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
             ) {
@@ -654,7 +705,7 @@ private fun TestsCard(
             }
             Button(
                 onClick = { (parsed as? TestSettingsParse.Valid)?.let { valid -> onSave(valid.settings) } },
-                enabled = dirty && parsed is TestSettingsParse.Valid,
+                enabled = unsaved && parsed is TestSettingsParse.Valid,
                 modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
             ) {
                 Text(text = stringResource(R.string.settings_tests_save))
@@ -727,6 +778,7 @@ private fun MeasurementCard(
     ).joinToString(separator = " ")
     SectionCard(
         title = stringResource(R.string.settings_section_measurement),
+        subtitle = stringResource(R.string.settings_measurement_note),
         icon = FieldTapIcons.SignalBars,
         modifier = modifier,
     ) {
@@ -831,7 +883,12 @@ private fun ZoneRow(zone: PrivacyZone, onEdit: () -> Unit, onDelete: () -> Unit)
 
 @Composable
 private fun ConsentCard(consent: ConsentRecord?, onWithdraw: () -> Unit, modifier: Modifier) {
-    SectionCard(title = stringResource(R.string.settings_section_consent), icon = FieldTapIcons.CheckCircle, modifier = modifier) {
+    SectionCard(
+        title = stringResource(R.string.settings_section_consent),
+        subtitle = stringResource(R.string.settings_consent_note),
+        icon = FieldTapIcons.CheckCircle,
+        modifier = modifier,
+    ) {
         if (consent != null && Consent.isCurrent(consent)) {
             SetupParagraph(text = stringResource(R.string.settings_consent_given, SetupFormats.date(consent.grantedUtcMs)))
             OutlinedButton(
@@ -1025,18 +1082,22 @@ private val ZoneEditorStateSaver: Saver<ZoneEditorState?, Any> = listSaver<ZoneE
 
 private const val FORM_SAVED_FIELDS = 7
 
-/** Keeps unsaved test settings across a rotation. */
-private val TestSettingsFormSaver: Saver<TestSettingsForm, Any> = listSaver<TestSettingsForm, String>(
+/** Keeps typed test settings across a rotation; nothing typed (null) saves as an empty list. */
+private val TestSettingsFormSaver: Saver<TestSettingsForm?, Any> = listSaver<TestSettingsForm?, String>(
     save = { form ->
-        listOf(
-            form.pingTarget,
-            form.pingIntervalS,
-            form.pingCount,
-            form.downloadUrl,
-            form.downloadIntervalMin,
-            form.downloadCapMb,
-            form.sessionBudgetMb,
-        )
+        if (form == null) {
+            emptyList()
+        } else {
+            listOf(
+                form.pingTarget,
+                form.pingIntervalS,
+                form.pingCount,
+                form.downloadUrl,
+                form.downloadIntervalMin,
+                form.downloadCapMb,
+                form.sessionBudgetMb,
+            )
+        }
     },
     restore = { values ->
         if (values.size != FORM_SAVED_FIELDS) {
@@ -1077,6 +1138,8 @@ private fun SettingsPreview() {
             preciseLocation = true,
             onBack = {},
             onRetryLoad = {},
+            testsForm = null,
+            onTestsFormChange = {},
             onSaveTests = {},
             onTestsDefaultOnChange = {},
             onWalkModeDefaultChange = {},

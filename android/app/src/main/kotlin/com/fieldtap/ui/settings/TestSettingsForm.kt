@@ -185,6 +185,18 @@ internal data class TestSettingsForm(
         return if (problems.isEmpty()) TestSettingsParse.Valid(settings) else TestSettingsParse.Invalid(problems)
     }
 
+    /**
+     * True when this form holds edits that saving would apply to [saved]: its text is not how [saved] is shown, and it
+     * does not parse to [saved]. Spaces or a leading zero are not edits, and neither is an untouched form over stored
+     * values the rules no longer accept. Text that cannot be saved is an edit. The Settings screen asks before leaving
+     * with such edits.
+     */
+    fun hasUnsavedChanges(saved: TestSettings): Boolean {
+        if (this == from(saved)) return false
+        val parsed = parse(saved)
+        return parsed !is TestSettingsParse.Valid || parsed.settings != saved
+    }
+
     companion object {
         /** Up to 9 digits, so a value times its unit never overflows. */
         private val WHOLE_NUMBER = Regex("[0-9]{1,9}")

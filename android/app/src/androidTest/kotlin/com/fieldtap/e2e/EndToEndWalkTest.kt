@@ -164,6 +164,10 @@ class EndToEndWalkTest {
         screens.replaceText(R.string.settings_download_cap, DOWNLOAD_CAP_MB.toString())
         screens.replaceText(R.string.settings_download_budget, SESSION_BUDGET_MB.toString())
         Espresso.closeSoftKeyboard()
+        // Leaving with these edits unsaved asks first instead of dropping them: keep editing, then save.
+        screens.back()
+        screens.awaitText(R.string.settings_discard_title)
+        screens.click(hasText(E2e.string(R.string.settings_discard_keep)) and hasClickAction())
         val save = hasText(E2e.string(R.string.settings_tests_save)) and hasClickAction()
         screens.scrollTo(save)
         screens.await(save and isEnabled())

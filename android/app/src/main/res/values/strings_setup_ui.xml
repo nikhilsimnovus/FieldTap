@@ -217,8 +217,8 @@
     <string name="settings_save_failed">Settings could not be saved. Try again.</string>
     <string name="settings_section_tests">Ping and download tests</string>
     <string name="settings_tests_network_note">Tests run on the mobile network only, never on Wi-Fi.</string>
-    <string name="settings_tests_default">Tick tests in the Start dialog</string>
-    <string name="settings_tests_default_supporting">Tests stay off unless ticked for a session. This only sets the starting tick.</string>
+    <string name="settings_tests_default">Run tests by default</string>
+    <string name="settings_tests_default_supporting">You can still change this each time you start a session.</string>
     <string name="settings_ping_heading">Ping</string>
     <string name="settings_ping_target">Target</string>
     <string name="settings_ping_target_supporting">Host name or IPv4 address. Leave empty to turn ping off.</string>
@@ -240,6 +240,11 @@
     <string name="settings_tests_save">Save</string>
     <string name="settings_tests_restore">Restore defaults</string>
     <string name="settings_tests_saved">Test settings saved</string>
+    <string name="settings_tests_unsaved">Your changes to these tests are not saved yet.</string>
+    <string name="settings_discard_title">Discard unsaved test settings?</string>
+    <string name="settings_discard_body">Your changes to the ping and download tests have not been saved.</string>
+    <string name="settings_discard_confirm">Discard</string>
+    <string name="settings_discard_keep">Keep editing</string>
     <string name="settings_tests_rejected">These test settings were not saved. Check the fields marked in red.</string>
     <!-- %1$d and %2$d are the lowest and highest allowed values. -->
     <string name="settings_problem_whole_number">Enter a whole number from %1$d to %2$d.</string>
@@ -249,6 +254,7 @@
     <!-- %1$d is the download cap in MB. -->
     <string name="settings_problem_budget">The budget must be at least one download (%1$d MB), or no download can run.</string>
     <string name="settings_section_measurement">Measurement</string>
+    <string name="settings_measurement_note">Changes here apply at once.</string>
     <string name="settings_instant_updates">Instant cell updates</string>
     <string name="settings_instant_updates_supporting">Lets Android push cell changes as they happen, on top of FieldTap’s regular requests. Needs the Phone permission; FieldTap never reads your number or SIM identifiers.</string>
     <string name="settings_instant_updates_blocked">The Phone permission was refused. Allow it in app settings.</string>
@@ -285,6 +291,7 @@
     <string name="settings_zone_fix">GPS position</string>
     <string name="settings_zone_save">Save</string>
     <string name="settings_section_consent">Consent</string>
+    <string name="settings_consent_note">Sessions start only after you accept the disclosure.</string>
     <!-- %1$s is a date. -->
     <string name="settings_consent_given">You accepted the disclosure on %1$s.</string>
     <string name="settings_consent_outdated">You accepted an earlier version of the disclosure. Accept the current one before your next session.</string>

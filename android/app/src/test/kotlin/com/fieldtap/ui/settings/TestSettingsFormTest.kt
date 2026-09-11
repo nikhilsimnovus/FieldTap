@@ -192,6 +192,31 @@ class TestSettingsFormTest {
         )
     }
 
+    @Test
+    fun anUntouchedFormHasNoUnsavedChanges() {
+        assertFalse(TestSettingsForm.from(defaults).hasUnsavedChanges(defaults))
+        // Stored values the rules reject, or that round to the text shown, are not edits until the text changes.
+        val outOfRange = defaults.copy(pingCount = -1)
+        assertFalse(TestSettingsForm.from(outOfRange).hasUnsavedChanges(outOfRange))
+        val rounded = defaults.copy(pingIntervalMs = 60_499)
+        assertFalse(TestSettingsForm.from(rounded).hasUnsavedChanges(rounded))
+        assertTrue(TestSettingsForm.from(rounded).copy(pingIntervalS = "61").hasUnsavedChanges(rounded))
+    }
+
+    @Test
+    fun editsStayUnsavedUntilTheSettingsHoldThem() {
+        val form = TestSettingsForm.from(defaults)
+
+        assertFalse("spaces and a leading zero change nothing", form.copy(pingIntervalS = " 060 ").hasUnsavedChanges(defaults))
+        assertTrue(form.copy(pingIntervalS = "30").hasUnsavedChanges(defaults))
+        assertTrue(form.copy(downloadUrl = "").hasUnsavedChanges(defaults))
+        assertTrue("text that cannot be saved is still an edit", form.copy(pingIntervalS = "x").hasUnsavedChanges(defaults))
+
+        val edited = form.copy(pingTarget = "10.0.2.2", pingIntervalS = "30")
+        val saved = (edited.parse(defaults) as TestSettingsParse.Valid).settings
+        assertFalse("once saved, the same text is no longer an edit", edited.hasUnsavedChanges(saved))
+    }
+
     private fun problemsOf(form: TestSettingsForm): List<TestSettingsProblem> =
         (form.parse(defaults) as TestSettingsParse.Invalid).problems
 
