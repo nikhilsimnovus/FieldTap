@@ -21,8 +21,11 @@ internal data class ServingIndices(
  * Picks the serving cells and reads service state.
  *
  * [select]:
- * - Primary: the first cell with `connectionStatus == 1` (primary serving). When no cell reports a
- *   connection status at all (every value null), the first registered LTE or NR cell. Otherwise none.
+ * - Primary: the first cell with `connectionStatus == 1` (primary serving). When no cell reports primary
+ *   serving, the first registered LTE or NR cell, whatever the other cells report: a registered cell is the
+ *   one the phone is registered on, and some radio HALs report `CONNECTION_NONE` (0) for it, for example
+ *   while idle or on the Android 12 emulator, where requiring a status of 1 left sessions without a single
+ *   serving cell. Without a registered LTE or NR cell, none.
  * - NSA secondary: when the primary is LTE, the first NR cell with `connectionStatus == 2`
  *   (secondary serving). Never when the primary is NR (SA) or absent.
  * - A GSM, WCDMA, TD-SCDMA or CDMA primary is returned, but never yields a kpi.csv row.
@@ -33,8 +36,9 @@ internal data class ServingIndices(
  *
  * [isOutOfService]: `OUT_OF_SERVICE` or `POWER_OFF`, and not emergency-only.
  *
- * Tests: NSA (LTE status 1, NR status 2, LTE neighbour status 0); SA; vendor without statuses;
- * two primaries (first wins); emergency-only with a registered NR cell.
+ * Tests: NSA (LTE status 1, NR status 2, LTE neighbour status 0); SA; vendor without statuses; a HAL
+ * reporting status 0 for the registered cell; two primaries (first wins); emergency-only with a registered
+ * NR cell.
  *
  * Owner: workstream `radio-core`.
  */
@@ -70,7 +74,6 @@ object ServingCellSelector {
     private fun primaryIndex(cells: List<CellSnapshot>): Int? {
         val byStatus = cells.indexOfFirst { it.connectionStatus == CellSnapshot.CONNECTION_PRIMARY_SERVING }
         if (byStatus >= 0) return byStatus
-        if (cells.any { it.connectionStatus != null }) return null
         return cells.indexOfFirst { it.registered && (it.rat == Rat.LTE || it.rat == Rat.NR) }.takeIf { it >= 0 }
     }
 }

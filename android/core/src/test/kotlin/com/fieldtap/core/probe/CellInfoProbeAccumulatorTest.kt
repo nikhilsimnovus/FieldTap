@@ -143,9 +143,20 @@ class CellInfoProbeAccumulatorTest {
     }
 
     @Test
-    fun statusesWithoutAPrimaryMeanNoServingCell() {
+    fun aRegisteredCellReportedAsNotConnectedStillServes() {
+        // The Android 12 emulator reports its registered cell with status 0 (CONNECTION_NONE).
         val probe = CellInfoProbeAccumulator()
         probe.onAnswer(answer(lte(status = 0, timestampMs = 1_000)))
+
+        assertEquals(listOf("lte"), probe.result().servingRats)
+        assertTrue(probe.result().connectionStatusReported)
+        assertFalse(probe.notes().contains("No primary serving cell was identified, so no KPI rows would be written."))
+    }
+
+    @Test
+    fun statusesWithoutAPrimaryOrARegisteredCellMeanNoServingCell() {
+        val probe = CellInfoProbeAccumulator()
+        probe.onAnswer(answer(lteNeighbour(), nr(status = 2, registered = false, timestampMs = 1_000)))
 
         assertTrue(probe.result().servingRats.isEmpty())
         assertTrue(probe.result().connectionStatusReported)
