@@ -32,7 +32,7 @@ internal sealed interface NotificationModel {
 }
 
 /** The first line of a recording notification. */
-internal enum class RecordingHeadline { RECORDING, PAUSED, SAVING }
+internal enum class RecordingHeadline { RECORDING, PAUSED, WAITING_FOR_LOCATION, LOCATION_OFF, SAVING }
 
 /**
  * Text pieces of the session notification. Words come from string resources; numbers are formatted here.
@@ -40,8 +40,14 @@ internal enum class RecordingHeadline { RECORDING, PAUSED, SAVING }
  * Owner: workstream `service-and-tests`.
  */
 internal object NotificationText {
+    /**
+     * Saving wins; then location off, because nothing at all is measured then; then waiting for a location fix
+     * (privacy zones set and no fix shows where the phone is); then paused in a zone; else recording.
+     */
     fun headline(snapshot: RecorderSnapshot): RecordingHeadline = when {
         snapshot.stopping -> RecordingHeadline.SAVING
+        !snapshot.locationEnabled -> RecordingHeadline.LOCATION_OFF
+        snapshot.waitingForLocation -> RecordingHeadline.WAITING_FOR_LOCATION
         snapshot.paused -> RecordingHeadline.PAUSED
         else -> RecordingHeadline.RECORDING
     }

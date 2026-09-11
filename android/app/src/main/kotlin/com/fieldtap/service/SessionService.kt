@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -134,9 +135,10 @@ class SessionService : LifecycleService(), ServiceHost {
  * The session notification. Channel [SessionService.CHANNEL_ID], low importance, no sound. Actions are
  * PendingIntents to [SessionService] (immutable), so no exported receiver exists.
  *
- * - Recording: title "Recording session" (or paused in a privacy zone, or saving), text with the serving RAT,
- *   RSRP and the newest sample's age, a chronometer from the session start, and Mark and Stop (Mark is hidden
- *   while paused, both while saving).
+ * - Recording: title "Recording session" (or location off, waiting for a location fix, paused in a privacy zone, or
+ *   saving), text with the serving RAT, RSRP and the newest sample's age (or what the state means), a chronometer
+ *   from the session start, and Mark and Stop. Mark shows only while recording, Stop unless saving; with location
+ *   off a Location settings action comes first, because nothing is recorded until location is back on.
  * - Soak: elapsed against planned time, a progress bar, and Stop test.
  * - Tapping opens the app. Nothing on it names the session or a place, so it is safe on the lock screen.
  *
@@ -153,6 +155,15 @@ class SessionNotification(private val context: Context) {
     private val markIntent: PendingIntent by lazy { serviceIntent(SessionService.ACTION_MARK, REQUEST_MARK) }
 
     private val stopIntent: PendingIntent by lazy { serviceIntent(SessionService.ACTION_STOP, REQUEST_STOP) }
+
+    private val locationSettingsIntent: PendingIntent by lazy {
+        PendingIntent.getActivity(
+            context,
+            REQUEST_LOCATION_SETTINGS,
+            Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PENDING_FLAGS,
+        )
+    }
 
     fun ensureChannel() {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
@@ -180,11 +191,15 @@ class SessionNotification(private val context: Context) {
         val title = when (headline) {
             RecordingHeadline.RECORDING -> context.getString(R.string.notification_recording_title)
             RecordingHeadline.PAUSED -> context.getString(R.string.notification_paused_title)
+            RecordingHeadline.WAITING_FOR_LOCATION -> context.getString(R.string.notification_waiting_title)
+            RecordingHeadline.LOCATION_OFF -> context.getString(R.string.notification_location_off_title)
             RecordingHeadline.SAVING -> context.getString(R.string.notification_saving_title)
         }
         val text = when (headline) {
             RecordingHeadline.RECORDING -> servingText(snapshot)
             RecordingHeadline.PAUSED -> context.getString(R.string.notification_paused_text)
+            RecordingHeadline.WAITING_FOR_LOCATION -> context.getString(R.string.notification_waiting_text)
+            RecordingHeadline.LOCATION_OFF -> context.getString(R.string.notification_location_off_text)
             RecordingHeadline.SAVING -> context.getString(R.string.notification_saving_text)
         }
         val builder = builder()
@@ -193,6 +208,9 @@ class SessionNotification(private val context: Context) {
             .setUsesChronometer(true)
             .setShowWhen(true)
             .setWhen(snapshot.startedUtcMs)
+        if (headline == RecordingHeadline.LOCATION_OFF) {
+            builder.addAction(0, context.getString(R.string.notification_action_location_settings), locationSettingsIntent)
+        }
         if (headline == RecordingHeadline.RECORDING) {
             builder.addAction(0, context.getString(R.string.notification_action_mark), markIntent)
         }
@@ -283,6 +301,7 @@ class SessionNotification(private val context: Context) {
         const val REQUEST_OPEN = 0
         const val REQUEST_MARK = 1
         const val REQUEST_STOP = 2
+        const val REQUEST_LOCATION_SETTINGS = 3
         const val PROGRESS_MAX = 1_000
         const val PENDING_FLAGS = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     }

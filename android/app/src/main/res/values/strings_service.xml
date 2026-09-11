@@ -6,6 +6,7 @@
     <string name="notification_action_stop">Stop</string>
     <string name="notification_action_mark">Mark</string>
     <string name="notification_action_stop_test">Stop test</string>
+    <string name="notification_action_location_settings">Location settings</string>
 
     <string name="notification_starting_title">Starting session</string>
     <string name="notification_starting_text">Preparing the session folder</string>
@@ -13,6 +14,10 @@
     <string name="notification_recording_title">Recording session</string>
     <string name="notification_paused_title">Paused in a privacy zone</string>
     <string name="notification_paused_text">Nothing is written until you leave the zone</string>
+    <string name="notification_location_off_title">Location is off: nothing is recorded</string>
+    <string name="notification_location_off_text">Android gives no cell information or GPS fixes until location is back on</string>
+    <string name="notification_waiting_title">Waiting for a location fix</string>
+    <string name="notification_waiting_text">You set privacy zones, so nothing is written until a fix shows you are outside them</string>
     <string name="notification_saving_title">Saving session</string>
     <string name="notification_saving_text">Writing the last rows and closing the files</string>
 

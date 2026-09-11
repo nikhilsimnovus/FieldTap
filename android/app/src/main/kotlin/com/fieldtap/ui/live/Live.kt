@@ -9,11 +9,13 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
@@ -76,6 +79,7 @@ import com.fieldtap.core.live.ChartPoint
 import com.fieldtap.core.live.LiveCell
 import com.fieldtap.core.live.LiveState
 import com.fieldtap.core.live.LiveStateReducer
+import com.fieldtap.core.nettest.TestSettings
 import com.fieldtap.core.privacy.Consent
 import com.fieldtap.core.readiness.SettingsTarget
 import com.fieldtap.core.session.RecorderSnapshot
@@ -120,6 +124,7 @@ import com.fieldtap.ui.components.StatusChip
 import com.fieldtap.ui.components.ToggleRow
 import com.fieldtap.ui.components.TopBarAction
 import com.fieldtap.ui.components.statusIcon
+import com.fieldtap.ui.settings.TestSettingsRules
 import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.FieldTapIcons
 import com.fieldtap.ui.theme.Formats
@@ -128,6 +133,7 @@ import com.fieldtap.ui.theme.SignalScale
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
 import com.fieldtap.ui.theme.StatusTone
+import com.fieldtap.ui.theme.tabular
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -157,12 +163,20 @@ data class LiveUiState(
     val prestart: PrestartState = PrestartState.None,
     /** A one-off message for the snackbar, until [LiveViewModel.consumeMessage] is called with its id. */
     val message: LiveMessageEvent? = null,
+    /** The test targets in Settings, named in the Start dialog; null until settings were read. */
+    val tests: TestSettings? = null,
 ) {
     /** Mark writes an event only while recording outside a privacy zone. */
     val markEnabled: Boolean get() = LivePresentation.markAllowed(status)
 
-    /** The running session is paused in a privacy zone. */
+    /** The running session is paused because a fix showed the phone inside a privacy zone. */
     val pausedInZone: Boolean get() = LivePresentation.pausedInZone(status)
+
+    /** The running session writes nothing until a location fix shows the phone outside its privacy zones. */
+    val waitingForLocation: Boolean get() = LivePresentation.waitingForLocation(status)
+
+    /** Location services are off: nothing new can be measured, and a running session records nothing. */
+    val locationOff: Boolean get() = LivePresentation.locationOff(live, status)
 }
 
 /** A short confirmation or failure shown in the snackbar. */
@@ -210,6 +224,7 @@ class LiveViewModel(private val graph: AppGraph) : ViewModel() {
                 recovered = recovered,
                 prestart = local.prestart,
                 message = local.message,
+                tests = settings?.tests,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -411,6 +426,7 @@ private suspend fun <T> attempt(block: suspend () -> T): T? = try {
  * Language never implies decoding or signalling.
  *
  * @param onOpenDisclosure opens the consent notice, the fix for a start refused for want of consent.
+ * @param onOpenSession opens one session's detail, from the banner of a session that recovery closed.
  *
  * Owner: workstream `ui-session`.
  */
@@ -424,6 +440,7 @@ fun LiveScreen(
     onOpenAbout: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenDisclosure: () -> Unit = onOpenSettings,
+    onOpenSession: (String) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.recheckReadiness() }
@@ -445,6 +462,7 @@ fun LiveScreen(
         onOpenSettings = onOpenSettings,
         onOpenAbout = onOpenAbout,
         onOpenDisclosure = onOpenDisclosure,
+        onOpenSession = onOpenSession,
         nowWallMs = viewModel::nowWallMs,
     )
     // Walk mode forces the dark surface; otherwise this follows the system like the activity's theme.
@@ -504,12 +522,15 @@ fun SignalChart(
 }
 
 /**
- * Walk mode: while [enabled], keeps the screen on (`FLAG_KEEP_SCREEN_ON`), dims it
- * (`WindowManager.LayoutParams.screenBrightness` low) and uses a dark surface, and prompts to turn Wi-Fi
- * off or plug in so Android's 2 s interval applies. Restores the window on dispose. No wake lock.
+ * Walk mode: while [enabled], keeps the screen on (`FLAG_KEEP_SCREEN_ON`) with a dark surface, and prompts to turn
+ * Wi-Fi off or plug in so Android's 2 s interval applies. Clears the flag on dispose. No wake lock.
  *
- * This effect owns the window flag and brightness; the dark surface and the Wi-Fi prompt are drawn by
- * [LiveScreen]. Outside an activity (previews) it does nothing.
+ * It never sets the window brightness. A window brightness overrides adaptive brightness and the user's own slider,
+ * so a fixed low level would leave the numbers unreadable in daylight, where walks happen; the dark surface is what
+ * saves power on a screen that stays on.
+ *
+ * This effect owns the window flag; the dark surface and the Wi-Fi prompt are drawn by [LiveScreen]. Outside an
+ * activity (previews) it does nothing.
  *
  * Owner: workstream `ui-session`.
  */
@@ -521,19 +542,11 @@ fun WalkModeEffect(enabled: Boolean) {
         if (!enabled || window == null) {
             onDispose { }
         } else {
-            val previousBrightness = window.attributes.screenBrightness
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            window.attributes = window.attributes.also { it.screenBrightness = WALK_MODE_BRIGHTNESS }
-            onDispose {
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                window.attributes = window.attributes.also { it.screenBrightness = previousBrightness }
-            }
+            onDispose { window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
         }
     }
 }
-
-/** Window brightness in walk mode: dim, but readable at a glance outdoors. */
-private const val WALK_MODE_BRIGHTNESS: Float = 0.15f
 
 /** Longest name, note or place the Start dialog accepts. */
 private const val MAX_TEXT_LENGTH: Int = 120
@@ -559,6 +572,7 @@ private data class LiveActions(
     val onOpenSettings: () -> Unit,
     val onOpenAbout: () -> Unit,
     val onOpenDisclosure: () -> Unit,
+    val onOpenSession: (String) -> Unit,
     val nowWallMs: () -> Long,
 )
 
@@ -602,17 +616,21 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
     Scaffold(
         modifier = modifier,
         topBar = {
-            FieldTapTopBar(
-                title = stringResource(R.string.live_title),
-                actions = {
-                    TopBarAction(
-                        icon = FieldTapIcons.Sessions,
-                        contentDescription = stringResource(R.string.live_action_sessions),
-                        onClick = actions.onOpenSessions,
-                    )
-                    LiveOverflowMenu(actions)
-                },
-            )
+            Column {
+                FieldTapTopBar(
+                    title = stringResource(R.string.live_title),
+                    actions = {
+                        TopBarAction(
+                            icon = FieldTapIcons.Sessions,
+                            contentDescription = stringResource(R.string.live_action_sessions),
+                            onClick = actions.onOpenSessions,
+                        )
+                        LiveOverflowMenu(actions)
+                    },
+                )
+                // Pinned under the bar while a session runs: whether it is collecting stays in view however far the list scrolls.
+                LivePresentation.recordingStrip(state.status, state.live)?.let { RecordingStatusStrip(it) }
+            }
         },
         bottomBar = {
             LiveActionBar(
@@ -636,6 +654,7 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
 
     if (startDialogOpen) {
         StartSessionDialog(
+            tests = state.tests,
             testsDefaultOn = state.testsDefaultOn,
             walkMode = state.walkMode,
             nowWallMs = actions.nowWallMs,
@@ -709,6 +728,25 @@ private fun OverflowItem(@StringRes label: Int, icon: ImageVector, onClick: () -
     )
 }
 
+/** What the Live list items need, gathered once, so the phone layout and the wide layout share the same items. */
+private class LiveParts(
+    val state: LiveUiState,
+    val actions: LiveActions,
+    val labels: SignalQualityLabels,
+    val notes: List<ListenerNote>,
+    val locationMissing: Boolean,
+    @StringRes val refusalText: Int?,
+    val requestPreciseLocation: () -> Unit,
+    val openLocationSettings: () -> Unit,
+    val openWifiSettings: () -> Unit,
+)
+
+/**
+ * Upright on a phone: the serving cell, its 5-minute trend, the cadence and the network and GPS state first, so what an
+ * engineer glances at while walking is on the first screen; the cell details and neighbours follow. From
+ * [Sizes.WideLayoutMinWidth] (landscape phones, tablets) two panes: the serving cell and its details on one side, the
+ * trend, cadence and network state on the other, both in view.
+ */
 @Composable
 private fun LiveList(
     state: LiveUiState,
@@ -717,116 +755,230 @@ private fun LiveList(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val labels = signalQualityLabels()
-    val live = state.live
-    val notes = LivePresentation.listenerNotes(live.listeners)
-    val locationMissing = notes.any { it.listener == RadioListener.CELL_INFO_REQUEST && it.outcome == ListenerOutcome.MISSING_PERMISSION }
-    val refusalText = refusalMessageRes(state.refusal)
+    val notes = LivePresentation.listenerNotes(state.live.listeners)
+    val requestMissing: (ListenerNote) -> Boolean = { it.listener == RadioListener.CELL_INFO_REQUEST && it.outcome == ListenerOutcome.MISSING_PERMISSION }
+    val parts = LiveParts(
+        state = state,
+        actions = actions,
+        labels = signalQualityLabels(),
+        notes = notes.filterNot(requestMissing),
+        locationMissing = notes.any(requestMissing),
+        refusalText = refusalMessageRes(state.refusal),
+        requestPreciseLocation = requestPreciseLocation,
+        openLocationSettings = { SystemSettings.open(context, SettingsTarget.LOCATION_SOURCE) },
+        openWifiSettings = { SystemSettings.open(context, SettingsTarget.WIFI) },
+    )
+    val gutter = screenGutter()
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        if (maxWidth >= Sizes.WideLayoutMinWidth) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = gutter),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
+            ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    contentPadding = PaddingValues(vertical = Spacing.Lg),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
+                ) {
+                    bannerItems(parts)
+                    servingTilesItem(parts)
+                    servingCardItem(parts)
+                    neighboursItem(parts)
+                }
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    contentPadding = PaddingValues(vertical = Spacing.Lg),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
+                ) {
+                    chartItem(parts)
+                    cadenceItem(parts)
+                    networkItem(parts)
+                    limitsItem(parts)
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = gutter, vertical = Spacing.Lg),
+                verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                bannerItems(parts)
+                servingTilesItem(parts)
+                chartItem(parts)
+                cadenceItem(parts)
+                networkItem(parts)
+                servingCardItem(parts)
+                neighboursItem(parts)
+                limitsItem(parts)
+            }
+        }
+    }
+}
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = screenGutter(), vertical = Spacing.Lg),
-        verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        items(state.recovered, key = { "recovered:" + it.dirName }) { outcome ->
+/** Recovered sessions, a refusal, then what stops measuring (location off, no permission, waiting for a fix, a zone), then the Wi-Fi prompt. */
+private fun LazyListScope.bannerItems(parts: LiveParts) {
+    val state = parts.state
+    val actions = parts.actions
+    items(state.recovered, key = { "recovered:" + it.dirName }) { outcome ->
+        val name = outcome.name ?: outcome.dirName
+        StatusBanner(
+            title = stringResource(if (outcome.interrupted) R.string.live_recovered_title else R.string.live_recovered_stopped_title),
+            message = if (outcome.interrupted) {
+                stringResource(R.string.live_recovered_message, name, exitReasonWords(outcome.stoppedBy))
+            } else {
+                stringResource(R.string.live_recovered_stopped_message, name)
+            },
+            tone = StatusTone.WARNING,
+            actionLabel = stringResource(R.string.live_action_open_session),
+            onAction = {
+                actions.onAcknowledgeRecovered(outcome.dirName)
+                actions.onOpenSession(outcome.dirName)
+            },
+            dismissContentDescription = stringResource(R.string.action_dismiss),
+            onDismiss = { actions.onAcknowledgeRecovered(outcome.dirName) },
+            modifier = Modifier.contentWidth(),
+        )
+    }
+    val refusalText = parts.refusalText
+    if (refusalText != null) {
+        item(key = "refusal") {
             StatusBanner(
-                title = stringResource(R.string.live_recovered_title),
-                message = stringResource(R.string.live_recovered_message, outcome.dirName, exitReasonWords(outcome.stoppedBy)),
+                message = stringResource(refusalText),
                 tone = StatusTone.WARNING,
-                actionLabel = stringResource(R.string.live_action_view_sessions),
-                onAction = actions.onOpenSessions,
                 dismissContentDescription = stringResource(R.string.action_dismiss),
-                onDismiss = { actions.onAcknowledgeRecovered(outcome.dirName) },
+                onDismiss = actions.onDismissRefusal,
                 modifier = Modifier.contentWidth(),
             )
         }
-        if (refusalText != null) {
-            item(key = "refusal") {
-                StatusBanner(
-                    message = stringResource(refusalText),
-                    tone = StatusTone.WARNING,
-                    dismissContentDescription = stringResource(R.string.action_dismiss),
-                    onDismiss = actions.onDismissRefusal,
-                    modifier = Modifier.contentWidth(),
-                )
-            }
-        }
-        if (locationMissing) {
-            item(key = "location-missing") {
-                StatusBanner(
-                    message = stringResource(R.string.live_note_request_missing),
-                    tone = StatusTone.ERROR,
-                    icon = FieldTapIcons.Location,
-                    actionLabel = stringResource(R.string.live_action_allow_location),
-                    onAction = requestPreciseLocation,
-                    modifier = Modifier.contentWidth(),
-                )
-            }
-        }
-        if (state.pausedInZone) {
-            item(key = "paused") {
-                StatusBanner(
-                    message = stringResource(R.string.live_paused_banner),
-                    tone = StatusTone.INFO,
-                    icon = FieldTapIcons.Shield,
-                    modifier = Modifier.contentWidth(),
-                )
-            }
-        }
-        if (LivePresentation.showWalkModeWifiPrompt(state.walkMode, live.conditions)) {
-            item(key = "walk-wifi") {
-                StatusBanner(
-                    message = stringResource(R.string.live_walk_wifi_prompt),
-                    tone = StatusTone.WARNING,
-                    icon = FieldTapIcons.Wifi,
-                    actionLabel = stringResource(R.string.live_action_wifi_settings),
-                    onAction = { SystemSettings.open(context, SettingsTarget.WIFI) },
-                    modifier = Modifier.contentWidth(),
-                )
-            }
-        }
-        item(key = "serving-tiles") {
-            ServingTiles(live = live, labels = labels, modifier = Modifier.contentWidth())
-        }
-        if (live.serving != null) {
-            item(key = "serving-card") {
-                ServingCard(live = live, labels = labels, modifier = Modifier.contentWidth())
-            }
-        }
-        item(key = "cadence") {
-            CadenceCard(
-                live = live,
-                walkMode = state.walkMode,
-                notes = notes.filterNot { it.listener == RadioListener.CELL_INFO_REQUEST && it.outcome == ListenerOutcome.MISSING_PERMISSION },
-                onWalkModeChange = actions.onWalkModeChange,
+    }
+    if (state.locationOff) {
+        item(key = "location-off") {
+            StatusBanner(
+                title = stringResource(R.string.issue_location_off_title),
+                message = stringResource(
+                    if (state.status is SessionStatus.Recording) R.string.live_location_off_recording else R.string.issue_location_off_detail,
+                ),
+                tone = StatusTone.ERROR,
+                icon = FieldTapIcons.Location,
+                actionLabel = stringResource(R.string.issue_location_off_fix),
+                onAction = parts.openLocationSettings,
                 modifier = Modifier.contentWidth(),
             )
         }
-        item(key = "chart") {
-            SectionCard(title = stringResource(R.string.live_section_chart), modifier = Modifier.contentWidth()) {
-                SignalChart(
-                    rsrp = live.rsrpSeries,
-                    sinr = live.sinrSeries,
-                    nowElapsedMs = live.nowElapsedMs,
-                    gapThresholdMs = ChartMath.gapThresholdMs(live.shortInterval),
-                )
-            }
+    }
+    if (parts.locationMissing) {
+        item(key = "location-missing") {
+            StatusBanner(
+                message = stringResource(R.string.live_note_request_missing),
+                tone = StatusTone.ERROR,
+                icon = FieldTapIcons.Location,
+                actionLabel = stringResource(R.string.live_action_allow_location),
+                onAction = parts.requestPreciseLocation,
+                modifier = Modifier.contentWidth(),
+            )
         }
-        item(key = "network") {
-            NetworkCard(live = live, modifier = Modifier.contentWidth())
+    }
+    if (state.waitingForLocation && !state.locationOff) {
+        item(key = "waiting-for-location") {
+            StatusBanner(
+                message = stringResource(R.string.live_waiting_location_banner),
+                tone = StatusTone.INFO,
+                icon = FieldTapIcons.Shield,
+                modifier = Modifier.contentWidth(),
+            )
         }
-        item(key = "neighbours") {
-            NeighboursCard(neighbours = live.neighbours, labels = labels, modifier = Modifier.contentWidth())
+    }
+    if (state.pausedInZone) {
+        item(key = "paused") {
+            StatusBanner(
+                message = stringResource(R.string.live_paused_banner),
+                tone = StatusTone.INFO,
+                icon = FieldTapIcons.Shield,
+                modifier = Modifier.contentWidth(),
+            )
         }
-        if (live.serving == null) {
-            item(key = "limits") {
-                LimitsStatementCard(
-                    title = stringResource(R.string.live_limits_title),
-                    statement = stringResource(R.string.limits_statement),
-                    modifier = Modifier.contentWidth(),
-                )
-            }
+    }
+    if (LivePresentation.showWalkModeWifiPrompt(state.walkMode, state.live.conditions)) {
+        item(key = "walk-wifi") {
+            StatusBanner(
+                message = stringResource(R.string.live_walk_wifi_prompt),
+                tone = StatusTone.WARNING,
+                icon = FieldTapIcons.Wifi,
+                actionLabel = stringResource(R.string.live_action_wifi_settings),
+                onAction = parts.openWifiSettings,
+                modifier = Modifier.contentWidth(),
+            )
+        }
+    }
+}
+
+private fun LazyListScope.servingTilesItem(parts: LiveParts) {
+    item(key = "serving-tiles") {
+        ServingTiles(live = parts.state.live, labels = parts.labels, modifier = Modifier.contentWidth())
+    }
+}
+
+private fun LazyListScope.servingCardItem(parts: LiveParts) {
+    if (parts.state.live.serving != null) {
+        item(key = "serving-card") {
+            ServingCard(live = parts.state.live, labels = parts.labels, modifier = Modifier.contentWidth())
+        }
+    }
+}
+
+private fun LazyListScope.chartItem(parts: LiveParts) {
+    item(key = "chart") {
+        val live = parts.state.live
+        SectionCard(title = stringResource(R.string.live_section_chart), modifier = Modifier.contentWidth()) {
+            SignalChart(
+                rsrp = live.rsrpSeries,
+                sinr = live.sinrSeries,
+                nowElapsedMs = live.nowElapsedMs,
+                gapThresholdMs = ChartMath.gapThresholdMs(live.shortInterval),
+            )
+        }
+    }
+}
+
+private fun LazyListScope.cadenceItem(parts: LiveParts) {
+    item(key = "cadence") {
+        CadenceCard(
+            live = parts.state.live,
+            walkMode = parts.state.walkMode,
+            notes = parts.notes,
+            onWalkModeChange = parts.actions.onWalkModeChange,
+            modifier = Modifier.contentWidth(),
+        )
+    }
+}
+
+private fun LazyListScope.networkItem(parts: LiveParts) {
+    item(key = "network") {
+        NetworkCard(live = parts.state.live, modifier = Modifier.contentWidth())
+    }
+}
+
+private fun LazyListScope.neighboursItem(parts: LiveParts) {
+    item(key = "neighbours") {
+        NeighboursCard(neighbours = parts.state.live.neighbours, labels = parts.labels, modifier = Modifier.contentWidth())
+    }
+}
+
+private fun LazyListScope.limitsItem(parts: LiveParts) {
+    if (parts.state.live.serving == null) {
+        item(key = "limits") {
+            LimitsStatementCard(
+                title = stringResource(R.string.live_limits_title),
+                statement = stringResource(R.string.limits_statement),
+                modifier = Modifier.contentWidth(),
+            )
         }
     }
 }
@@ -839,13 +991,13 @@ private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, modifier:
     val sinrQuality = SignalScale.quality(SignalMetric.SINR, serving?.sinr)
     val ageMs = live.servingAgeMs
     val absence = LivePresentation.servingAbsence(live)
-    val ageText = if (ageMs != null) {
-        stringResource(R.string.age_old, Formats.ageSeconds(ageMs))
+    val problem = LivePresentation.servingProblem(live)
+    val ageText = if (ageMs != null) stringResource(R.string.age_old, Formats.ageSeconds(ageMs)) else absenceBadge(absence)
+    // With a cell: its identity and operator, then why it may be ageing. Without: why there is none.
+    val supportingText = if (serving != null) {
+        listOfNotNull(servingSummary(serving), problem?.let { servingProblemLine(it) }).joinToString("\n")
     } else {
-        when (absence) {
-            is ServingAbsence.NoLteOrNrServing -> stringResource(R.string.live_no_lte_nr_badge)
-            ServingAbsence.WaitingForAnswer, null -> stringResource(R.string.live_waiting_first_measurement)
-        }
+        absenceDetail(absence)
     }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(Spacing.Md)) {
         MetricTile(
@@ -857,7 +1009,7 @@ private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, modifier:
             qualityLabel = if (serving != null) labels.of(rsrpQuality) else null,
             ageText = ageText,
             badge = live.badge,
-            supportingText = serving?.let { cellIdentity(it) } ?: absenceDetail(absence),
+            supportingText = supportingText,
             placeholder = UNKNOWN_VALUE,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -1135,6 +1287,7 @@ private fun LiveActionBar(
 
 @Composable
 private fun StartSessionDialog(
+    tests: TestSettings?,
     testsDefaultOn: Boolean,
     walkMode: Boolean,
     nowWallMs: () -> Long,
@@ -1218,7 +1371,7 @@ private fun StartSessionDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(text = stringResource(R.string.live_tests_title), style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            text = stringResource(R.string.live_tests_supporting),
+                            text = tests?.let { testsTargetsText(it) } ?: stringResource(R.string.live_tests_supporting),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1490,12 +1643,112 @@ private fun gpsText(chip: GpsChip): String = when (chip) {
     is GpsChip.Lost -> stringResource(R.string.live_gps_lost, Formats.ageSeconds(chip.ageMs))
 }
 
-/** The hero tile's line under the value when Android names no LTE or NR serving cell; null otherwise. */
+/** The hero tile's badge when there is no serving cell. */
+@Composable
+private fun absenceBadge(absence: ServingAbsence?): String = stringResource(
+    when (absence) {
+        ServingAbsence.LocationOff -> R.string.live_absence_location_off
+        ServingAbsence.RadioOff -> R.string.live_absence_radio_off
+        ServingAbsence.NoService -> R.string.live_absence_no_service
+        ServingAbsence.EmergencyOnly -> R.string.live_absence_emergency
+        is ServingAbsence.NoLteOrNrServing -> R.string.live_no_lte_nr_badge
+        ServingAbsence.WaitingForAnswer, null -> R.string.live_waiting_first_measurement
+    },
+)
+
+/** The hero tile's line under the value when there is no serving cell: what stops it, or null while waiting. */
 @Composable
 private fun absenceDetail(absence: ServingAbsence?): String? = when (absence) {
+    ServingAbsence.LocationOff -> stringResource(R.string.issue_location_off_detail)
+    ServingAbsence.RadioOff -> stringResource(R.string.live_absence_radio_off_detail)
+    ServingAbsence.NoService -> stringResource(R.string.live_absence_no_service_detail)
+    ServingAbsence.EmergencyOnly -> stringResource(R.string.live_absence_emergency_detail)
     is ServingAbsence.NoLteOrNrServing ->
         absence.network?.let { stringResource(R.string.live_no_lte_nr_detail_on, it) } ?: stringResource(R.string.live_no_lte_nr_detail)
     ServingAbsence.WaitingForAnswer, null -> null
+}
+
+/** Why the serving cell on screen may be ageing, or that it is an emergency-only camp. */
+@Composable
+private fun servingProblemLine(problem: ServingAbsence): String? = when (problem) {
+    ServingAbsence.LocationOff -> stringResource(R.string.live_problem_location_off)
+    ServingAbsence.RadioOff -> stringResource(R.string.live_problem_radio_off)
+    ServingAbsence.NoService -> stringResource(R.string.live_problem_no_service)
+    ServingAbsence.EmergencyOnly -> stringResource(R.string.live_problem_emergency)
+    ServingAbsence.WaitingForAnswer, is ServingAbsence.NoLteOrNrServing -> null
+}
+
+/** "LTE · PCI 212 · EARFCN 66786 · band 66 · Verizon · 311480": the cell, then who runs it. */
+@Composable
+private fun servingSummary(cell: LiveCell): String =
+    (listOf(cellIdentity(cell)) + listOfNotNull(cell.operator, cell.plmn)).joinToString(stringResource(R.string.value_separator))
+
+/** What the tests reach, as Settings has them, under the Start dialog's tests choice. */
+@Composable
+private fun testsTargetsText(tests: TestSettings): String {
+    val ping = tests.pingTarget.trim().takeIf { it.isNotEmpty() }
+    val host = TestSettingsRules.downloadHost(tests.downloadUrl)
+    return when {
+        ping != null && host != null -> stringResource(R.string.live_tests_targets_both, ping, host)
+        ping != null -> stringResource(R.string.live_tests_targets_ping, ping)
+        host != null -> stringResource(R.string.live_tests_targets_download, host)
+        else -> stringResource(R.string.live_tests_targets_none)
+    }
+}
+
+/** The running session's state, its fresh samples and GPS, in one line under the top bar. */
+@Composable
+private fun RecordingStatusStrip(strip: RecordingStrip, modifier: Modifier = Modifier) {
+    val tone = when (strip.state) {
+        RecordingState.RECORDING -> StatusTone.SUCCESS
+        RecordingState.LOCATION_OFF -> StatusTone.ERROR
+        RecordingState.PAUSED_IN_ZONE, RecordingState.WAITING_FOR_LOCATION, RecordingState.SAVING -> StatusTone.INFO
+    }
+    val family = FieldTapDesign.colors.status(tone)
+    val stateText = stringResource(
+        when (strip.state) {
+            RecordingState.RECORDING -> R.string.live_recording
+            RecordingState.PAUSED_IN_ZONE -> R.string.live_strip_paused
+            RecordingState.WAITING_FOR_LOCATION -> R.string.live_strip_waiting
+            RecordingState.LOCATION_OFF -> R.string.live_strip_location_off
+            RecordingState.SAVING -> R.string.live_stopping
+        },
+    )
+    val samples = pluralStringResource(
+        R.plurals.live_strip_samples,
+        strip.freshSamples.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+        strip.freshSamples,
+    )
+    val gpsText = stringResource(
+        when (strip.gps) {
+            StripGps.FIX -> R.string.live_strip_gps_fix
+            StripGps.LOST -> R.string.live_strip_gps_lost
+            StripGps.WAITING -> R.string.live_strip_gps_waiting
+        },
+    )
+    Surface(color = family.container, contentColor = family.onContainer, modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics(mergeDescendants = true) {}
+                .padding(horizontal = screenGutter(), vertical = Spacing.Xs),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
+        ) {
+            Icon(imageVector = statusIcon(tone), contentDescription = null, modifier = Modifier.size(Sizes.IconSmall))
+            Text(
+                text = stateText + stringResource(R.string.value_separator) + samples,
+                style = MaterialTheme.typography.labelLarge.tabular(),
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = if (strip.gps == StripGps.FIX) FieldTapIcons.GpsFixed else FieldTapIcons.GpsOff,
+                contentDescription = null,
+                modifier = Modifier.size(Sizes.IconSmall),
+            )
+            Text(text = gpsText, style = MaterialTheme.typography.labelLarge)
+        }
+    }
 }
 
 /** "LTE · PCI 212 · EARFCN 66786 · band 66". */
@@ -1619,5 +1872,6 @@ private val PreviewActions = LiveActions(
     onOpenSettings = {},
     onOpenAbout = {},
     onOpenDisclosure = {},
+    onOpenSession = {},
     nowWallMs = { 1_789_050_600_000L },
 )

@@ -20,6 +20,18 @@ class NotificationTextTest {
     }
 
     @Test
+    fun locationOffAndWaitingForAFixAreSaidInsteadOfARecordingThatCollectsNothing() {
+        assertEquals(RecordingHeadline.LOCATION_OFF, NotificationText.headline(snapshot().copy(locationEnabled = false)))
+        assertEquals(
+            RecordingHeadline.LOCATION_OFF,
+            NotificationText.headline(snapshot(paused = true).copy(locationEnabled = false, waitingForLocation = true)),
+        )
+        assertEquals(RecordingHeadline.WAITING_FOR_LOCATION, NotificationText.headline(snapshot().copy(waitingForLocation = true)))
+        assertEquals(RecordingHeadline.WAITING_FOR_LOCATION, NotificationText.headline(snapshot(paused = true).copy(waitingForLocation = true)))
+        assertEquals(RecordingHeadline.SAVING, NotificationText.headline(snapshot(stopping = true).copy(locationEnabled = false)))
+    }
+
+    @Test
     fun ratLabelsAreUpperCase() {
         assertEquals("LTE", NotificationText.ratLabel(ServingRat.LTE))
         assertEquals("NR", NotificationText.ratLabel(ServingRat.NR))

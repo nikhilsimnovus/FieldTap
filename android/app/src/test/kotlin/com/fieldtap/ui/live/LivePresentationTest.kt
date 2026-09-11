@@ -13,6 +13,7 @@ import com.fieldtap.core.input.ServiceStateSnapshot
 import com.fieldtap.core.input.SignalSnapshot
 import com.fieldtap.core.live.LiveCell
 import com.fieldtap.core.live.LiveState
+import com.fieldtap.core.session.RecorderSnapshot
 import com.fieldtap.core.session.StartRequest
 import com.fieldtap.format.FixProvider
 import com.fieldtap.format.Rat
@@ -183,6 +184,84 @@ class LivePresentationTest {
         val onNr = hspa.copy(networkType = 20)
         assertEquals(ServingAbsence.NoLteOrNrServing(null), LivePresentation.servingAbsence(LiveState(shortInterval = true, data = onNr)))
     }
+
+    @Test
+    fun withNoCellTheTilesNameWhatStopsMeasurementsBeforeBlamingTheNetwork() {
+        // With location off Android keeps answering, with no cells: the old wording blamed the network.
+        assertEquals(ServingAbsence.LocationOff, LivePresentation.servingAbsence(LiveState(shortInterval = true, locationEnabled = false)))
+        assertEquals(ServingAbsence.LocationOff, LivePresentation.servingAbsence(LiveState(locationEnabled = false, service = service(ServiceRegState.POWER_OFF))))
+        assertEquals(ServingAbsence.RadioOff, LivePresentation.servingAbsence(LiveState(shortInterval = true, service = service(ServiceRegState.POWER_OFF))))
+        assertEquals(
+            ServingAbsence.EmergencyOnly,
+            LivePresentation.servingAbsence(LiveState(shortInterval = true, service = service(ServiceRegState.OUT_OF_SERVICE, emergencyOnly = true))),
+        )
+        assertEquals(ServingAbsence.NoService, LivePresentation.servingAbsence(LiveState(shortInterval = true, service = service(ServiceRegState.OUT_OF_SERVICE))))
+        assertEquals(ServingAbsence.NoService, LivePresentation.servingAbsence(LiveState(service = service(ServiceRegState.OUT_OF_SERVICE))))
+        assertEquals(
+            ServingAbsence.NoLteOrNrServing(null),
+            LivePresentation.servingAbsence(LiveState(shortInterval = true, locationEnabled = true, service = service(ServiceRegState.IN_SERVICE))),
+        )
+    }
+
+    @Test
+    fun aServingCellStillOnScreenGetsTheReasonItAges() {
+        val lte = LiveCell(Rat.LTE, 212, 66_786, 66, -90, -9, 12, "311480", "Verizon", 1, 1_000)
+        assertNull(LivePresentation.servingProblem(LiveState(serving = lte, locationEnabled = true, service = service(ServiceRegState.IN_SERVICE))))
+        assertEquals(ServingAbsence.LocationOff, LivePresentation.servingProblem(LiveState(serving = lte, locationEnabled = false)))
+        assertEquals(ServingAbsence.NoService, LivePresentation.servingProblem(LiveState(serving = lte, service = service(ServiceRegState.OUT_OF_SERVICE))))
+        // A SIM-less phone camps on a cell for emergency calls and reports it as registered.
+        assertEquals(
+            ServingAbsence.EmergencyOnly,
+            LivePresentation.servingProblem(LiveState(serving = lte, service = service(ServiceRegState.IN_SERVICE, emergencyOnly = true))),
+        )
+        assertNull(LivePresentation.servingAbsence(LiveState(serving = lte, locationEnabled = false)))
+    }
+
+    @Test
+    fun theRecordingStripSaysWhetherTheSessionIsCollecting() {
+        val live = LiveState()
+        assertNull(LivePresentation.recordingStrip(SessionStatus.Idle, live))
+
+        val recording = snapshot()
+        assertEquals(RecordingStrip(RecordingState.RECORDING, 42, StripGps.FIX), LivePresentation.recordingStrip(SessionStatus.Recording(recording), live))
+        assertEquals(
+            RecordingStrip(RecordingState.LOCATION_OFF, 42, StripGps.LOST),
+            LivePresentation.recordingStrip(SessionStatus.Recording(recording.copy(locationEnabled = false, hasRecentFix = false, trackRows = 30)), live),
+        )
+        assertEquals(
+            RecordingState.LOCATION_OFF,
+            LivePresentation.recordingStrip(SessionStatus.Recording(recording), live.copy(locationEnabled = false))?.state,
+        )
+        val waiting = recording.copy(paused = true, waitingForLocation = true, hasRecentFix = false, trackRows = 0)
+        assertEquals(RecordingStrip(RecordingState.WAITING_FOR_LOCATION, 42, StripGps.WAITING), LivePresentation.recordingStrip(SessionStatus.Recording(waiting), live))
+        assertTrue(LivePresentation.waitingForLocation(SessionStatus.Recording(waiting)))
+        assertFalse("waiting for a fix is not a pause inside a zone", LivePresentation.pausedInZone(SessionStatus.Recording(waiting)))
+        assertFalse(LivePresentation.markAllowed(SessionStatus.Recording(waiting)))
+
+        val inZone = recording.copy(paused = true)
+        assertEquals(RecordingState.PAUSED_IN_ZONE, LivePresentation.recordingStrip(SessionStatus.Recording(inZone), live)?.state)
+        assertTrue(LivePresentation.pausedInZone(SessionStatus.Recording(inZone)))
+        assertEquals(RecordingState.SAVING, LivePresentation.recordingStrip(SessionStatus.Stopping(recording.copy(stopping = true)), live)?.state)
+
+        assertTrue(LivePresentation.locationOff(live.copy(locationEnabled = false), SessionStatus.Idle))
+        assertFalse(LivePresentation.locationOff(live, SessionStatus.Idle))
+    }
+
+    private fun snapshot(): RecorderSnapshot = RecorderSnapshot(
+        dirName = "20260910-143000_Walk",
+        startedUtcMs = 1_789_050_600_000L,
+        elapsedMs = 93_000,
+        servingRat = null,
+        servingRsrpDbm = null,
+        newestSampleAgeMs = null,
+        paused = false,
+        freshSamples = 42,
+        repeatsDropped = 40,
+        eventsWritten = 3,
+        trackRows = 90,
+        hasRecentFix = true,
+        stopping = false,
+    )
 
     @Test
     fun theButtonIsBusyWhileChecksOrTheStartCallRun() {

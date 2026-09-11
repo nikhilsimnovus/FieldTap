@@ -49,7 +49,7 @@
     <string name="stop_other">Stopped: %1$s</string>
     <string name="exit_unknown">reason not recorded</string>
     <string name="exit_exit_self">the app exited</string>
-    <string name="exit_signaled">the process was ended by a signal</string>
+    <string name="exit_signaled">the app was killed</string>
     <string name="exit_low_memory">low memory</string>
     <string name="exit_crash">the app crashed</string>
     <string name="exit_crash_native">a native crash</string>
@@ -82,7 +82,7 @@
     <string name="live_recording">Recording</string>
     <string name="live_mark">Mark</string>
     <!-- Content description of the Mark button while marks are off. -->
-    <string name="live_mark_unavailable">Mark, unavailable while paused in a privacy zone</string>
+    <string name="live_mark_unavailable">Mark, unavailable while logging is paused</string>
 
     <string name="live_rsrp_lte">LTE RSRP</string>
     <string name="live_rsrp_nr">NR SS-RSRP</string>
@@ -91,6 +91,17 @@
     <string name="live_sinr">SINR</string>
     <string name="live_waiting_first_measurement">Waiting for the first cell measurement</string>
     <string name="live_no_lte_nr_badge">No LTE or NR cell</string>
+    <string name="live_absence_location_off">Location is off</string>
+    <string name="live_absence_radio_off">Radio off</string>
+    <string name="live_absence_radio_off_detail">The phone radio is off, for example in airplane mode. Turn it on to measure cells.</string>
+    <string name="live_absence_no_service">No service</string>
+    <string name="live_absence_no_service_detail">The phone has no network here, not even for emergency calls.</string>
+    <string name="live_absence_emergency">Emergency calls only</string>
+    <string name="live_absence_emergency_detail">No SIM service: the phone is only camped for emergency calls and reports no cell to measure.</string>
+    <string name="live_problem_location_off">Location is off: no new measurements</string>
+    <string name="live_problem_radio_off">Radio off: no new measurements</string>
+    <string name="live_problem_no_service">No service: this is the last cell measured</string>
+    <string name="live_problem_emergency">Emergency calls only: no SIM service on this cell</string>
     <string name="live_no_lte_nr_detail">Android reports no LTE or NR serving cell. FieldTap measures LTE and NR.</string>
     <!-- %1$s is Android's data network type, e.g. HSPA. -->
     <string name="live_no_lte_nr_detail_on">Android reports no LTE or NR serving cell; mobile data is on %1$s. FieldTap measures LTE and NR.</string>
@@ -131,7 +142,7 @@
     <string name="live_cadence_screen_on">Screen on, Wi-Fi off</string>
     <string name="live_row_measured_interval">Measured interval (median of the last 10)</string>
     <string name="live_walk_mode">Walk mode</string>
-    <string name="live_walk_mode_supporting">Keeps the screen on, dark and dim, so Android can refresh every 2 s. Uses no wake lock. In a pocket with the screen off, Android refreshes every 10 s and, on battery, sends no signal-strength updates.</string>
+    <string name="live_walk_mode_supporting">Keeps the screen on with a dark surface, so Android can refresh every 2 s. Brightness follows your phone. Uses no wake lock. In a pocket with the screen off, Android refreshes every 10 s and, on battery, sends no signal-strength updates.</string>
     <string name="live_walk_wifi_prompt">Wi-Fi is connected on battery, so Android refreshes cell info only every 10 s. Turn Wi-Fi off or plug in for 2 s updates.</string>
     <string name="live_action_wifi_settings">Wi-Fi settings</string>
 
@@ -198,10 +209,25 @@
     <string name="live_limits_title">What FieldTap reads</string>
 
     <string name="live_paused_banner">Logging is paused in a privacy zone. Nothing is written until you leave it, and marks are off.</string>
+    <string name="live_waiting_location_banner">Waiting for a location fix. You set privacy zones, so nothing is written until a fix shows you are outside them.</string>
+    <string name="live_location_off_recording">The session is running but records nothing: Android returns no cell information and no GPS fixes while location is off. Turn location back on.</string>
     <string name="live_recovered_title">Session interrupted</string>
-    <!-- %1$s is the session folder name, %2$s one of the exit_* phrases. -->
-    <string name="live_recovered_message">%1$s stopped unexpectedly (%2$s). It was closed at its last save and kept.</string>
-    <string name="live_action_view_sessions">View sessions</string>
+    <!-- %1$s is the session name, %2$s one of the exit_* phrases. -->
+    <string name="live_recovered_message">Android closed FieldTap while “%1$s” was recording (%2$s). It was saved up to its last few seconds and kept.</string>
+    <string name="live_recovered_stopped_title">Session closed</string>
+    <!-- %1$s is the session name. -->
+    <string name="live_recovered_stopped_message">“%1$s” stopped but could not be saved at the time. It is closed now, with everything it recorded.</string>
+    <string name="live_action_open_session">Open session</string>
+    <string name="live_strip_paused">Paused in a privacy zone</string>
+    <string name="live_strip_waiting">Waiting for a location fix</string>
+    <string name="live_strip_location_off">Location off: not recording</string>
+    <plurals name="live_strip_samples">
+        <item quantity="one">%1$d fresh sample</item>
+        <item quantity="other">%1$d fresh samples</item>
+    </plurals>
+    <string name="live_strip_gps_fix">GPS fix</string>
+    <string name="live_strip_gps_lost">GPS lost</string>
+    <string name="live_strip_gps_waiting">No GPS yet</string>
     <string name="live_refusal_blank_name">Give the session a name to start it.</string>
     <string name="live_refusal_running">A session is already running.</string>
 
@@ -213,6 +239,13 @@
     <string name="live_field_place_supporting">A place name, never coordinates</string>
     <string name="live_tests_title">Run ping and download tests</string>
     <string name="live_tests_supporting">Uses mobile data to reach the servers named in Settings.</string>
+    <!-- %1$s is the ping target, %2$s the download host, both as Settings has them. -->
+    <string name="live_tests_targets_both">Uses mobile data: pings %1$s and downloads from %2$s, as set in Settings.</string>
+    <!-- %1$s is the ping target. -->
+    <string name="live_tests_targets_ping">Uses mobile data: pings %1$s, as set in Settings. The download test is off.</string>
+    <!-- %1$s is the download host. -->
+    <string name="live_tests_targets_download">Uses mobile data: downloads from %1$s, as set in Settings. Ping is off.</string>
+    <string name="live_tests_targets_none">Both tests are off in Settings.</string>
     <!-- %1$s is the local time, e.g. 14:30. -->
     <string name="live_default_name">Walk %1$s</string>
     <string name="live_start_confirm">Start</string>

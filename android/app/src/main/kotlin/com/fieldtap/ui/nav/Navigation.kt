@@ -153,6 +153,7 @@ fun FieldTapNavHost(
                 onOpenSettings = dropUnlessResumed { navController.navigate(Routes.SETTINGS) { launchSingleTop = true } },
                 onOpenAbout = dropUnlessResumed { navController.navigate(Routes.ABOUT) { launchSingleTop = true } },
                 onOpenDisclosure = dropUnlessResumed { navController.navigate(Routes.DISCLOSURE) { launchSingleTop = true } },
+                onOpenSession = { dirName -> navController.navigate(Routes.sessionDetail(dirName)) { launchSingleTop = true } },
             )
         }
         composable(Routes.SESSIONS) {

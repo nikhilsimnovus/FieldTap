@@ -84,10 +84,22 @@ data class ListenerNote(val listener: RadioListener, val outcome: ListenerOutcom
 /** A signal-strength report newer than the serving cell's measurement (display only, never recorded). */
 data class SignalReport(val rsrpDbm: Int, val ageMs: Long)
 
-/** Why the serving tiles show no serving cell. */
+/** Why the serving tiles show no serving cell, or no new measurement of it. */
 sealed interface ServingAbsence {
     /** No cell-info answer has arrived since the sources started. */
     data object WaitingForAnswer : ServingAbsence
+
+    /** Location services are off: Android returns no cell information and no fixes. */
+    data object LocationOff : ServingAbsence
+
+    /** The phone's radio is off, for example in airplane mode. */
+    data object RadioOff : ServingAbsence
+
+    /** Out of service: no network, not even for emergency calls. */
+    data object NoService : ServingAbsence
+
+    /** Only emergency calls: usually no SIM, or a SIM the network does not accept. Camped cells are still measured. */
+    data object EmergencyOnly : ServingAbsence
 
     /**
      * Answers arrive, but none names an LTE or NR serving cell: the phone is on another network, as the API 31
@@ -96,6 +108,15 @@ sealed interface ServingAbsence {
      */
     data class NoLteOrNrServing(val network: String?) : ServingAbsence
 }
+
+/** What the running session is doing, for the status strip under the top bar. */
+enum class RecordingState { RECORDING, PAUSED_IN_ZONE, WAITING_FOR_LOCATION, LOCATION_OFF, SAVING }
+
+/** The GPS part of the status strip. */
+enum class StripGps { WAITING, FIX, LOST }
+
+/** The status strip shown, not scrolling, while a session runs: the facts that decide whether it is collecting. */
+data class RecordingStrip(val state: RecordingState, val freshSamples: Long, val gps: StripGps)
 
 /**
  * The decisions behind the Live screen's words and tones, pure so they are unit-tested; the composables
@@ -203,20 +224,72 @@ object LivePresentation {
     }
 
     /**
-     * Why there is no serving cell to show: null while there is one; [ServingAbsence.WaitingForAnswer] before the
-     * first cell-info answer; otherwise answers arrive without an LTE or NR serving cell, which the tiles must say
-     * instead of "waiting", because measurements are arriving.
+     * Why there is no serving cell to show: null while there is one. Otherwise the first that applies: location off
+     * (Android then answers with no cells at all), the radio off, emergency calls only, out of service; then
+     * [ServingAbsence.WaitingForAnswer] before the first cell-info answer; otherwise answers arrive without an LTE or
+     * NR serving cell, which the tiles must say instead of "waiting", because measurements are arriving.
      */
     fun servingAbsence(live: LiveState): ServingAbsence? = when {
         live.serving != null -> null
-        live.shortInterval == null -> ServingAbsence.WaitingForAnswer
-        else -> ServingAbsence.NoLteOrNrServing(dataNetworkName(live.data)?.takeUnless { it.startsWith("LTE") || it.startsWith("NR") })
+        else -> servingProblem(live) ?: if (live.shortInterval == null) {
+            ServingAbsence.WaitingForAnswer
+        } else {
+            ServingAbsence.NoLteOrNrServing(dataNetworkName(live.data)?.takeUnless { it.startsWith("LTE") || it.startsWith("NR") })
+        }
+    }
+
+    /**
+     * A condition that stops or limits measurements, whether or not a serving cell is still on screen: location off,
+     * the radio off, emergency calls only, or out of service, in that order; null when none applies. With a serving
+     * cell on screen it explains why that cell is ageing, or that it is an emergency-only camp.
+     */
+    fun servingProblem(live: LiveState): ServingAbsence? {
+        val service = live.service
+        return when {
+            live.locationEnabled == false -> ServingAbsence.LocationOff
+            service == null -> null
+            service.state == ServiceRegState.POWER_OFF -> ServingAbsence.RadioOff
+            ServingCellSelector.isEmergencyOnly(service) -> ServingAbsence.EmergencyOnly
+            service.state == ServiceRegState.OUT_OF_SERVICE -> ServingAbsence.NoService
+            else -> null
+        }
     }
 
     /** Mark writes an event only while recording outside a privacy zone. */
     fun markAllowed(status: SessionStatus): Boolean = status is SessionStatus.Recording && !status.snapshot.paused
 
-    fun pausedInZone(status: SessionStatus): Boolean = status is SessionStatus.Recording && status.snapshot.paused
+    /** Paused because a fix showed the phone inside a privacy zone (not because no fix shows where it is). */
+    fun pausedInZone(status: SessionStatus): Boolean =
+        status is SessionStatus.Recording && status.snapshot.paused && !status.snapshot.waitingForLocation
+
+    /** The running session writes nothing until a location fix shows the phone outside its privacy zones. */
+    fun waitingForLocation(status: SessionStatus): Boolean = status is SessionStatus.Recording && status.snapshot.waitingForLocation
+
+    /** Location services are off, as the Live feed or the running session learnt it: nothing new can be measured. */
+    fun locationOff(live: LiveState, status: SessionStatus): Boolean =
+        live.locationEnabled == false || (status is SessionStatus.Recording && !status.snapshot.locationEnabled)
+
+    /** The status strip while a session records or saves; null otherwise. */
+    fun recordingStrip(status: SessionStatus, live: LiveState): RecordingStrip? {
+        val snapshot = when (status) {
+            is SessionStatus.Recording -> status.snapshot
+            is SessionStatus.Stopping -> status.snapshot
+            else -> return null
+        }
+        val state = when {
+            status is SessionStatus.Stopping || snapshot.stopping -> RecordingState.SAVING
+            locationOff(live, status) -> RecordingState.LOCATION_OFF
+            snapshot.waitingForLocation -> RecordingState.WAITING_FOR_LOCATION
+            snapshot.paused -> RecordingState.PAUSED_IN_ZONE
+            else -> RecordingState.RECORDING
+        }
+        val gps = when {
+            snapshot.hasRecentFix -> StripGps.FIX
+            snapshot.trackRows == 0L && live.lastFix == null -> StripGps.WAITING
+            else -> StripGps.LOST
+        }
+        return RecordingStrip(state = state, freshSamples = snapshot.freshSamples, gps = gps)
+    }
 
     /** The session button: busy while the checks or the start call run, then the session's own state. */
     fun buttonState(status: SessionStatus, prestart: PrestartState): SessionButtonState = when (status) {

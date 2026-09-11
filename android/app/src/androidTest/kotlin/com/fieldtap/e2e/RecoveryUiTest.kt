@@ -38,7 +38,9 @@ class RecoveryUiTest {
         val screens = Screens(compose, GROUP)
 
         screens.await(hasText(E2e.string(R.string.live_recovered_title)), RECOVERY_WAIT_MS, unmerged = true)
-        screens.await(hasTextMatching(Regex(Regex.escape(dirName))), RECOVERY_WAIT_MS, unmerged = true)
+        // The banner names the session as the engineer named it, not by its folder.
+        val sessionName = runBlocking { E2e.graph.sessions.detail(dirName) }?.meta?.name ?: throw AssertionError("Session $dirName has no name")
+        screens.await(hasTextMatching(Regex(Regex.escape(sessionName))), RECOVERY_WAIT_MS, unmerged = true)
         screens.shot("16-live-recovered-$scenario")
 
         val detail = runBlocking { E2e.graph.sessions.detail(dirName) } ?: throw AssertionError("Session $dirName is gone")
