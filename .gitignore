@@ -42,3 +42,11 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# Build output
+build/
+dist/
+*.egg-info/
+
+# Android platform-tools, fetched by `fieldtap setup --install-adb`
+tools/platform-tools/

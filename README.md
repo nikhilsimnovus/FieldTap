@@ -6,10 +6,46 @@ Qualcomm diag port, decode it, and land it in Wireshark as clean GSMTAP.
 FieldTap is the real-network counterpart to the Simnovus simulator line. UESIM, ORUSIM
 and RuSIM simulate a UE in the lab. FieldTap taps a real one in the field.
 
-> **Status: pre-alpha. No shippable code yet.**
-> This repository currently contains planning and architecture documentation only.
-> Read [`docs/ROADMAP.md`](docs/ROADMAP.md) for what has to happen next, and
-> [`docs/LICENSING.md`](docs/LICENSING.md) for the decision that gates everything else.
+> **Status: pre-alpha. A clean-room implementation exists; it has not yet been run
+> against a handset.**
+> The `fieldtap` package speaks diag itself and imports nothing from QCSuper or SCAT.
+> It decodes LTE and NR RRC/NAS log records and writes pcapng that stock Wireshark
+> dissects. The unit tests and `fieldtap selftest` pass against Wireshark 4.0, but the
+> header layout tables are verified only against a synthetic corpus. Read
+> [`docs/ROADMAP.md`](docs/ROADMAP.md) for what has to happen next, and
+> [`docs/LICENSING.md`](docs/LICENSING.md) for the decision that still gates the
+> business model.
+
+## Quick start
+
+    pip install -e ".[all]"
+    fieldtap setup --install-adb       # check Wireshark, adb, drivers; fetch what is missing
+    fieldtap demo                      # a simulated drive test end to end, no handset needed
+    fieldtap auto                      # then plug a phone in
+
+`fieldtap auto` is the product: it watches USB, and for every handset that appears it
+enables the diag port, configures the log mask, captures, tags with GPS, optionally runs
+ping and download tests on the phone, and writes a report when the phone is unplugged.
+Several phones can be connected at once; each gets its own session and report. On
+Windows, `FieldTap-Auto.cmd` does the same thing by double-click.
+
+    fieldtap auto --profile all --traffic ping,download --live
+
+Each session lands in `captures/<timestamp>_<name>/`:
+
+| File | What it is |
+| --- | --- |
+| `capture.qmdl` | the raw diag stream, exactly as the modem sent it |
+| `capture.pcapng` | decoded RRC/NAS, opens in stock Wireshark |
+| `report.html` | the session report: KPIs, events, route map, call flow |
+| `summary.json` | the same numbers for machines |
+| `events.csv` | procedures and failures with 3GPP causes |
+| `kpi.csv` | RSRP/RSRQ/SINR timeline, GPS-tagged |
+| `track.csv`, `traffic.csv`, `cells.csv` | route, active tests, serving cells |
+
+Single-shot commands still exist: `capture`, `decode`, `info`, `flow`, `kpi`, `events`,
+`report`, `sessions`, `logcodes`, `selftest`. `device/` holds the root helper for the adb
+transport; it needs the Android NDK and is untested on hardware.
 
 ## Where the project actually stands
 
@@ -26,9 +62,10 @@ Every component in that chain is third-party. Specifically:
 | `diag_nr_rrc_dissector.lua` | Ships **inside QCSuper** | Not original work. Covered by QCSuper's GPLv3. |
 | `cots_nr_dissector.lua` | Commercial trial, `makemytechnology.com` | **Expired, compiled bytecode, not redistributable.** Currently the only NR decode path — and it no longer runs. |
 
-The honest summary: FieldTap today is a workflow assembled from other people's tools,
-one of which has stopped working because its trial ran out. Turning it into a product
-means replacing the parts that are not ours. That is what the roadmap is about.
+The honest summary: until Sep 2026 FieldTap was a workflow assembled from other people's
+tools, one of which stopped working because its trial ran out. The `fieldtap` package
+replaces the capture and decode parts with our own code. What remains is proving that
+code on real handsets, which is what the roadmap is about.
 
 ## What is deliberately not in this repository
 
@@ -51,6 +88,13 @@ explains what changed and Roadmap task 0.1 is now more urgent, not less.
 | [`docs/LICENSING.md`](docs/LICENSING.md) | The GPL problem and the four ways out |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Target design and the decode pipeline |
 | [`docs/COMPETITIVE-LANDSCAPE.md`](docs/COMPETITIVE-LANDSCAPE.md) | XCAL-Mobile, NSG, QualiPoc and where FieldTap fits |
+| [`docs/DEVICE-SETUP.md`](docs/DEVICE-SETUP.md) | Getting a handset and this laptop ready |
+| [`docs/MACOS.md`](docs/MACOS.md) | Testing on a MacBook, where no driver is needed |
+| [`docs/CAPTURE-OPTIONS.md`](docs/CAPTURE-OPTIONS.md) | What hardware can actually capture frames, and what to buy |
+| [`docs/UI-PLAN.md`](docs/UI-PLAN.md) | The local web UI plan |
+| [`docs/APP-AND-CLOUD-PLAN.md`](docs/APP-AND-CLOUD-PLAN.md) | Accounts and upload, the market gap, and the redaction rule that gates it |
+| [`docs/APP-PLAN.md`](docs/APP-PLAN.md) | The Android app: what it measures, how it is built, and what it cannot do |
+| [`docs/research/`](docs/research/) | Competitor analysis, Windows/diag mechanics, Qualcomm log layouts |
 | [`captures/README.md`](captures/README.md) | Capture handling policy and how to reproduce |
 | [`third_party/README.md`](third_party/README.md) | Vendored QCSuper: provenance, and what it changed about the licence |
 | [`tools/README.md`](tools/README.md) | External dependency setup |

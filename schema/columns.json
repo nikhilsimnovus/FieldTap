@@ -1,0 +1,3311 @@
+{
+  "format": "fieldtap-session/1",
+  "schema_version": 1,
+  "encoding": {
+    "charset": "utf-8",
+    "byte_order_mark": false,
+    "csv_line_terminator": "\r\n",
+    "csv_delimiter": ",",
+    "csv_quote": "\"",
+    "csv_quoting": "minimal",
+    "csv_quote_if_contains": [
+      ",",
+      "\"",
+      "\r",
+      "\n"
+    ],
+    "csv_blank": "",
+    "csv_max_line_chars": 1048576,
+    "text_line_breaks": "replace_with_space",
+    "number_rounding": "half_even_exact_binary",
+    "number_digits": "ascii",
+    "decimal_separator": ".",
+    "negative_zero": false,
+    "json_line_terminator": "\n",
+    "json_indent": 2,
+    "json_ascii_only": false
+  },
+  "patterns": {
+    "match": "full",
+    "python": "re.fullmatch(pattern, value)",
+    "kotlin": "Regex(pattern).matches(value)",
+    "syntax": "explicit character classes such as [0-9] and [^ \\t\\r\\n]; no \\s, \\d, \\w, \\b or '.', which mean different things in Python, the JVM and Android's ICU, except in [\\s\\S], which is any character in all three",
+    "search_patterns": [
+      "directory.slug_replace_pattern",
+      "identifiers.digit_token_pattern"
+    ],
+    "python_only_patterns": [
+      "timestamps.python_portable_pattern"
+    ]
+  },
+  "timestamps": {
+    "utc_suffix": "_utc",
+    "utc_pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}\\+00:00$",
+    "utc_kotlin_pattern": "yyyy-MM-dd'T'HH:mm:ss.SSSxxx",
+    "utc_example": "2026-09-10T14:30:00.000+00:00",
+    "python_portable_pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}.[0-9]{2}(:[0-9]{2}(:[0-9]{2}(\\.[0-9]{3}([0-9]{3})?)?)?)?([+-][0-9]{2}:[0-9]{2}(:[0-9]{2}(\\.[0-9]{6})?)?)?$",
+    "time_epoch_decimals": 3
+  },
+  "android_unavailable": 2147483647,
+  "directory": {
+    "pattern": "^[0-9]{8}-[0-9]{6}_[A-Za-z0-9._-]{1,48}$",
+    "time_format_python": "%Y%m%d-%H%M%S",
+    "time_format_kotlin": "yyyyMMdd-HHmmss",
+    "slug_replace_pattern": "[^A-Za-z0-9._-]+",
+    "slug_replacement": "-",
+    "slug_strip": "-",
+    "slug_max_length": 48,
+    "slug_empty": "session"
+  },
+  "files": [
+    "session.json",
+    "kpi.csv",
+    "track.csv",
+    "events.csv",
+    "traffic.csv",
+    "cells.csv",
+    "cellinfo.csv"
+  ],
+  "report_outputs": [
+    "summary.json",
+    "report.html",
+    "index.html"
+  ],
+  "session_json": {
+    "never_null_objects": [
+      "transport",
+      "handset",
+      "device",
+      "modem",
+      "log_mask",
+      "files",
+      "summary",
+      "summary.plmns",
+      "summary.messages",
+      "summary.client",
+      "summary.framing"
+    ],
+    "transport_app": "android-api",
+    "transport_laptop": [
+      "serial",
+      "usb",
+      "tcp",
+      "adb",
+      "file"
+    ],
+    "transport_simulated": "file",
+    "app_only_keys": [
+      "capabilities",
+      "collection",
+      "privacy"
+    ],
+    "laptop_summary_keys": [
+      "modem_time_first_utc",
+      "modem_time_last_utc"
+    ],
+    "handset_keys": [
+      "manufacturer",
+      "model",
+      "device",
+      "android_version",
+      "android_build",
+      "security_patch",
+      "baseband",
+      "soc",
+      "platform",
+      "hardware",
+      "operator_mccmnc",
+      "operator_name",
+      "sim_mccmnc",
+      "sim_operator_name",
+      "network_type"
+    ],
+    "location_precisions": [
+      "full",
+      "approx_110m",
+      "none"
+    ],
+    "approx_110m_decimals": 3,
+    "forbidden_keys": [
+      "imei",
+      "imeisv",
+      "meid",
+      "imsi",
+      "iccid",
+      "msisdn",
+      "phone_number",
+      "line1_number",
+      "subscriber_id",
+      "sim_serial",
+      "serial",
+      "serial_number",
+      "android_id",
+      "advertising_id",
+      "tmsi",
+      "guti",
+      "supi",
+      "suci",
+      "ssid",
+      "bssid",
+      "mac",
+      "mac_address",
+      "ip",
+      "ip_address"
+    ],
+    "max_bytes": 16777216,
+    "max_depth": 32,
+    "fields": [
+      {
+        "path": "format",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "values": [
+          "fieldtap-session/1"
+        ],
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "session_id",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "group_id",
+        "type": "string",
+        "required": true,
+        "nullable": true,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "name",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": "^[\\s\\S]*[^ \\t\\r\\n][\\s\\S]*$",
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "note",
+        "type": "string",
+        "required": true,
+        "nullable": true,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "location",
+        "type": "string",
+        "required": true,
+        "nullable": true,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "started_utc",
+        "type": "utc",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "stopped_utc",
+        "type": "utc",
+        "required": true,
+        "nullable": true,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "transport",
+        "type": "object",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "transport.transport",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "values": [
+          "android-api"
+        ],
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "transport.app",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": "^[\\s\\S]*[^ \\t\\r\\n][\\s\\S]*$",
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "transport.app_version",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": "^[\\s\\S]*[^ \\t\\r\\n][\\s\\S]*$",
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "transport.version_code",
+        "type": "integer",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": 1,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset",
+        "type": "object",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset.manufacturer",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset.model",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset.device",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset.android_version",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset.android_build",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset.security_patch",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset.baseband",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset.soc",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset.platform",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset.hardware",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset.operator_mccmnc",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": "^[0-9]{5,6}$",
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset.operator_name",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset.sim_mccmnc",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": "^[0-9]{5,6}$",
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset.sim_operator_name",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "handset.network_type",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "device",
+        "type": "object",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "device.key",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": "^app:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "device.label",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "modem",
+        "type": "object",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "log_mask",
+        "type": "object",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "files",
+        "type": "object",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "summary",
+        "type": "object",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "summary.stopped_by",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": "^[a-z0-9_]+$",
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "summary.plmns",
+        "type": "object",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "capabilities",
+        "type": "object",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "capabilities.layer3",
+        "type": "boolean",
+        "required": true,
+        "nullable": false,
+        "values": [
+          false
+        ],
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "collection",
+        "type": "object",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "collection.median_fresh_interval_ms",
+        "type": "integer",
+        "required": true,
+        "nullable": true,
+        "values": null,
+        "pattern": null,
+        "min": 0,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "collection.short_interval_pct",
+        "type": "number",
+        "required": true,
+        "nullable": true,
+        "values": null,
+        "pattern": null,
+        "min": 0,
+        "max": 100,
+        "decimals": 1
+      },
+      {
+        "path": "collection.screen_on_pct",
+        "type": "number",
+        "required": true,
+        "nullable": true,
+        "values": null,
+        "pattern": null,
+        "min": 0,
+        "max": 100,
+        "decimals": 1
+      },
+      {
+        "path": "collection.wifi_connected_pct",
+        "type": "number",
+        "required": true,
+        "nullable": true,
+        "values": null,
+        "pattern": null,
+        "min": 0,
+        "max": 100,
+        "decimals": 1
+      },
+      {
+        "path": "collection.charging_pct",
+        "type": "number",
+        "required": true,
+        "nullable": true,
+        "values": null,
+        "pattern": null,
+        "min": 0,
+        "max": 100,
+        "decimals": 1
+      },
+      {
+        "path": "collection.fresh_samples",
+        "type": "integer",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": 0,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "collection.repeats_dropped",
+        "type": "integer",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": 0,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "collection.gaps",
+        "type": "array",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "collection.gaps[]",
+        "type": "object",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "collection.gaps[].start_utc",
+        "type": "utc",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "collection.gaps[].stop_utc",
+        "type": "utc",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "collection.gaps[].seconds",
+        "type": "number",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": 0,
+        "max": null,
+        "decimals": 1
+      },
+      {
+        "path": "collection.gaps[].reason",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": "^[a-z0-9_]+$",
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "privacy",
+        "type": "object",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "privacy.data_class",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "values": [
+          "kpi"
+        ],
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "privacy.location_precision",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "values": [
+          "full",
+          "approx_110m",
+          "none"
+        ],
+        "pattern": null,
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "privacy.zone_pauses",
+        "type": "integer",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": null,
+        "min": 0,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "privacy.consent_version",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": "^[\\s\\S]*[^ \\t\\r\\n][\\s\\S]*$",
+        "min": null,
+        "max": null,
+        "decimals": null
+      },
+      {
+        "path": "privacy.consent_sha256",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "values": null,
+        "pattern": "^[0-9a-f]{64}$",
+        "min": null,
+        "max": null,
+        "decimals": null
+      }
+    ]
+  },
+  "csv": [
+    {
+      "name": "kpi.csv",
+      "presence": "always",
+      "min_columns": 9,
+      "header": [
+        "frame",
+        "time_epoch",
+        "rat",
+        "meas_id",
+        "pci",
+        "rsrp_dbm",
+        "rsrq_db",
+        "sinr_db",
+        "comment",
+        "lat",
+        "lon"
+      ],
+      "columns": [
+        {
+          "name": "frame",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": true,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "time_epoch",
+          "type": "decimal",
+          "format": "%.3f",
+          "decimals": 3,
+          "required": true,
+          "always_blank": false,
+          "min": 946684800.0,
+          "max": 4102444800.0,
+          "range_by_rat": null,
+          "unit": "s",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "rat",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "lte",
+            "nr"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "meas_id",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": true,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "pci",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              0,
+              503
+            ],
+            "nr": [
+              0,
+              1007
+            ]
+          },
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": true,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "rsrp_dbm",
+          "type": "decimal",
+          "format": "%.1f",
+          "decimals": 1,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              -156.0,
+              -43.0
+            ],
+            "nr": [
+              -156.0,
+              -29.0
+            ]
+          },
+          "unit": "dBm",
+          "values": null,
+          "pattern": null,
+          "list_allowed": true,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "rsrq_db",
+          "type": "decimal",
+          "format": "%.1f",
+          "decimals": 1,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              -34.0,
+              3.0
+            ],
+            "nr": [
+              -43.0,
+              20.5
+            ]
+          },
+          "unit": "dB",
+          "values": null,
+          "pattern": null,
+          "list_allowed": true,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "sinr_db",
+          "type": "decimal",
+          "format": "%.1f",
+          "decimals": 1,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              -23.0,
+              40.0
+            ],
+            "nr": [
+              -23.0,
+              40.5
+            ]
+          },
+          "unit": "dB",
+          "values": null,
+          "pattern": null,
+          "list_allowed": true,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "comment",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": "^android-api age_ms=(0|[1-9][0-9]*) src=(request|push)$",
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "lat",
+          "type": "decimal",
+          "format": "%.7f",
+          "decimals": 7,
+          "required": false,
+          "always_blank": false,
+          "min": -90.0,
+          "max": 90.0,
+          "range_by_rat": null,
+          "unit": "degree",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "lon",
+          "type": "decimal",
+          "format": "%.7f",
+          "decimals": 7,
+          "required": false,
+          "always_blank": false,
+          "min": -180.0,
+          "max": 180.0,
+          "range_by_rat": null,
+          "unit": "degree",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        }
+      ]
+    },
+    {
+      "name": "track.csv",
+      "presence": "unless_precision_none",
+      "min_columns": 8,
+      "header": [
+        "time_utc",
+        "lat",
+        "lon",
+        "accuracy_m",
+        "altitude_m",
+        "speed_mps",
+        "provider",
+        "source"
+      ],
+      "columns": [
+        {
+          "name": "time_utc",
+          "type": "utc",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "lat",
+          "type": "decimal",
+          "format": "%.7f",
+          "decimals": 7,
+          "required": true,
+          "always_blank": false,
+          "min": -90.0,
+          "max": 90.0,
+          "range_by_rat": null,
+          "unit": "degree",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "lon",
+          "type": "decimal",
+          "format": "%.7f",
+          "decimals": 7,
+          "required": true,
+          "always_blank": false,
+          "min": -180.0,
+          "max": 180.0,
+          "range_by_rat": null,
+          "unit": "degree",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "accuracy_m",
+          "type": "decimal",
+          "format": "%.1f",
+          "decimals": 1,
+          "required": false,
+          "always_blank": false,
+          "min": 0.0,
+          "max": null,
+          "range_by_rat": null,
+          "unit": "m",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "altitude_m",
+          "type": "decimal",
+          "format": "%.1f",
+          "decimals": 1,
+          "required": false,
+          "always_blank": false,
+          "min": -1000.0,
+          "max": 20000.0,
+          "range_by_rat": null,
+          "unit": "m",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "speed_mps",
+          "type": "decimal",
+          "format": "%.2f",
+          "decimals": 2,
+          "required": false,
+          "always_blank": false,
+          "min": 0.0,
+          "max": 400.0,
+          "range_by_rat": null,
+          "unit": "m/s",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "provider",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "gps",
+            "fused",
+            "network"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "source",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "android"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        }
+      ]
+    },
+    {
+      "name": "events.csv",
+      "presence": "always",
+      "min_columns": 11,
+      "header": [
+        "time_utc",
+        "rat",
+        "kind",
+        "severity",
+        "title",
+        "detail",
+        "frame",
+        "pci",
+        "arfcn",
+        "cause",
+        "setup_ms"
+      ],
+      "columns": [
+        {
+          "name": "time_utc",
+          "type": "utc",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "rat",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "lte",
+            "nr",
+            "-"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "kind",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": "^[a-z0-9_]+$",
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "severity",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "info",
+            "ok",
+            "warn",
+            "error"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "title",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "detail",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "frame",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": true,
+          "min": 1,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "pci",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              0,
+              503
+            ],
+            "nr": [
+              0,
+              1007
+            ]
+          },
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "arfcn",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              0,
+              262143
+            ],
+            "nr": [
+              0,
+              3279165
+            ]
+          },
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "cause",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": "^[a-z0-9_]+$",
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "setup_ms",
+          "type": "decimal",
+          "format": "%.1f",
+          "decimals": 1,
+          "required": false,
+          "always_blank": true,
+          "min": 0.0,
+          "max": null,
+          "range_by_rat": null,
+          "unit": "ms",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        }
+      ]
+    },
+    {
+      "name": "traffic.csv",
+      "presence": "always",
+      "min_columns": 13,
+      "header": [
+        "time_utc",
+        "test",
+        "target",
+        "ok",
+        "seconds",
+        "loss_pct",
+        "rtt_min_ms",
+        "rtt_avg_ms",
+        "rtt_max_ms",
+        "mbps",
+        "bytes",
+        "http_code",
+        "error"
+      ],
+      "columns": [
+        {
+          "name": "time_utc",
+          "type": "utc",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "test",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "ping",
+            "download"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "target",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "ok",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "0",
+            "1"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "seconds",
+          "type": "decimal",
+          "format": "%.2f",
+          "decimals": 2,
+          "required": true,
+          "always_blank": false,
+          "min": 0.0,
+          "max": null,
+          "range_by_rat": null,
+          "unit": "s",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "loss_pct",
+          "type": "decimal",
+          "format": "%.1f",
+          "decimals": 1,
+          "required": false,
+          "always_blank": false,
+          "min": 0.0,
+          "max": 100.0,
+          "range_by_rat": null,
+          "unit": "%",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "rtt_min_ms",
+          "type": "decimal",
+          "format": "%.1f",
+          "decimals": 1,
+          "required": false,
+          "always_blank": false,
+          "min": 0.0,
+          "max": null,
+          "range_by_rat": null,
+          "unit": "ms",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "rtt_avg_ms",
+          "type": "decimal",
+          "format": "%.1f",
+          "decimals": 1,
+          "required": false,
+          "always_blank": false,
+          "min": 0.0,
+          "max": null,
+          "range_by_rat": null,
+          "unit": "ms",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "rtt_max_ms",
+          "type": "decimal",
+          "format": "%.1f",
+          "decimals": 1,
+          "required": false,
+          "always_blank": false,
+          "min": 0.0,
+          "max": null,
+          "range_by_rat": null,
+          "unit": "ms",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "mbps",
+          "type": "decimal",
+          "format": "%.3f",
+          "decimals": 3,
+          "required": false,
+          "always_blank": false,
+          "min": 0.0,
+          "max": null,
+          "range_by_rat": null,
+          "unit": "Mbit/s",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "bytes",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": 0,
+          "max": null,
+          "range_by_rat": null,
+          "unit": "byte",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": true
+        },
+        {
+          "name": "http_code",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": 100,
+          "max": 599,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "error",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        }
+      ]
+    },
+    {
+      "name": "cells.csv",
+      "presence": "always",
+      "min_columns": 17,
+      "header": [
+        "first_seen_utc",
+        "rat",
+        "plmn",
+        "mcc",
+        "mnc",
+        "tac",
+        "cell_id",
+        "enb_id",
+        "sector",
+        "pci",
+        "band",
+        "dl_earfcn",
+        "ul_earfcn",
+        "dl_bw_mhz",
+        "ul_bw_mhz",
+        "version",
+        "plausible",
+        "operator",
+        "additional_plmns",
+        "samples",
+        "rsrp_min",
+        "rsrp_max"
+      ],
+      "columns": [
+        {
+          "name": "first_seen_utc",
+          "type": "utc",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "rat",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "lte",
+            "nr"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "plmn",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": "^[0-9]{5,6}$",
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "mcc",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": "^[0-9]{3}$",
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "mnc",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": "^[0-9]{2,3}$",
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "tac",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": 0,
+          "max": 16777215,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "cell_id",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              0,
+              268435455
+            ],
+            "nr": [
+              0,
+              68719476735
+            ]
+          },
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "enb_id",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": 0,
+          "max": 1048575,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "sector",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": 0,
+          "max": 255,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "pci",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              0,
+              503
+            ],
+            "nr": [
+              0,
+              1007
+            ]
+          },
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "band",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": 1,
+          "max": 1024,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "dl_earfcn",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              0,
+              262143
+            ],
+            "nr": [
+              0,
+              3279165
+            ]
+          },
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "ul_earfcn",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              0,
+              262143
+            ],
+            "nr": [
+              0,
+              3279165
+            ]
+          },
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "dl_bw_mhz",
+          "type": "decimal",
+          "format": "%.1f",
+          "decimals": 1,
+          "required": false,
+          "always_blank": false,
+          "min": 0.0,
+          "max": 400.0,
+          "range_by_rat": null,
+          "unit": "MHz",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "ul_bw_mhz",
+          "type": "decimal",
+          "format": "%.1f",
+          "decimals": 1,
+          "required": false,
+          "always_blank": false,
+          "min": 0.0,
+          "max": 400.0,
+          "range_by_rat": null,
+          "unit": "MHz",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "version",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "android"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "plausible",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "True",
+            "False"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "operator",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "additional_plmns",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": "^([0-9]{5,6}(, [0-9]{5,6})*)?$",
+          "list_allowed": false,
+          "list_separator": ", ",
+          "list_order": "ascending",
+          "breaks_report": false
+        },
+        {
+          "name": "samples",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": 0,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "rsrp_min",
+          "type": "decimal",
+          "format": "%.1f",
+          "decimals": 1,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              -156.0,
+              -43.0
+            ],
+            "nr": [
+              -156.0,
+              -29.0
+            ]
+          },
+          "unit": "dBm",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "rsrp_max",
+          "type": "decimal",
+          "format": "%.1f",
+          "decimals": 1,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              -156.0,
+              -43.0
+            ],
+            "nr": [
+              -156.0,
+              -29.0
+            ]
+          },
+          "unit": "dBm",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        }
+      ]
+    },
+    {
+      "name": "cellinfo.csv",
+      "presence": "always",
+      "min_columns": 19,
+      "header": [
+        "seen_utc",
+        "rat",
+        "registered",
+        "plmn",
+        "mcc",
+        "mnc",
+        "operator",
+        "pci",
+        "arfcn",
+        "bands",
+        "tac",
+        "cell_id",
+        "bandwidth_khz",
+        "rsrp",
+        "rsrq",
+        "sinr",
+        "rssi",
+        "level",
+        "additional_plmns",
+        "time_epoch",
+        "timestamp_ms",
+        "age_ms",
+        "stale",
+        "connection_status",
+        "source",
+        "cqi",
+        "timing_advance",
+        "csi_rsrp",
+        "csi_rsrq",
+        "csi_sinr",
+        "screen_on",
+        "charging",
+        "wifi_connected",
+        "sub_id",
+        "lat",
+        "lon"
+      ],
+      "columns": [
+        {
+          "name": "seen_utc",
+          "type": "utc",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "rat",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "nr",
+            "lte",
+            "wcdma",
+            "gsm",
+            "tdscdma",
+            "cdma"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "registered",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "0",
+            "1"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "plmn",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": "^[0-9]{5,6}$",
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "mcc",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": "^[0-9]{3}$",
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "mnc",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": "^[0-9]{2,3}$",
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "operator",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "pci",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              0,
+              503
+            ],
+            "nr": [
+              0,
+              1007
+            ]
+          },
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "arfcn",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              0,
+              262143
+            ],
+            "nr": [
+              0,
+              3279165
+            ]
+          },
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "bands",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": "^([0-9]+(, [0-9]+)*)?$",
+          "list_allowed": false,
+          "list_separator": ", ",
+          "list_order": "as_reported",
+          "breaks_report": false
+        },
+        {
+          "name": "tac",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": 0,
+          "max": 16777215,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "cell_id",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              0,
+              268435455
+            ],
+            "nr": [
+              0,
+              68719476735
+            ]
+          },
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "bandwidth_khz",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": 0,
+          "max": 400000,
+          "range_by_rat": null,
+          "unit": "kHz",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "rsrp",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              -156,
+              -43
+            ],
+            "nr": [
+              -156,
+              -29
+            ]
+          },
+          "unit": "dBm",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "rsrq",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              -34,
+              3
+            ],
+            "nr": [
+              -43,
+              20
+            ]
+          },
+          "unit": "dB",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "sinr",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": {
+            "lte": [
+              -23,
+              40
+            ],
+            "nr": [
+              -23,
+              40
+            ]
+          },
+          "unit": "dB",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "rssi",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": -150,
+          "max": 0,
+          "range_by_rat": null,
+          "unit": "dBm",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "level",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": 0,
+          "max": 4,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "additional_plmns",
+          "type": "text",
+          "format": null,
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": "^([0-9]{5,6}(, [0-9]{5,6})*)?$",
+          "list_allowed": false,
+          "list_separator": ", ",
+          "list_order": "ascending",
+          "breaks_report": false
+        },
+        {
+          "name": "time_epoch",
+          "type": "decimal",
+          "format": "%.3f",
+          "decimals": 3,
+          "required": true,
+          "always_blank": false,
+          "min": 946684800.0,
+          "max": 4102444800.0,
+          "range_by_rat": null,
+          "unit": "s",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "timestamp_ms",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": 0,
+          "max": null,
+          "range_by_rat": null,
+          "unit": "ms",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "age_ms",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": 0,
+          "max": null,
+          "range_by_rat": null,
+          "unit": "ms",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "stale",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "0",
+            "1"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "connection_status",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "0",
+            "1",
+            "2"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "source",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "request",
+            "push"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "cqi",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": 0,
+          "max": 15,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "timing_advance",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": 0,
+          "max": 3846,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "csi_rsrp",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": -156,
+          "max": -31,
+          "range_by_rat": null,
+          "unit": "dBm",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "csi_rsrq",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": -20,
+          "max": -3,
+          "range_by_rat": null,
+          "unit": "dB",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "csi_sinr",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": -23,
+          "max": 23,
+          "range_by_rat": null,
+          "unit": "dB",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "screen_on",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "0",
+            "1"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "charging",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "0",
+            "1"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "wifi_connected",
+          "type": "enum",
+          "format": null,
+          "decimals": null,
+          "required": true,
+          "always_blank": false,
+          "min": null,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": [
+            "0",
+            "1"
+          ],
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "sub_id",
+          "type": "integer",
+          "format": "%d",
+          "decimals": null,
+          "required": false,
+          "always_blank": false,
+          "min": 0,
+          "max": null,
+          "range_by_rat": null,
+          "unit": null,
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "lat",
+          "type": "decimal",
+          "format": "%.7f",
+          "decimals": 7,
+          "required": false,
+          "always_blank": false,
+          "min": -90.0,
+          "max": 90.0,
+          "range_by_rat": null,
+          "unit": "degree",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        },
+        {
+          "name": "lon",
+          "type": "decimal",
+          "format": "%.7f",
+          "decimals": 7,
+          "required": false,
+          "always_blank": false,
+          "min": -180.0,
+          "max": 180.0,
+          "range_by_rat": null,
+          "unit": "degree",
+          "values": null,
+          "pattern": null,
+          "list_allowed": false,
+          "list_separator": null,
+          "list_order": null,
+          "breaks_report": false
+        }
+      ]
+    }
+  ],
+  "events": {
+    "severities": [
+      "info",
+      "ok",
+      "warn",
+      "error"
+    ],
+    "app_kinds": [
+      {
+        "kind": "serving_cell",
+        "rat": [
+          "lte",
+          "nr"
+        ],
+        "severity": [
+          "info"
+        ],
+        "pci_arfcn": true
+      },
+      {
+        "kind": "rat_change",
+        "rat": [
+          "lte",
+          "nr"
+        ],
+        "severity": [
+          "info",
+          "warn"
+        ],
+        "pci_arfcn": true
+      },
+      {
+        "kind": "service_lost",
+        "rat": [
+          "lte",
+          "nr",
+          "-"
+        ],
+        "severity": [
+          "error"
+        ],
+        "pci_arfcn": false
+      },
+      {
+        "kind": "emergency_only",
+        "rat": [
+          "lte",
+          "nr"
+        ],
+        "severity": [
+          "error"
+        ],
+        "pci_arfcn": true
+      },
+      {
+        "kind": "service_restored",
+        "rat": [
+          "lte",
+          "nr"
+        ],
+        "severity": [
+          "ok"
+        ],
+        "pci_arfcn": true
+      },
+      {
+        "kind": "data_state",
+        "rat": [
+          "-"
+        ],
+        "severity": [
+          "info",
+          "warn"
+        ],
+        "pci_arfcn": false
+      },
+      {
+        "kind": "nr_display",
+        "rat": [
+          "nr"
+        ],
+        "severity": [
+          "info"
+        ],
+        "pci_arfcn": false
+      },
+      {
+        "kind": "gps_lost",
+        "rat": [
+          "-"
+        ],
+        "severity": [
+          "warn"
+        ],
+        "pci_arfcn": false
+      },
+      {
+        "kind": "gps_restored",
+        "rat": [
+          "-"
+        ],
+        "severity": [
+          "ok"
+        ],
+        "pci_arfcn": false
+      },
+      {
+        "kind": "sampling_gap",
+        "rat": [
+          "-"
+        ],
+        "severity": [
+          "warn"
+        ],
+        "pci_arfcn": false
+      },
+      {
+        "kind": "marker",
+        "rat": [
+          "-"
+        ],
+        "severity": [
+          "info"
+        ],
+        "pci_arfcn": false
+      },
+      {
+        "kind": "test_failed",
+        "rat": [
+          "-"
+        ],
+        "severity": [
+          "error"
+        ],
+        "pci_arfcn": false
+      },
+      {
+        "kind": "session_interrupted",
+        "rat": [
+          "-"
+        ],
+        "severity": [
+          "error"
+        ],
+        "pci_arfcn": false
+      },
+      {
+        "kind": "privacy_zone",
+        "rat": [
+          "-"
+        ],
+        "severity": [
+          "info"
+        ],
+        "pci_arfcn": false
+      }
+    ],
+    "signalling_kinds": [
+      "attach_accept",
+      "attach_attempt",
+      "attach_complete",
+      "attach_reject",
+      "auth",
+      "auth_failure",
+      "auth_reject",
+      "bearer_dedicated",
+      "bearer_release",
+      "bearer_setup",
+      "capability",
+      "config_update",
+      "deregistration",
+      "detach",
+      "emm_info",
+      "emm_status",
+      "esm_status",
+      "failure_info",
+      "guti",
+      "handover",
+      "handover_command",
+      "identity",
+      "irat_mobility",
+      "meas_report",
+      "mm_status",
+      "nas_security",
+      "nas_security_reject",
+      "paging",
+      "pdn_attempt",
+      "pdn_disconnect",
+      "pdn_reject",
+      "pdu_accept",
+      "pdu_attempt",
+      "pdu_modify_reject",
+      "pdu_reject",
+      "pdu_release",
+      "reconfiguration",
+      "reconfiguration_complete",
+      "reestablishment",
+      "reestablishment_attempt",
+      "reestablishment_reject",
+      "registration_accept",
+      "registration_attempt",
+      "registration_complete",
+      "registration_reject",
+      "rrc_attempt",
+      "rrc_connected",
+      "rrc_reject",
+      "rrc_release",
+      "rrc_resume",
+      "rrc_resume_attempt",
+      "rrc_setup",
+      "scg_failure",
+      "security_mode",
+      "service_accept",
+      "service_attempt",
+      "service_reject",
+      "sib1",
+      "sm_status",
+      "tau_accept",
+      "tau_attempt",
+      "tau_reject"
+    ],
+    "signalling_kind_prefixes": [
+      "handover",
+      "rrc_",
+      "attach_",
+      "registration_",
+      "tau_",
+      "pdn_",
+      "pdu_",
+      "reestablishment",
+      "bearer_"
+    ],
+    "interrupted_stop_tolerance_seconds": 1.0
+  },
+  "traffic_tests": {
+    "app": [
+      "ping",
+      "download"
+    ],
+    "laptop": [
+      "ping",
+      "download",
+      "iperf3"
+    ]
+  },
+  "kpi": {
+    "max_age_ms": 11000,
+    "max_age_ms_short_interval": 2500,
+    "gps_match_seconds": 5.0,
+    "time_window_slack_seconds": 60.0,
+    "comment_pattern": "^android-api age_ms=(0|[1-9][0-9]*) src=(request|push)$"
+  },
+  "identifiers": {
+    "digit_token_pattern": "(?<![0-9A-Za-z])[0-9]{14,20}[Ff]?(?![0-9A-Za-z])",
+    "imei": "a 15-digit token that passes the Luhn check",
+    "imsi": "a 14- or 15-digit token starting with 2 to 7 (a mobile country code)",
+    "iccid": "a 19- or 20-digit token starting with 89, optionally ending in F"
+  },
+  "upload_bundle": {
+    "name": "<session directory name>.zip",
+    "file_names": [
+      "session.json",
+      "kpi.csv",
+      "track.csv",
+      "events.csv",
+      "traffic.csv",
+      "cells.csv",
+      "cellinfo.csv"
+    ],
+    "required": [
+      "session.json"
+    ],
+    "max_compressed_bytes": 52428800,
+    "max_uncompressed_bytes": 209715200,
+    "compression_methods": [
+      0,
+      8
+    ],
+    "zip64": false,
+    "hash": "sha256"
+  }
+}

@@ -1,0 +1,4 @@
+# The golden Android session is compared byte for byte, by the Python tests and
+# by the app's :format tests. core.autocrlf would rewrite its line endings on
+# checkout (CRLF CSVs to LF, LF JSON to CRLF), so git must not touch them.
+tests/fixtures/android_session/** -text
