@@ -8,14 +8,17 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -25,12 +28,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.fieldtap.ui.theme.Durations
 import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.FieldTapIcons
@@ -53,7 +61,10 @@ enum class SessionButtonState {
  * - STARTING / STOPPING: disabled with a spinner and [busyLabel], so a double tap cannot start twice.
  * - RECORDING: the recording colour, a pulsing dot, [recordingLabel] and [elapsedText] on the start
  *   side, and a stop icon with [stopLabel] on the end side. The change of colour, icon and words makes
- *   the running state unmistakable at a glance.
+ *   the running state unmistakable at a glance. Where the button is too narrow for all of it ([recordingIsCompact]:
+ *   beside Mark on a 320 dp screen, or at font scale 1.3 on a 360 dp one) the label and the Stop word are left out,
+ *   so the elapsed time stays whole; it never wraps, and shrinks before it would clip. TalkBack reads
+ *   "Recording, 12:34, Stop" in both layouts.
  *
  * Full width, 64 dp tall. Stopping ends the session for good, so confirm it with a dialog in the
  * screen before calling the view model.
@@ -89,7 +100,14 @@ fun SessionButton(
         enabled = enabled && !busy,
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = Sizes.PrimaryButtonHeight),
+            .heightIn(min = Sizes.PrimaryButtonHeight)
+            .then(
+                if (recording) {
+                    Modifier.semantics { contentDescription = listOfNotNull(recordingLabel, elapsedText, stopLabel).joinToString(", ") }
+                } else {
+                    Modifier
+                },
+            ),
         shape = ShapeRoles.Pill,
         colors = ButtonDefaults.buttonColors(
             containerColor = container,
@@ -119,24 +137,53 @@ fun SessionButton(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            SessionButtonState.RECORDING -> {
-                RecordingDot(color = content)
-                Spacer(modifier = Modifier.width(Spacing.Md))
-                Column(modifier = Modifier.weight(1f)) {
-                    if (recordingLabel != null) {
-                        Text(text = recordingLabel, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+            SessionButtonState.RECORDING -> BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val compact = recordingIsCompact(maxWidth, LocalDensity.current.fontScale)
+                val elapsedStyle = FieldTapDesign.numeric.medium
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    RecordingDot(color = content)
+                    Spacer(modifier = Modifier.width(if (compact) Spacing.Sm else Spacing.Md))
+                    Column(modifier = Modifier.weight(1f)) {
+                        if (!compact && recordingLabel != null) {
+                            Text(text = recordingLabel, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        if (elapsedText != null) {
+                            Text(
+                                text = elapsedText,
+                                style = elapsedStyle,
+                                maxLines = 1,
+                                softWrap = false,
+                                autoSize = TextAutoSize.StepBased(
+                                    minFontSize = MIN_ELAPSED_FONT_SIZE_SP.sp,
+                                    maxFontSize = elapsedStyle.fontSize,
+                                    stepSize = 1.sp,
+                                ),
+                            )
+                        }
                     }
-                    if (elapsedText != null) {
-                        Text(text = elapsedText, style = FieldTapDesign.numeric.medium, maxLines = 1)
+                    Icon(imageVector = FieldTapIcons.Stop, contentDescription = null, modifier = Modifier.size(Sizes.Icon))
+                    if (!compact) {
+                        Spacer(modifier = Modifier.width(Spacing.Sm))
+                        Text(text = stopLabel, style = MaterialTheme.typography.titleMedium, maxLines = 1)
                     }
                 }
-                Icon(imageVector = FieldTapIcons.Stop, contentDescription = null, modifier = Modifier.size(Sizes.Icon))
-                Spacer(modifier = Modifier.width(Spacing.Sm))
-                Text(text = stopLabel, style = MaterialTheme.typography.titleMedium, maxLines = 1)
             }
         }
     }
 }
+
+/** The content width the recording state needs for its label and the Stop word at font scale 1. */
+internal val RecordingFullContentWidth: Dp = 168.dp
+
+/** The smallest the elapsed time shrinks to before it would clip, for hours on a narrow button. */
+private const val MIN_ELAPSED_FONT_SIZE_SP: Int = 12
+
+/**
+ * Whether the recording state leaves out its label and the Stop word to keep the elapsed time whole: when the
+ * content of the button is narrower than [RecordingFullContentWidth] grown by the font scale. Before this rule the
+ * end-to-end screenshots showed "Rec" and "1:" beside the Mark button on the 320 dp emulator screen.
+ */
+internal fun recordingIsCompact(contentWidth: Dp, fontScale: Float): Boolean = contentWidth < RecordingFullContentWidth * fontScale
 
 /**
  * A softly pulsing dot that says "recording now". Use it next to a "Recording" label (on the button,

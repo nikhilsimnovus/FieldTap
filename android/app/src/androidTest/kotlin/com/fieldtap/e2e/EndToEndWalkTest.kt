@@ -193,7 +193,8 @@ class EndToEndWalkTest {
 
         val startAnyway = hasText(E2e.string(R.string.prestart_start_anyway)) and hasClickAction()
         val blocked = hasText(E2e.string(R.string.prestart_title_blocked))
-        val recording = hasText(E2e.string(R.string.live_recording)) and hasClickAction()
+        // The button's description always names the state; on a narrow screen its visible words are left out.
+        val recording = hasContentDescription(E2e.string(R.string.live_recording), substring = true) and hasClickAction()
         screens.waitFor("the pre-start sheet or a recording session", PRESTART_WAIT_MS) {
             screens.exists(startAnyway) || screens.exists(blocked) || screens.exists(recording)
         }
@@ -252,7 +253,7 @@ class EndToEndWalkTest {
 
     private fun stopSession(dirName: String, recordingSinceMs: Long) {
         val inDialog = hasAnyAncestor(isDialog())
-        screens.click(hasText(E2e.string(R.string.live_stop)) and hasClickAction() and !inDialog)
+        screens.click(hasContentDescription(E2e.string(R.string.live_stop), substring = true) and hasClickAction() and !inDialog)
         screens.awaitText(R.string.live_stop_dialog_title)
         screens.shot("11-stop-dialog")
         screens.click(hasText(E2e.string(R.string.live_stop_confirm)) and hasClickAction() and inDialog)

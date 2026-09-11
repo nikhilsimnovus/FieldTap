@@ -1,5 +1,6 @@
 package com.fieldtap.ui.components
 
+import androidx.compose.ui.unit.dp
 import com.fieldtap.core.live.AgeBadge
 import com.fieldtap.ui.theme.SignalQuality
 import com.fieldtap.ui.theme.StatusTone
@@ -11,6 +12,19 @@ import org.junit.Test
 
 /** The decisions components make from state, which both screen workstreams rely on being the same. */
 class ComponentLogicTest {
+    @Test
+    fun theRecordingButtonLeavesOutItsWordsBeforeTheElapsedTime() {
+        // Beside Mark on the 320 dp emulator screen the button's content is about 132 dp wide.
+        assertTrue(recordingIsCompact(132.dp, fontScale = 1.0f))
+        // A 411 dp phone gives about 219 dp: the label and the Stop word fit, at font scale 1.3 as well (218.4 dp).
+        assertFalse(recordingIsCompact(219.dp, fontScale = 1.0f))
+        assertFalse(recordingIsCompact(219.dp, fontScale = 1.3f))
+        // The boundary itself is roomy; the same width at a larger font is not.
+        assertTrue(recordingIsCompact(RecordingFullContentWidth - 1.dp, fontScale = 1.0f))
+        assertFalse(recordingIsCompact(RecordingFullContentWidth, fontScale = 1.0f))
+        assertTrue(recordingIsCompact(RecordingFullContentWidth, fontScale = 1.3f))
+    }
+
     @Test
     fun ageBadgeTurnsAmberThenRed() {
         assertEquals(StatusTone.NEUTRAL, ageTone(AgeBadge.NONE))
