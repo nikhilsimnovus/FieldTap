@@ -36,6 +36,12 @@ android {
     buildFeatures {
         compose = true
     }
+
+    lint {
+        // targetSdk 36 is deliberate: it is the Android version the CI emulator and the field phones run.
+        // Raise it together with a test pass on that version, not because lint suggests it.
+        disable += "OldTargetApi"
+    }
 }
 
 // Compiled by the JDK 21 toolchain.

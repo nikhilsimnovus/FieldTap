@@ -202,9 +202,10 @@ The KDoc of each stub is the full contract. This section is the summary an imple
 
 ### 6.2 Gaps and collection statistics (radio-core)
 
-- A sampling gap ends at a fresh answer more than twice the interval in force at the previous fresh
-  answer after it. It is written when it ends, as a `sampling_gap` event (time = the ending answer's
-  arrival) and a `collection.gaps` entry (start and stop = measurement times).
+- A sampling gap ends at a fresh answer more than twice the Android interval after the previous fresh
+  sample, where the interval is the one in force when that previous sample was measured (the newest answer
+  at or before its measurement time). It is written when it ends, as a `sampling_gap` event (time = the
+  ending answer's arrival) and a `collection.gaps` entry (start and stop = measurement times).
 - Reason: `app_paused` (our ticker stalled more than 3 s), else `no_service`, else `screen_off`, else
   `unknown`. A privacy-zone resume resets the detector, so no gap straddles a pause.
 - `median_fresh_interval_ms`: sorted intervals between fresh answers, element at `size / 2`.
@@ -235,7 +236,8 @@ row before them by at most the sample age (at most 11 s). `fieldtap validate` do
 ### 6.4 GPS join and track (location-privacy-core)
 
 - `FixSelector`: no mock fixes in release builds, no 0,0, strictly increasing fix time; GPS always,
-  fused and network only when no GPS fix in the last 3 s.
+  fused and network only when no GPS fix in the last 3 s (accepted only after more than 3000 ms without
+  one; a gap of exactly 3000 ms still counts as recent).
 - `FixJoiner`: nearest accepted fix within 5000 ms inclusive on `elapsedRealtime`, earlier on a tie.
   `Pending` while a nearer fix could still arrive (no fix at or after the measurement yet, and less than
   5 s plus 1.5 s slack has passed). `joinFinal` at stop.
@@ -279,8 +281,8 @@ row before them by at most the sample age (at most 11 s). `fieldtap validate` do
 ### 6.8 Lifecycle, stop reasons and recovery (session-core, applied by service-and-tests)
 
 - `SessionStateMachine.reduce`: IDLE -> STARTING -> RECORDING -> STOPPING -> IDLE, with refusals checked
-  in order: `BLANK_NAME`, `NO_CONSENT`, `NO_PRECISE_LOCATION`, `LOCATION_OFF`, `STORAGE_FULL`,
-  `READINESS_REQUIRED`; `SESSION_RUNNING` whenever a session exists.
+  in order: `BLANK_NAME`, `NO_CONSENT`, `NO_PRECISE_LOCATION`, `LOCATION_OFF`, `STORAGE_FULL`;
+  `SESSION_RUNNING` whenever a session exists. Readiness is not a precondition (decision 7).
 - `summary.stopped_by`: `user`, or an app stop token (`storage_full`, `permission_revoked`,
   `service_destroyed`), or, after a kill, the `ApplicationExitInfo` reason name in lower case without
   `REASON_` (`low_memory`, `freezer`, `crash`, `anr`, `user_requested`, `other`, `unknown`, ...).
@@ -300,17 +302,19 @@ Old sessions are never deleted automatically.
 ### 6.10 Tests (service-and-tests)
 
 Tests are off by default and opted into per session. Ping targets `8.8.8.8` by default, 5 echoes every
-60 s. The download has no default URL; it runs every 5 min, is capped at 10 MB, and has a 100 MB
-session budget. Both run on a cellular `Network` requested explicitly: the ICMP datagram socket is bound
+60 s. The download defaults to `https://speed.cloudflare.com/__down?bytes=10000000` (decision 6), editable in
+Settings, which names its host; it runs every 5 min, is capped at 10 MB, and has a 100 MB session budget. Both run on a cellular `Network` requested explicitly: the ICMP datagram socket is bound
 with `Network.bindSocket`, the download uses `Network.openConnection`. With no cellular network, the row
 has `ok` 0 and error `no cellular network`, plus a `test_failed` event. No tests run while paused in a zone.
 
 ### 6.11 Readiness, soak, probe (platform-adapters, service-and-tests)
 
 - `ReadinessPolicy.evaluate(facts)`: blockers are no precise location and location off. Advice covers
-  notifications, phone permission, battery optimisation, background restriction, standby bucket, SIM, and
-  Wi-Fi while not charging. The check is required before the first session, and on OnePlus, OPPO and
-  realme before every session.
+  notifications, battery optimisation, background restriction, a rare or restricted standby bucket, no ready
+  SIM, and Wi-Fi while not charging; OnePlus, OPPO and realme are flagged as makers known for stopping
+  background apps. The phone permission is always OK (decision 9). Tapping Start runs the checks and shows the
+  pre-start sheet (decision 7); no separate visit is required, and `ReadinessPolicy.requiredBeforeSession`
+  remains a pure rule that no start depends on.
 - Soak: the foreground service runs the telephony ticker for 10 min with no files. `SoakEvaluator` reports
   seconds logged against seconds elapsed.
 - Probe: 30 s of every input plus a registration attempt on the three restricted listeners. Exported as
@@ -370,7 +374,8 @@ adb shell am start -W -n $APP/com.fieldtap.debug.AutomationActivity -a com.field
     --es name e2e-walk --ez accept_consent true --ez mark_ready true
 adb shell am start -W -n $APP/com.fieldtap.debug.AutomationActivity -a com.fieldtap.debug.MARK --es note "checkpoint 1"
 adb shell am start -W -n $APP/com.fieldtap.debug.AutomationActivity -a com.fieldtap.debug.STOP_SESSION
-adb shell cat /sdcard/Android/data/$APP/files/automation/last-result.json
+# am start -W returns before START reaches Recording or STOP reaches Idle: wait for this action's result.
+adb shell "f=/sdcard/Android/data/$APP/files/automation/last-result.json; while [ ! -f \$f ]; do sleep 1; done; cat \$f"
 adb pull /sdcard/Android/data/$APP/files/sessions/<dir_name>
 ```
 
@@ -382,18 +387,30 @@ adb pull /sdcard/Android/data/$APP/files/sessions/<dir_name>
 | `accept_consent` | boolean | START | Record consent to the current text first |
 | `mark_ready` | boolean | START | Record the readiness check as run now |
 | `timeout_ms` | long | START, STOP | Wait for Recording or Idle (default 20000) |
+| `ping_target`, `download_url` | string | START | Saved to the test settings first; empty turns that test off |
+| `ping_interval_ms`, `download_interval_ms`, `download_cap_bytes`, `session_budget_bytes` | long | START | Saved to the test settings first (decision 6) |
+| `ping_count` | int | START | Echoes per ping test |
 
 Each action writes one line of JSON (`{"action", "ok", "dir_name", "error"}`) to logcat under the tag
-`FieldTapAutomation` and to `files/automation/last-result.json`, then finishes. `am start` brings the
-activity to the foreground, which is what allows it to start the location foreground service.
+`FieldTapAutomation` and to `files/automation/last-result.json`, then finishes. The file is removed when an
+action begins and written atomically when it ends, so a harness waits for it (or for the logcat line) and
+never reads the previous action's result. `am start` brings the activity to the foreground, which is what
+allows it to start the location foreground service.
+
+Extras may be passed with any `am start` flag (`--ez`, `--es`, `--el`, `--ei`); a value that cannot be read as
+its type fails the action with `invalid_<extra>`. Besides the `StartRefusal` names, `error` is one of
+`timeout`, `not_recording`, `paused`, `start_failed` (accepted, then back to Idle without an outcome),
+`stopped_while_starting`, `missing_name`, `unknown_action`, `interrupted` (Android destroyed the activity
+mid-action) and `exception`.
 Instrumentation tests can launch the same intent with `ActivityScenario`, or call `DebugAutomation`
 directly while an activity of the app is resumed.
 
 ## 10. Workstreams
 
-Eight workstreams, not seven: the screens split cleanly into session screens and setup screens, and the
-UI was otherwise the largest single stream. Each owns the files listed and nothing else. A test directory
-listed as owned may gain any new files.
+Nine workstreams: the screens split cleanly into session screens and setup screens, and the design system
+became its own stream so both screen streams build on the same tokens and components. Each owns the files
+listed and nothing else. A test directory listed as owned may gain any new files. "Ownership as built", at the
+end of this section, records where the lists grew during implementation.
 
 ### format: session file writers and schema constants
 
@@ -520,6 +537,34 @@ listed as owned may gain any new files.
 - **Unit tests:** view models with a fake `AppGraph` (consent record written with the current hash, zone
   validation surfaced, test settings saved); `AppStringsTest` stays green.
 
+### design-system: tokens, components, theme and brand resources
+
+- **Owns:** `android/app/src/main/kotlin/com/fieldtap/ui/theme/**` (including `DESIGN.md`), `.../ui/components/**`,
+  `.../ui/FieldTapTheme.kt`, `res/values/themes.xml`, `res/values-night/themes.xml`, `res/values/colors.xml`, the
+  launcher icon resources and `res/drawable/ic_stat_fieldtap.xml`;
+  `android/app/src/test/kotlin/com/fieldtap/ui/{theme,components}/**`.
+- **Provides:** colour schemes and the one signal scale, type, shapes, `Spacing` and `Sizes` (including
+  `Sizes.WideLayoutMinWidth`), `FieldTapIcons`, `Formats`, and the components the screens are built from: metric
+  tiles, signal bars and chips, the cadence indicator, banners and chips, cards and rows, empty and loading
+  states, `SignalHistoryChart`, `SessionButton` and `ReadinessSheet`.
+- **Unit tests:** WCAG AA contrast of every text and status colour in both themes, signal scale boundaries,
+  formats, brand resources against the Kotlin tokens, chart and grid maths.
+
+### Ownership as built
+
+Recorded at integration, where workstreams added files beyond their lists:
+
+- ui-session also owns `android/app/src/testDebug/kotlin/com/fieldtap/debug/**` (classes in `src/debug` can be
+  unit-tested only from the debug unit-test source set) and `ui/common/{DisplayTime,ScreenSupport,StopReasons,
+  SystemSettings}.kt`, `ui/live/{LivePresentation,Prestart}.kt`, `ui/sessions/SessionsPresentation.kt`. The theme,
+  colour and launcher resources first listed under ui-session belong to design-system.
+- ui-setup also owns `ui/readiness/ReadinessPresentation.kt`, `ui/probe/ProbePresentation.kt`,
+  `ui/settings/{TestSettingsForm,ZoneDrafts}.kt` and `ui/setup/{PermissionRules,SetupFormats,SetupLayout}.kt`.
+- service-and-tests also owns `service/{SessionRuntime,SessionFactory,NotificationText,AndroidSessionPlatform}.kt`
+  and `core/nettest/BodyCounter.kt`; platform-adapters also owns `platform/AdapterExecutor.kt`,
+  `platform/settings/StoredSettings.kt` and `platform/telephony/TelephonyValues.kt`.
+- `res/xml/data_extraction_rules.xml` and `res/xml/backup_rules.xml` (decision 3) are shared files, like the manifest.
+
 ## 11. Shared files and frozen contracts
 
 Written in the design stage and owned by no workstream. Implementers do not edit them; a needed change is
@@ -540,6 +585,11 @@ These shapes are frozen: an implementer fills the bodies but does not change the
 - the ui-setup composable signatures called by `FieldTapNavHost`.
 
 A change to any of them is agreed through the orchestrator, because another workstream codes against it.
+Changes agreed at integration:
+
+- `CellRow.pci` and `CellRow.dlEarfcn` are nullable: a leg Android reports without them is still a cells.csv row,
+  with the value blank and `plausible` False (docs/SESSION-FORMAT.md, cells.csv).
+- `StartRefusal.READINESS_REQUIRED` and `StartPreconditions.readinessRequired` are removed (decision 7).
 
 Inside owned files, an implementer may add private or internal helpers, new files in owned packages, and
 tests. Public API added for one's own use is fine; public API another workstream needs goes through the
@@ -548,7 +598,7 @@ orchestrator.
 ## 12. Building on this PC
 
 - Commands, from `android/`:
-  `./gradlew :format:test :core:test :app:assembleDebug :app:testDebugUnitTest`; to compile only:
+  `./gradlew :format:test :core:test :app:testDebugUnitTest :app:assembleDebug :app:lintDebug`; to compile only:
   `./gradlew :format:compileKotlin :core:compileKotlin :app:compileDebugKotlin`.
 - In Bash, first `source /c/Users/Simnovus-Lab/tools/android-env.sh` and
   `export JAVA_TOOL_OPTIONS='-Djdk.net.unixdomain.tmpdir=C:\Users\Simnovus-Lab\.gradle\afunix'`. Without the
@@ -577,6 +627,8 @@ orchestrator.
 | Mock fixes rejected in release builds | Honest tracks. Debug builds accept them for the emulator. |
 | No WorkManager or OkHttp | No upload in this version. `Network.openConnection` binds to cellular. |
 | The Live screen runs the sources while visible, with no session | Live is a screen of the plan. Location is while-in-use there. |
-| `READINESS_REQUIRED` refuses a start until the check ran | "Before the first session, and before every session on OnePlus, OPPO and realme". |
+| Readiness never refuses a start; Start runs the checks and shows a pre-start sheet naming each problem, with "Start anyway" unless something blocks | Decision 7, replacing the earlier `READINESS_REQUIRED` refusal. |
 | Storage cap in decimal units | Matches "2 GB" and "10 MB" (the golden download is 10 000 000 bytes). |
-| Consent text `2026-09-10-draft` in `Consent.CURRENT` | Placeholder until product and legal wording exists. |
+| Consent text `2026-09-10-draft` in `Consent.CURRENT`, worded per decision 2 | Not legally reviewed. Any change to the text needs a new version and the new SHA-256 pinned in `ConsentTest`, because stored consent records and every session's `consent_sha256` depend on the exact bytes. |
+| The sampling-gap threshold uses the interval in force when the previous fresh sample was measured | Only this reproduces the golden 14.0 s `screen_off` gap: the answer that delivered the previous fresh sample already reports the screen off. |
+| A cells.csv row may lack `pci` or `dl_earfcn` | SESSION-FORMAT.md: the cells must account for every row of kpi.csv, and `plausible` says which rows are incomplete. |

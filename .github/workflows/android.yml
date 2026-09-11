@@ -52,12 +52,31 @@ jobs:
           # The default is read-only off the default branch; let pushes write it.
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
-      - name: Unit tests and debug APK
+      - name: Unit tests, lint and APKs
         run: |
-          tasks=(:format:test :core:test :app:testDebugUnitTest :app:assembleDebug)
+          tasks=(:format:test :core:test :app:testDebugUnitTest :app:assembleDebug :app:lintDebug :app:assembleRelease)
           # The instrumented-test APK, once an androidTest source set exists.
           if [ -d app/src/androidTest ]; then tasks+=(:app:assembleDebugAndroidTest); fi
           ./gradlew --stacktrace "${tasks[@]}"
+
+      # The automation hook lives in src/debug only (android/ARCHITECTURE.md section 9): a release APK must
+      # not export it. The debug APK is checked too, so a check that cannot see the hook fails instead of passing.
+      - name: Release APK has no debug automation hook
+        run: |
+          aapt2="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -n 1)aapt2"
+          release_apk=$(ls app/build/outputs/apk/release/*.apk)
+          debug_apk=$(ls app/build/outputs/apk/debug/*.apk)
+          release_manifest=$("$aapt2" dump xmltree --file AndroidManifest.xml "$release_apk")
+          debug_manifest=$("$aapt2" dump xmltree --file AndroidManifest.xml "$debug_apk")
+          if ! grep -q "com.fieldtap.debug.AutomationActivity" <<< "$debug_manifest"; then
+            echo "The debug APK does not declare the automation hook; this check cannot be trusted"
+            exit 1
+          fi
+          if grep -q "com.fieldtap.debug" <<< "$release_manifest"; then
+            echo "The release APK declares the debug automation hook"
+            exit 1
+          fi
+          echo "OK: ${release_apk##*/} has no com.fieldtap.debug entry; ${debug_apk##*/} has the hook"
 
       - name: Upload APKs
         uses: actions/upload-artifact@v7

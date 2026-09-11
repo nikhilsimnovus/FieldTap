@@ -5,12 +5,14 @@
     Play-clean by decision: no background location, no wake lock, no battery-exemption request,
     no all-packages query, no Wi-Fi state (no SSID or BSSID), no privileged phone state.
 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Every measurement comes from the telephony stack. -->
+    <!-- Every measurement comes from the telephony stack: a phone without it has nothing to record. -->
     <uses-feature
         android:name="android.hardware.telephony"
-        android:required="true" />
+        android:required="true"
+        tools:ignore="UnnecessaryRequiredFeature" />
     <uses-feature
         android:name="android.hardware.location.gps"
         android:required="false" />
@@ -29,9 +31,15 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
 
+    <!--
+        Sessions, settings and consent never leave the phone except as a shared zip (decision 3):
+        no cloud backup, no device-to-device transfer, no adb backup.
+    -->
     <application
         android:name=".app.FieldTapApplication"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
