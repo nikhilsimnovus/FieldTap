@@ -71,8 +71,10 @@ data class ClassifiedAnswer(
  * - Seen keys are remembered for at least [historyMs] of elapsedRealtime after their last sighting
  *   (each sighting renews the memory). As a guard against a vendor that floods new timestamps, at most
  *   65 536 measurements are remembered; the ones sighted longest ago are forgotten first.
- * - A stale cell keeps the measurement time of the measurement it repeats: `time_epoch` and
- *   `timestamp_ms` stay, only `seen_utc` and `age_ms` move on.
+ * - A stale cell keeps the measurement time of the measurement it repeats, as computed at its first
+ *   sighting: `time_epoch` and `timestamp_ms` stay, only `seen_utc` and `age_ms` move on. The wall clock and
+ *   elapsedRealtime are read separately at each answer, so recomputing it would move a repeat by a millisecond
+ *   (or by a wall-clock step), and the repeat could no longer be matched to its fresh row.
  * - [classify] never throws for vendor oddities. Timestamps that never advance make every later
  *   answer a repeat, which is the honest result; negative ages clamp to 0.
  * - Calls come from one thread (the session dispatcher or the Live reducer's collector); the
@@ -85,8 +87,8 @@ data class ClassifiedAnswer(
  * Owner: workstream `radio-core`.
  */
 class FreshnessEngine(private val historyMs: Long = 120_000) {
-    /** Each measurement seen, mapped to the elapsedRealtime of its last sighting; least recently sighted first. */
-    private val sightings = LinkedHashMap<Sighting, Long>()
+    /** Each measurement seen, with its last sighting and its measurement time; least recently sighted first. */
+    private val sightings = LinkedHashMap<Sighting, Seen>()
 
     init {
         require(historyMs >= 0) { "historyMs must not be negative, was $historyMs" }
@@ -98,17 +100,18 @@ class FreshnessEngine(private val historyMs: Long = 120_000) {
         val keys = answer.cells.map { Sighting(CellKey.of(it), it.timestampMs) }
         val cells = answer.cells.mapIndexed { index, cell ->
             val ageMs = ageOf(nowMs, cell.timestampMs)
+            val earlier = sightings[keys[index]]
             ClassifiedCell(
                 cell = cell,
-                stale = sightings.containsKey(keys[index]),
+                stale = earlier != null,
                 ageMs = ageMs,
-                measurementWallMs = answer.observedWallMs - ageMs,
+                measurementWallMs = earlier?.measurementWallMs ?: (answer.observedWallMs - ageMs),
             )
         }
-        for (key in keys) {
+        for ((index, key) in keys.withIndex()) {
             // Re-inserting moves the sighting to the end, so the map stays ordered by last sighting.
-            sightings.remove(key)
-            sightings[key] = nowMs
+            val earlier = sightings.remove(key)
+            sightings[key] = Seen(lastSightingMs = nowMs, measurementWallMs = earlier?.measurementWallMs ?: cells[index].measurementWallMs)
         }
         trimToCapacity()
 
@@ -135,7 +138,7 @@ class FreshnessEngine(private val historyMs: Long = 120_000) {
         val cutoffMs = nowMs - historyMs
         val iterator = sightings.values.iterator()
         while (iterator.hasNext()) {
-            if (iterator.next() < cutoffMs) iterator.remove() else break
+            if (iterator.next().lastSightingMs < cutoffMs) iterator.remove() else break
         }
     }
 
@@ -148,6 +151,9 @@ class FreshnessEngine(private val historyMs: Long = 120_000) {
     }
 
     private data class Sighting(val key: CellKey, val timestampMs: Long)
+
+    /** The elapsedRealtime of a measurement's last sighting, and its wall-clock measurement time from the first. */
+    private class Seen(val lastSightingMs: Long, val measurementWallMs: Long)
 }
 
 private const val MAX_SIGHTINGS: Int = 65_536
@@ -167,4 +173,20 @@ internal fun ClassifiedAnswer.freshReference(): ClassifiedCell? {
     if (!fresh) return null
     primary?.let { return it }
     return cells.filter { !it.stale }.maxByOrNull { it.cell.timestampMs }
+}
+
+/**
+ * This answer without the cells measured before [fromElapsedMs] (their `timestampMs` is earlier), or null when
+ * every cell was: nothing of it may be written. The serving cells are kept only when they were measured in time
+ * (the NSA leg only with its primary), and `fresh` and `repeat` are judged again on what is left. An answer
+ * with no cells at all is returned as it is.
+ */
+internal fun ClassifiedAnswer.measuredFrom(fromElapsedMs: Long): ClassifiedAnswer? {
+    if (cells.none { it.cell.timestampMs < fromElapsedMs }) return this
+    val kept = cells.filter { it.cell.timestampMs >= fromElapsedMs }
+    if (kept.isEmpty()) return null
+    val keptPrimary = primary?.takeIf { it.cell.timestampMs >= fromElapsedMs }
+    val keptLeg = if (keptPrimary == null) null else nsaSecondary?.takeIf { it.cell.timestampMs >= fromElapsedMs }
+    val keptFresh = if (keptPrimary != null) !keptPrimary.stale else kept.any { !it.stale }
+    return copy(cells = kept, primary = keptPrimary, nsaSecondary = keptLeg, fresh = keptFresh, repeat = !keptFresh)
 }

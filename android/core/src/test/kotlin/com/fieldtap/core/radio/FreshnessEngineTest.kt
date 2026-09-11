@@ -40,6 +40,24 @@ class FreshnessEngineTest {
     }
 
     @Test
+    fun aRepeatKeepsTheMeasurementTimeOfItsFirstSightingWhenTheClocksDrift() {
+        val engine = FreshnessEngine()
+        val first = engine.classify(answer(900, listOf(lte(400))))
+        assertEquals(WALL0 + 400, first.primary!!.measurementWallMs)
+
+        // The wall clock and elapsedRealtime are read one after the other and each is cut to a millisecond, so the
+        // next answer can see them a millisecond further apart; and Android may step the wall clock.
+        val jittered = answer(1_900, listOf(lte(400))).let { it.copy(observedWallMs = it.observedWallMs + 1) }
+        val repeat = engine.classify(jittered)
+        assertTrue(repeat.repeat)
+        assertEquals(WALL0 + 400, repeat.primary!!.measurementWallMs)
+        assertEquals(1_500L, repeat.primary.ageMs)
+
+        val stepped = answer(2_900, listOf(lte(400))).let { it.copy(observedWallMs = it.observedWallMs - 3_600_000) }
+        assertEquals(WALL0 + 400, engine.classify(stepped).primary!!.measurementWallMs)
+    }
+
+    @Test
     fun aPushAnswerRepeatingARequestAnswerIsARepeat() {
         val engine = FreshnessEngine()
         val cells = listOf(lte(400), nr(400))

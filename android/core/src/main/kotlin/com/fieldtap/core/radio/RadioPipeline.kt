@@ -20,6 +20,9 @@ data class RadioStep(
     }
 }
 
+/** `collection.fresh_samples` and `collection.repeats_dropped`, cheap enough to read after every command. */
+data class SampleCounts(val freshSamples: Long, val repeatsDropped: Long)
+
 /**
  * Everything radio the session recorder needs, behind one interface so the recorder can be tested
  * with a fake. Single-threaded: called only on the session dispatcher.
@@ -30,7 +33,9 @@ data class RadioStep(
  *
  * [onResume] is called at the moment logging resumes: it resets the gap detector and feeds the latest
  * service, data and display snapshots, re-stamped with the resume time, to the event deriver, so the
- * files learn about any change that happened inside the zone without learning when.
+ * files learn about any change that happened inside the zone without learning when. From then on nothing
+ * measured before the resume is written, whenever Android delivers it: a cell measured inside the zone and
+ * delivered after the resume fix is neither a row nor an event.
  *
  * [onKpiWritten] is called by the recorder for each kpi.csv row it actually wrote (after the GPS join),
  * and feeds [ServingCellTable].
@@ -61,6 +66,9 @@ interface RadioPipeline {
     /** `collection` now. */
     fun collection(): CollectionMeta
 
+    /** The two counters of [collection], without building it: the recorder reads them after every command. */
+    fun sampleCounts(): SampleCounts = collection().let { SampleCounts(it.freshSamples, it.repeatsDropped) }
+
     /** The newest classified answer, paused or not; for the notification. */
     fun latest(): ClassifiedAnswer?
 }
@@ -69,13 +77,18 @@ interface RadioPipeline {
  * The production [RadioPipeline]: [FreshnessEngine] -> [RadioRows] -> [RadioEventDeriver],
  * [SamplingGapDetector], [CollectionStats], [ServingCellTable].
  *
- * One written answer, in order: classify; count it in the statistics; build its cellinfo and KPI
- * candidates; derive the cell events from the accepted KPI candidates; then, if the answer ends a
- * sampling gap, append its `sampling_gap` event (whose time, the answer's arrival, is never earlier
- * than the cell events' measurement time) and record the gap. A paused answer is only classified.
+ * One written answer, in order: classify; leave out the cells measured before the last resume; count it in
+ * the statistics; build its cellinfo and KPI candidates; derive the cell events from the accepted KPI
+ * candidates; then, if the answer ends a sampling gap, append its `sampling_gap` event (whose time, the
+ * answer's arrival, is never earlier than the cell events' measurement time) and record the gap. A paused
+ * answer is only classified, and so is a written answer all of whose cells were measured before the resume.
  *
- * [onResume] resets the gap detector and breaks the statistics' interval chain, then re-feeds the latest
- * service, data and display snapshots, in that order, stamped with the resume time.
+ * [sessionStartElapsedMs] is the session's start on elapsedRealtime: a sample measured before it can still be
+ * written (a first answer is often measured a little before the start), but it never becomes the reference of
+ * the gap detector or of the interval statistics, so no gap and no interval begins before the session.
+ *
+ * [onResume] resets the gap detector and breaks the statistics' interval chain from the resume time, then
+ * re-feeds the latest service, data and display snapshots, in that order, stamped with the resume time.
  *
  * Tests: feeding the golden session's 120 answers (see tests/fixtures/make_android_session.py for
  * the inputs) yields its kpi rows, cellinfo rows (without positions), serving_cell events, gap and
@@ -89,23 +102,35 @@ class DefaultRadioPipeline(
     private val gaps: SamplingGapDetector = SamplingGapDetector(),
     private val stats: CollectionStats = CollectionStats(),
     private val cellTable: ServingCellTable = ServingCellTable(),
+    sessionStartElapsedMs: Long? = null,
 ) : RadioPipeline {
     private var latestAnswer: ClassifiedAnswer? = null
     private var latestService: ServiceStateSnapshot? = null
     private var latestData: DataStateSnapshot? = null
     private var latestDisplay: DisplayInfoSnapshot? = null
 
+    /** Cells measured before this elapsedRealtime are never written: the moment logging last resumed. */
+    private var writeFromElapsedMs: Long = Long.MIN_VALUE
+
+    init {
+        if (sessionStartElapsedMs != null) {
+            gaps.reset(sessionStartElapsedMs)
+            stats.onResume(sessionStartElapsedMs)
+        }
+    }
+
     override fun onCellInfo(answer: CellInfoAnswer, writing: Boolean): RadioStep {
         val classified = freshness.classify(answer)
         latestAnswer = classified
         if (!writing) return RadioStep.EMPTY
+        val written = classified.measuredFrom(writeFromElapsedMs) ?: return RadioStep.EMPTY
 
-        stats.onAnswer(classified)
-        val cellInfo = RadioRows.cellInfo(classified)
-        val kpi = RadioRows.kpi(classified)
+        stats.onAnswer(written)
+        val cellInfo = RadioRows.cellInfo(written)
+        val kpi = RadioRows.kpi(written)
         val events = ArrayList<EventRow>()
-        if (kpi.isNotEmpty()) events.addAll(deriver.onAccepted(classified, kpi))
-        val gap = gaps.onAnswer(classified)
+        if (kpi.isNotEmpty()) events.addAll(deriver.onAccepted(written, kpi))
+        val gap = gaps.onAnswer(written)
         if (gap != null) {
             stats.onGap(gap)
             events.add(gap.toEvent())
@@ -134,8 +159,9 @@ class DefaultRadioPipeline(
     }
 
     override fun onResume(nowWallMs: Long, nowElapsedMs: Long): List<EventRow> {
-        gaps.reset()
-        stats.onResume()
+        writeFromElapsedMs = maxOf(writeFromElapsedMs, nowElapsedMs)
+        gaps.reset(writeFromElapsedMs)
+        stats.onResume(writeFromElapsedMs)
         val events = ArrayList<EventRow>()
         latestService?.let {
             events.addAll(deriver.onServiceState(it.copy(observedWallMs = nowWallMs, observedElapsedMs = nowElapsedMs)))
@@ -158,6 +184,8 @@ class DefaultRadioPipeline(
     override fun plmns(): Map<String, Int> = cellTable.plmns()
 
     override fun collection(): CollectionMeta = stats.snapshot()
+
+    override fun sampleCounts(): SampleCounts = SampleCounts(stats.freshSamples, stats.repeatsDropped)
 
     override fun latest(): ClassifiedAnswer? = latestAnswer
 }

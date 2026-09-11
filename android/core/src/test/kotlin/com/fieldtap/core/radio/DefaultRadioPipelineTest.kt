@@ -177,11 +177,9 @@ class DefaultRadioPipelineTest {
         assertEquals(before, pipeline.collection())
         assertEquals(none, pipeline.onResume(WALL0 + 22_000, BOOT0 + 22_000))
 
-        // The measurement taken inside the zone arrives again after it: a repeat, never a KPI row.
-        val again = pipeline.onCellInfo(answer(22_900, listOf(sector2)), writing = true)
-        assertTrue(again.kpi.isEmpty())
-        assertEquals(listOf(true), again.cellInfo.map { it.row.stale })
-        assertEquals(none, again.events)
+        // The measurement taken inside the zone arrives again after it. It was measured before the resume, so
+        // it is not written at all: no stale cellinfo row carrying the identity and the time from inside.
+        assertSame(RadioStep.EMPTY, pipeline.onCellInfo(answer(22_900, listOf(sector2)), writing = true))
 
         // The first fresh sample after the zone names the new cell, and no gap straddles the pause.
         val next = pipeline.onCellInfo(answer(24_900, listOf(lte(24_400, pci = 213, cellId = 21_640_194L))), writing = true)
@@ -191,9 +189,57 @@ class DefaultRadioPipelineTest {
 
         val collection = pipeline.collection()
         assertEquals(2L, collection.freshSamples)
-        assertEquals(1L, collection.repeatsDropped)
+        assertEquals(0L, collection.repeatsDropped)
+        assertEquals(SampleCounts(2, 0), pipeline.sampleCounts())
         assertNull(collection.medianFreshIntervalMs)
         assertTrue(collection.gaps.isEmpty())
+    }
+
+    @Test
+    fun aSampleMeasuredInsideTheZoneButFirstDeliveredAfterTheResumeIsNeitherARowNorAnEvent() {
+        assertEquals(listOf(EventKind.SERVING_CELL), pipeline.onCellInfo(answer(900, listOf(lte(400))), writing = true).events.map { it.kind })
+        assertSame(RadioStep.EMPTY, pipeline.onCellInfo(answer(5_900, listOf(lte(5_400))), writing = false))
+        assertEquals(none, pipeline.onResume(WALL0 + 31_000, BOOT0 + 31_000))
+
+        // Measured at 30.8 s, inside the zone, and delivered at 31.2 s, after the fix that resumed logging: on the
+        // modem's 2 s refresh this is the normal case, not a race. Neither the new cell nor its NSA leg is written,
+        // and the files do not learn of the cell change from it.
+        val sector2Inside = lte(30_800, pci = 213, cellId = 21_640_194L)
+        assertSame(RadioStep.EMPTY, pipeline.onCellInfo(answer(31_200, listOf(sector2Inside, nr(30_800))), writing = true))
+
+        // In one answer, a cell measured after the resume is written and a neighbour measured before it is not.
+        val neighbourInside = lte(30_900, pci = 214, status = CellSnapshot.CONNECTION_NONE, cellId = null)
+        val mixed = pipeline.onCellInfo(answer(32_900, listOf(lte(32_400, pci = 213, cellId = 21_640_194L), neighbourInside)), writing = true)
+        assertEquals(listOf(213), mixed.cellInfo.map { it.row.pci })
+        assertEquals(listOf(WALL0 + 32_400), mixed.kpi.map { it.row.timeEpochMs })
+        assertEquals(listOf("Serving cell changed"), mixed.events.map { it.title })
+        assertEquals(WALL0 + 32_400, mixed.events.single().timeUtcMs)
+        assertTrue(pipeline.collection().gaps.isEmpty())
+    }
+
+    @Test
+    fun aSampleMeasuredBeforeTheSessionStartedIsWrittenButOpensNoGapAndNoInterval() {
+        val session = DefaultRadioPipeline(sessionStartElapsedMs = BOOT0 + 5_000)
+        // Android's cached measurement, taken 5 s before the session started: still a cellinfo row (too old for kpi.csv).
+        val cached = session.onCellInfo(answer(5_040, listOf(lte(0))), writing = true)
+        assertEquals(1, cached.cellInfo.size)
+        assertTrue(cached.kpi.isEmpty())
+        // The first sample measured in the session names the cell; no gap reaches back before the start.
+        assertEquals(listOf(EventKind.SERVING_CELL), session.onCellInfo(answer(5_100, listOf(lte(5_060))), writing = true).events.map { it.kind })
+        assertEquals(none, session.onCellInfo(answer(7_100, listOf(lte(7_060))), writing = true).events)
+
+        val collection = session.collection()
+        assertEquals(3L, collection.freshSamples)
+        assertEquals(2_000L, collection.medianFreshIntervalMs)
+        assertTrue(collection.gaps.isEmpty())
+
+        // A pipeline that does not know when the session started turns the same answers into a 5.1 s gap.
+        val unaware = DefaultRadioPipeline()
+        unaware.onCellInfo(answer(5_040, listOf(lte(0))), writing = true)
+        assertEquals(
+            listOf(EventKind.SERVING_CELL, EventKind.SAMPLING_GAP),
+            unaware.onCellInfo(answer(5_100, listOf(lte(5_060))), writing = true).events.map { it.kind },
+        )
     }
 
     @Test

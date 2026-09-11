@@ -77,6 +77,11 @@ data class DeviceConditions(
  * callback, with every `CellInfo` in the list, in Android's order. [conditions] are read by the
  * adapter synchronously when the callback fires. [subId] is
  * `SubscriptionManager.getDefaultDataSubscriptionId()`, null when invalid.
+ *
+ * [cached] marks the one `getAllCellInfo()` read the adapter makes when it starts: Android's cached list,
+ * whatever the last requester received, possibly minutes old, and not a `requestCellInfoUpdate` answer at
+ * all. It fills the Live screen before the first request comes back; a session never writes it, counts it
+ * or times a gap from it.
  */
 data class CellInfoAnswer(
     val source: CellInfoSource,
@@ -85,6 +90,7 @@ data class CellInfoAnswer(
     val conditions: DeviceConditions,
     override val observedWallMs: Long,
     override val observedElapsedMs: Long,
+    val cached: Boolean = false,
 ) : MeasurementInput
 
 /** `CellInfoCallback.onError`, or a `SecurityException` from `requestCellInfoUpdate`. Never written to a file. */

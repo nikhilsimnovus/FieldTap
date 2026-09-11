@@ -85,7 +85,10 @@ data class SamplingGap(
  *   `UNKNOWN` service states neither start nor end a no-service period.
  * - [reset] forgets the previous fresh answer; the pipeline calls it when logging resumes after a
  *   privacy-zone pause, so no gap straddles a pause. The current service state and the last tick
- *   describe the present and are kept.
+ *   describe the present and are kept. A sample measured before `reset`'s `fromElapsedMs` never becomes
+ *   the reference: the pipeline passes the session's start, so a cached or late sample measured before
+ *   the session cannot open a gap that begins before it, and the resume time, so no sample from inside a
+ *   zone can.
  *
  * Not thread-safe: called on the session dispatcher only.
  *
@@ -102,12 +105,13 @@ class SamplingGapDetector {
     private val stalls = ArrayDeque<Span>()
     private var serviceBadSinceMs: Long? = null
     private val badServiceSpans = ArrayDeque<Span>()
+    private var referenceFromElapsedMs: Long = Long.MIN_VALUE
 
     /** Every answer, fresh or not. Returns the gap this answer ends, if any. */
     fun onAnswer(classified: ClassifiedAnswer): SamplingGap? {
         val answer = classified.answer
         var gap: SamplingGap? = null
-        val cell = classified.freshReference()
+        val cell = classified.freshReference()?.takeIf { it.cell.timestampMs >= referenceFromElapsedMs }
         if (cell != null) {
             val measuredMs = cell.cell.timestampMs
             val previous = reference
@@ -152,7 +156,9 @@ class SamplingGapDetector {
         if (last == null || nowElapsedMs > last) lastTickElapsedMs = nowElapsedMs
     }
 
-    fun reset() {
+    /** Forgets the previous fresh sample; a sample measured before [fromElapsedMs] never becomes the next one. */
+    fun reset(fromElapsedMs: Long = Long.MIN_VALUE) {
+        referenceFromElapsedMs = fromElapsedMs
         reference = null
         recentAnswers.clear()
         screenOffInWindow = false
@@ -243,7 +249,8 @@ class SamplingGapDetector {
  *   with no request answers. Unrounded; session.json writes one decimal.
  * - `gaps`: every [SamplingGap] passed to [onGap], in order.
  * - Counts only what the pipeline passes while writing. [onResume] breaks the interval chain, so no
- *   interval straddles a privacy-zone pause.
+ *   interval straddles a privacy-zone pause; a fresh sample measured before its `fromElapsedMs` (the
+ *   session's start, or the resume) adds no interval and does not start the chain.
  *
  * Not thread-safe: called on the session dispatcher only.
  *
@@ -253,8 +260,15 @@ class SamplingGapDetector {
  * Owner: workstream `radio-core`.
  */
 class CollectionStats {
-    private var freshSamples: Long = 0
-    private var repeatsDropped: Long = 0
+    /** `fresh_samples` so far, without building a [snapshot]. */
+    var freshSamples: Long = 0
+        private set
+
+    /** `repeats_dropped` so far, without building a [snapshot]. */
+    var repeatsDropped: Long = 0
+        private set
+
+    private var referenceFromElapsedMs: Long = Long.MIN_VALUE
     private var requestAnswers: Long = 0
     private var shortIntervalAnswers: Long = 0
     private var screenOnAnswers: Long = 0
@@ -277,7 +291,7 @@ class CollectionStats {
             if (conditions.wifiConnected) wifiConnectedAnswers += 1
             if (conditions.charging) chargingAnswers += 1
         }
-        val reference = classified.freshReference() ?: return
+        val reference = classified.freshReference()?.takeIf { it.cell.timestampMs >= referenceFromElapsedMs } ?: return
         val measuredMs = reference.cell.timestampMs
         val previous = previousFreshElapsedMs
         if (previous == null || measuredMs > previous) {
@@ -290,8 +304,12 @@ class CollectionStats {
         gaps.add(gap.toMeta())
     }
 
-    /** Forgets the previous fresh answer: the next interval starts after the pause. */
-    fun onResume() {
+    /**
+     * Forgets the previous fresh answer: the next interval starts after the pause. A sample measured before
+     * [fromElapsedMs] neither adds an interval nor starts the next chain.
+     */
+    fun onResume(fromElapsedMs: Long = Long.MIN_VALUE) {
+        referenceFromElapsedMs = fromElapsedMs
         previousFreshElapsedMs = null
     }
 
