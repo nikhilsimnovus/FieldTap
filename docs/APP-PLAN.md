@@ -519,7 +519,7 @@ Checked against AOSP source and Google's documentation on 2026-09-10.
 | --- | --- | --- | --- |
 | `TelephonyManager.requestCellInfoUpdate` | 29 | Precise location only | The main source. Inside the refresh interval it returns the cached list. |
 | `TelephonyManager.getAllCellInfo` | 17 | Precise location | Cached results only, for apps targeting Android 10+. Used for the first screen only. |
-| Cell-info refresh interval | | | 2 s if the screen is on and (Wi-Fi is off or the phone is charging); otherwise 10 s. |
+| Cell-info refresh interval | | | 2 s if a display is on and (no Wi-Fi network with internet is connected, or the phone is charging); otherwise 10 s. Charging is `BatteryManager.isCharging()`: plugged in below 90 %, only once the battery level rises, reported 15 min later; not merely plugged in. A display the proximity sensor blanks is off. |
 | `CellInfoListener` | 31 | Phone **and** precise location | Optional. `READ_BASIC_PHONE_STATE` does not satisfy it. |
 | `SignalStrengthsListener`, `DataConnectionStateListener` | 31 | Nothing | Signal updates stop screen-off on battery unless tethering or Android Auto is on. |
 | `ServiceStateListener` | 31 | Nothing to register | Operator fields are null without location. |

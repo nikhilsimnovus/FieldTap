@@ -143,7 +143,7 @@
     <string name="live_row_measured_interval">Measured interval (median of the last 10)</string>
     <string name="live_walk_mode">Walk mode</string>
     <string name="live_walk_mode_supporting">Keeps the screen on with a dark surface, so Android can refresh every 2 s. Brightness follows your phone. Uses no wake lock. In a pocket with the screen off, Android refreshes every 10 s and, on battery, sends no signal-strength updates.</string>
-    <string name="live_walk_wifi_prompt">Wi-Fi is connected on battery, so Android refreshes cell info only every 10 s. Turn Wi-Fi off or plug in for 2 s updates.</string>
+    <string name="live_walk_wifi_prompt">Wi-Fi is connected and the phone is not charging, so Android refreshes cell info only every 10 s. Turn Wi-Fi off for 2 s updates. A charger helps only once Android counts the phone as charging, which can take 15 minutes.</string>
     <string name="live_action_wifi_settings">Wi-Fi settings</string>
 
     <string name="live_note_push_missing">Phone permission not granted: no push updates. Requests every second still run.</string>
@@ -299,8 +299,8 @@
     <string name="issue_standby_detail">The app is in a restrictive standby bucket. Opening it more often lifts the limit.</string>
     <string name="issue_no_sim_title">No SIM is ready</string>
     <string name="issue_no_sim_detail">The phone can only camp on a cell for emergency calls, and ping and download tests cannot run.</string>
-    <string name="issue_wifi_title">Wi-Fi is on, on battery</string>
-    <string name="issue_wifi_detail">Android refreshes cell information only every 10 s. Turn Wi-Fi off or plug in for 2 s.</string>
+    <string name="issue_wifi_title">Wi-Fi is on and the phone is not charging</string>
+    <string name="issue_wifi_detail">Android refreshes cell information only every 10 s. Turn Wi-Fi off for 2 s. A charger helps only once Android counts the phone as charging, up to 15 minutes after plugging in.</string>
     <string name="issue_oem_title">This phone may stop background apps</string>
     <string name="issue_oem_detail">Phones from this maker are known to end long recordings. The readiness check explains what to change.</string>
     <string name="issue_open_readiness_fix">Readiness check</string>

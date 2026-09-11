@@ -235,8 +235,9 @@ object ReadinessPolicy {
 
             else -> advice(
                 check,
-                "Wi-Fi is connected on battery, so Android refreshes cell information only every 10 s; turn " +
-                    "Wi-Fi off or plug in for 2 s updates.",
+                "Wi-Fi is connected and the phone is not charging, so Android refreshes cell information only " +
+                    "every 10 s; turn Wi-Fi off for 2 s updates, because a charger helps only once Android counts the " +
+                    "phone as charging, up to 15 minutes after plugging in.",
                 SettingsTarget.WIFI,
             )
         }
