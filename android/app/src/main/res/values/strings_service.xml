@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Strings of the foreground service and its notification. Owner: workstream service-and-tests. -->
+<resources>
+    <string name="notification_channel_session">Session recording</string>
+    <string name="notification_action_stop">Stop</string>
+    <string name="notification_action_mark">Mark</string>
+</resources>

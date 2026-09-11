@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider roots. Owner: workstream ui-session. Only rebuilt export copies are ever shared, never the session directories. -->
+<paths>
+    <cache-path
+        name="exports"
+        path="exports/" />
+</paths>

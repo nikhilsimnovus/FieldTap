@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Debug builds only: the end-to-end automation hook. The release variant has no src/release
+    counterpart, so a release APK contains no exported automation entry point.
+    Contract: android/ARCHITECTURE.md, "Debug automation hook". Owner: workstream ui-session.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <activity
+            android:name="com.fieldtap.debug.AutomationActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="com.fieldtap.debug.START_SESSION" />
+                <action android:name="com.fieldtap.debug.MARK" />
+                <action android:name="com.fieldtap.debug.STOP_SESSION" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

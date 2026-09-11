@@ -22,9 +22,15 @@ tasks.test {
     useJUnit()
 }
 
+// Every dependency the :core workstreams need is declared here up front, so no implementer has to
+// edit this file (android/ARCHITECTURE.md, "Shared files"). :format and coroutines types appear in
+// :core's public signatures, hence api.
 dependencies {
-    implementation(project(":format"))
-    implementation(libs.kotlinx.coroutines.core)
+    api(project(":format"))
+    api(libs.kotlinx.coroutines.core)
+    // Reading JSON only (settings codec); session files are written by :format's own writer.
+    implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

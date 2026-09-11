@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Strings of the Live, Sessions and Session detail screens. Owner: workstream ui-session. -->
+<resources>
+    <string name="live_title">Live</string>
+    <string name="sessions_title">Sessions</string>
+</resources>

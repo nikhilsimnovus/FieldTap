@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Strings of the disclosure, permissions, readiness, probe, settings and about screens. Owner: workstream ui-setup. -->
+<resources>
+    <string name="about_no_account">No account yet: sessions stay on this phone until you share or delete them.</string>
+    <string name="readiness_title">Readiness check</string>
+</resources>
