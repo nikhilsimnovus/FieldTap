@@ -21,6 +21,15 @@ class FormatsTest {
     }
 
     @Test
+    fun countsAreGroupedForTheLocaleInAsciiDigits() {
+        assertEquals("0", Formats.count(0, us))
+        assertEquals("999", Formats.count(999, us))
+        assertEquals("1,234", Formats.count(1_234, us))
+        assertEquals("1.234.567", Formats.count(1_234_567, german))
+        assertEquals("ASCII digits in Arabic too", true, Formats.count(1_234, Locale.forLanguageTag("ar-EG")).all { it !in '٠'..'٩' })
+    }
+
+    @Test
     fun ageIsWholeSecondsFromNineAndAHalfTenths() {
         assertEquals("10", Formats.ageSeconds(9_950, us))
         assertEquals("11", Formats.ageSeconds(11_000, us))

@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -15,6 +17,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import com.fieldtap.ui.theme.FieldTapIcons
 
@@ -44,7 +48,8 @@ fun rememberTopBarScroll(): TopBarScroll {
  * [TopBarScroll] when the content under it scrolls.
  *
  * The back arrow shows only when both [onNavigateUp] and [navigateUpContentDescription] are given
- * ("Back" from a string resource). Use [TopBarAction] for actions, at most two plus an overflow menu.
+ * ("Back" from a string resource); a full-screen dialog passes [FieldTapIcons.Close] as [navigationIcon]. Use
+ * [TopBarAction] and [TopBarToggleAction] for actions, at most three plus an overflow menu.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,6 +59,7 @@ fun FieldTapTopBar(
     onNavigateUp: (() -> Unit)? = null,
     navigateUpContentDescription: String? = null,
     scroll: TopBarScroll? = null,
+    navigationIcon: ImageVector = FieldTapIcons.ArrowBack,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     TopAppBar(
@@ -63,7 +69,7 @@ fun FieldTapTopBar(
         navigationIcon = {
             if (onNavigateUp != null && navigateUpContentDescription != null) {
                 IconButton(onClick = onNavigateUp) {
-                    Icon(imageVector = FieldTapIcons.ArrowBack, contentDescription = navigateUpContentDescription)
+                    Icon(imageVector = navigationIcon, contentDescription = navigateUpContentDescription)
                 }
             }
         },
@@ -92,6 +98,35 @@ fun TopBarAction(
     }
 }
 
+/**
+ * A 48 dp icon that turns a mode on or off, for [FieldTapTopBar] or an action rail: walk mode on Live. When on, the icon
+ * sits in a tonal circle, so the state shows by shape as well as by colour. TalkBack reads [contentDescription] ("Walk
+ * mode") with [stateDescription] ("On" or "Off").
+ */
+@Composable
+fun TopBarToggleAction(
+    icon: ImageVector,
+    contentDescription: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    stateDescription: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    IconToggleButton(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        modifier = modifier.semantics { this.stateDescription = stateDescription },
+        enabled = enabled,
+        colors = IconButtonDefaults.iconToggleButtonColors(
+            checkedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+            checkedContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        ),
+    ) {
+        Icon(imageVector = icon, contentDescription = contentDescription)
+    }
+}
+
 @FieldTapPreviews
 @Composable
 private fun FieldTapTopBarPreview() {
@@ -108,6 +143,7 @@ private fun FieldTapTopBarPreview() {
         FieldTapTopBar(
             title = "Live",
             actions = {
+                TopBarToggleAction(icon = FieldTapIcons.Walk, contentDescription = "Walk mode", checked = true, onCheckedChange = {}, stateDescription = "On")
                 TopBarAction(icon = FieldTapIcons.Sessions, contentDescription = "Sessions", onClick = {})
                 TopBarAction(icon = FieldTapIcons.Tune, contentDescription = "Settings", onClick = {})
             },

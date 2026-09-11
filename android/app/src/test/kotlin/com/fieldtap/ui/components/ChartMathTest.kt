@@ -2,6 +2,7 @@ package com.fieldtap.ui.components
 
 import com.fieldtap.core.live.ChartPoint
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -63,6 +64,33 @@ class ChartMathTest {
     fun yFractionUsesTheDisplayRange() {
         assertEquals(0.65f, ChartMath.yFraction(-75, -140..-40), 1e-6f)
         assertEquals(0f, ChartMath.yFraction(-150, -140..-40), 0f)
+    }
+
+    @Test
+    fun theRangeKeepsTheThresholdsAndGrowsToTheValuesWithinTheDisplayRange() {
+        val comfort = -120..-60
+        val limits = -140..-40
+        assertEquals("nothing to draw", comfort, ChartMath.fittedRange(emptyList(), now, window, comfort, limits))
+        assertEquals("steady values inside it", comfort, ChartMath.fittedRange(listOf(p(1_000, -92), p(2_000, -100)), now, window, comfort, limits))
+        // -118 dBm: floor10 is -120, less 5; -44 dBm: ceil10 is -40, plus 5, then clamped to the display range.
+        assertEquals(-125..-40, ChartMath.fittedRange(listOf(p(1_000, -118), p(2_000, -44)), now, window, comfort, limits))
+        assertEquals(-140..-55, ChartMath.fittedRange(listOf(p(1_000, -139), p(2_000, -61)), now, window, comfort, limits))
+        assertEquals("a point before the window does not count", comfort, ChartMath.fittedRange(listOf(p(-1, -139)), now, window, comfort, limits))
+    }
+
+    @Test
+    fun labelsAreDrawnKeyFirstThenFromTheFarthest() {
+        assertEquals(listOf(-105, -85, -95), ChartMath.labelOrder(listOf(-85, -95, -105), key = -105))
+        assertEquals(listOf(0, 20, 13), ChartMath.labelOrder(listOf(20, 13, 0), key = 0))
+        assertEquals(listOf(-85, -95), ChartMath.labelOrder(listOf(-85, -95), key = null))
+    }
+
+    @Test
+    fun aLabelCollidesWhenItsGrownBoxReachesOneAlreadyDrawn() {
+        assertTrue(ChartMath.labelCollides(top = 10f, bottom = 26f, drawnTop = 20f, drawnBottom = 36f, grow = 2f))
+        assertTrue("touching counts once grown", ChartMath.labelCollides(top = 37f, bottom = 53f, drawnTop = 20f, drawnBottom = 36f, grow = 2f))
+        assertFalse(ChartMath.labelCollides(top = 39f, bottom = 55f, drawnTop = 20f, drawnBottom = 36f, grow = 2f))
+        assertFalse(ChartMath.labelCollides(top = 0f, bottom = 16f, drawnTop = 20f, drawnBottom = 36f, grow = 2f))
     }
 
     @Test

@@ -64,6 +64,9 @@ data class SignalThresholds(val excellentAtLeast: Int, val goodAtLeast: Int, val
     val boundaries: List<Int> get() = listOf(excellentAtLeast, goodAtLeast, fairAtLeast)
 }
 
+/** A stretch of a scale, from [from] to [to], where values have the level [quality]. */
+data class SignalZone(val from: Int, val to: Int, val quality: SignalQuality)
+
 /**
  * Thresholds and display ranges for [SignalMetric]s. Pure; the colours live in [SignalColors].
  *
@@ -83,6 +86,21 @@ object SignalScale {
     val RSRQ_DISPLAY_RANGE: IntRange = -30..0
     val SINR_DISPLAY_RANGE: IntRange = -25..40
 
+    /**
+     * What a signal bar spans: the thresholds' neighbourhood, so its four zones are wide enough to tell apart. A value
+     * beyond it sits at the bar's end; the number beside the bar is the reading.
+     */
+    val RSRP_BAR_RANGE: IntRange = -130..-50
+    val RSRQ_BAR_RANGE: IntRange = -25..-5
+    val SINR_BAR_RANGE: IntRange = -10..30
+
+    /**
+     * The least a Live chart panel shows, so every threshold keeps its place however steady the signal. The panel grows
+     * from here to take in the values it draws, up to the display range (`ChartMath.fittedRange`).
+     */
+    val RSRP_CHART_RANGE: IntRange = -120..-60
+    val SINR_CHART_RANGE: IntRange = -10..30
+
     fun thresholds(metric: SignalMetric): SignalThresholds = when (metric) {
         SignalMetric.RSRP -> RSRP_THRESHOLDS
         SignalMetric.RSRQ -> RSRQ_THRESHOLDS
@@ -93,6 +111,27 @@ object SignalScale {
         SignalMetric.RSRP -> RSRP_DISPLAY_RANGE
         SignalMetric.RSRQ -> RSRQ_DISPLAY_RANGE
         SignalMetric.SINR -> SINR_DISPLAY_RANGE
+    }
+
+    fun barRange(metric: SignalMetric): IntRange = when (metric) {
+        SignalMetric.RSRP -> RSRP_BAR_RANGE
+        SignalMetric.RSRQ -> RSRQ_BAR_RANGE
+        SignalMetric.SINR -> SINR_BAR_RANGE
+    }
+
+    /**
+     * The scale's four zones inside [range], lowest first: POOR up to the fair threshold, FAIR, GOOD, then EXCELLENT from
+     * the excellent threshold. A zone that falls outside [range] is left out, and the outer zones end at its ends.
+     */
+    fun zones(metric: SignalMetric, range: IntRange): List<SignalZone> {
+        val t = thresholds(metric)
+        val edges = listOf(Int.MIN_VALUE, t.fairAtLeast, t.goodAtLeast, t.excellentAtLeast, Int.MAX_VALUE)
+        val levels = listOf(SignalQuality.POOR, SignalQuality.FAIR, SignalQuality.GOOD, SignalQuality.EXCELLENT)
+        return levels.mapIndexedNotNull { i, level ->
+            val from = maxOf(edges[i], range.first)
+            val to = minOf(edges[i + 1], range.last)
+            if (to > from) SignalZone(from, to, level) else null
+        }
     }
 
     /** The emphasised reference line: -105 dBm (the report's), -15 dB RSRQ, 0 dB SINR. */

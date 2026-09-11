@@ -1,12 +1,16 @@
 package com.fieldtap.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -31,6 +35,7 @@ import com.fieldtap.ui.theme.SignalMetric
 import com.fieldtap.ui.theme.SignalQuality
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
+import com.fieldtap.ui.theme.StatusTone
 import kotlin.math.roundToInt
 
 /** How loud a [MetricTile]'s value is. */
@@ -58,6 +63,10 @@ enum class MetricEmphasis {
  *
  * @param label for example "RSRP"; [unit] "dBm"; [qualityLabel] "Good" (see [SignalQualityLabels]);
  *   [ageText] "2.1 s old". All from string resources.
+ * @param ageInHeader puts the age badge in the header row, beside the quality chip, instead of above the supporting
+ *   text: one row less, where the tile is wide enough for label, age and quality side by side (Live in landscape).
+ * @param valueTone WARNING or ERROR draws the value in that tone's colour with the tone's icon after it, for a number
+ *   that is worse than it should be (a share below -105 dBm over 10 %, sampling gaps). Other tones change nothing.
  * @param footer optional content under the value, for example a [SignalBar] on the hero tile. TalkBack
  *   does not read it separately, so the tile's words must already say what it shows.
  */
@@ -76,6 +85,8 @@ fun MetricTile(
     placeholder: String = "—",
     contentDescription: String? = null,
     onClick: (() -> Unit)? = null,
+    ageInHeader: Boolean = false,
+    valueTone: StatusTone? = null,
     footer: (@Composable () -> Unit)? = null,
 ) {
     val numeric = FieldTapDesign.numeric
@@ -86,7 +97,12 @@ fun MetricTile(
     }
     val valueStyle = baseStyle.copy(lineHeight = 1.2.em)
     val dimmed = value == null || badge == AgeBadge.STALE
-    val valueColor = if (dimmed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+    val toneFamily = valueTone?.takeIf { it == StatusTone.WARNING || it == StatusTone.ERROR }?.let { FieldTapDesign.colors.status(it) }
+    val valueColor = when {
+        dimmed -> MaterialTheme.colorScheme.onSurfaceVariant
+        toneFamily != null -> toneFamily.color
+        else -> MaterialTheme.colorScheme.onSurface
+    }
     val description = contentDescription ?: listOfNotNull(
         label,
         if (value != null && unit != null) "$value $unit" else value ?: placeholder,
@@ -121,6 +137,9 @@ fun MetricTile(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                if (ageInHeader && ageText != null) {
+                    AgeIndicator(text = ageText, badge = badge)
+                }
                 if (qualityLabel != null) {
                     SignalQualityChip(quality = quality, label = qualityLabel)
                 }
@@ -148,15 +167,27 @@ fun MetricTile(
                             .padding(start = Spacing.Xs),
                     )
                 }
+                if (toneFamily != null) {
+                    Icon(
+                        imageVector = statusIcon(valueTone),
+                        contentDescription = null,
+                        tint = toneFamily.color,
+                        modifier = Modifier
+                            .align(Alignment.CenterVertically)
+                            .padding(start = Spacing.Xs)
+                            .size(Sizes.IconSmall),
+                    )
+                }
             }
             footer?.invoke()
-            if (ageText != null || supportingText != null) {
+            val ageBelow = !ageInHeader && ageText != null
+            if (ageBelow || supportingText != null) {
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
                     verticalArrangement = Arrangement.spacedBy(Spacing.Xs),
                     itemVerticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (ageText != null) {
+                    if (!ageInHeader && ageText != null) {
                         AgeIndicator(text = ageText, badge = badge)
                     }
                     if (supportingText != null) {
@@ -180,9 +211,12 @@ fun MetricTile(
 
 /**
  * A secondary live value under a [MetricEmphasis.HERO] tile, sharing a row with another: label, number and unit, and its
- * quality as a swatch and a word. A missing value shows [placeholder] with no unit, and [qualityLabel] says why in plain
- * words that wrap, for example "Not reported". [stale] dims the number as a stale hero does. TalkBack reads one sentence: the label, the value
- * with its unit or the placeholder, then the quality.
+ * quality as a swatch and a word. [stale] dims the number as a stale hero does.
+ *
+ * A value the cell does not report ([value] null with a [qualityLabel] such as "Not reported") is one 48 dp line, the
+ * label then the reason, with no dash and no empty value line. With neither, the tile shows [placeholder] under the label:
+ * there is no cell to report anything yet. TalkBack reads one sentence: the label, the value with its unit or the
+ * placeholder, then the quality or the reason.
  */
 @Composable
 fun SecondaryMetricTile(
@@ -196,9 +230,15 @@ fun SecondaryMetricTile(
     placeholder: String = "—",
 ) {
     val valueStyle = FieldTapDesign.numeric.medium.copy(lineHeight = 1.2.em)
+    val notReported = value == null && qualityLabel != null
     val description = listOfNotNull(
         label,
-        if (value != null && unit != null) "$value $unit" else value ?: placeholder,
+        when {
+            value != null && unit != null -> "$value $unit"
+            value != null -> value
+            notReported -> null
+            else -> placeholder
+        },
         qualityLabel,
     ).joinToString(", ")
     Surface(
@@ -206,6 +246,30 @@ fun SecondaryMetricTile(
         shape = ShapeRoles.Tile,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
+        if (notReported) {
+            // Only why there is no number: a reserved value line and a dash filled 77 dp of the first screen with nothing.
+            Box(
+                modifier = Modifier
+                    .heightIn(min = Sizes.MinTouchTarget)
+                    .padding(horizontal = Spacing.Md, vertical = Spacing.Xs),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
+                    itemVerticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(text = qualityLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            return@Surface
+        }
         Column(
             modifier = Modifier.padding(horizontal = Spacing.Md, vertical = Spacing.Sm),
             verticalArrangement = Arrangement.spacedBy(Spacing.Xxs),
@@ -241,13 +305,8 @@ fun SecondaryMetricTile(
                     )
                 }
             }
-            if (qualityLabel != null) {
-                if (value == null) {
-                    // Why there is no number, as words that wrap: a chip cut "Not reported" to "Not repo…" at font scale 1.3.
-                    Text(text = qualityLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    SignalQualityChip(quality = quality, label = qualityLabel)
-                }
+            if (value != null && qualityLabel != null) {
+                SignalQualityChip(quality = quality, label = qualityLabel)
             }
         }
     }

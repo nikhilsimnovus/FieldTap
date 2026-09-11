@@ -51,11 +51,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -261,6 +263,10 @@ internal fun DisclosureContent(
     } else {
         null
     }
+    val window = LocalWindowInfo.current.containerDpSize
+    // A phone in landscape: the 88 dp mark and a large headline filled the first page before any of the four points.
+    val short = window.height < Sizes.ShortWindowMaxHeight
+    val twoColumns = short && window.width >= Sizes.WideLayoutMinWidth
     SetupScreenScaffold(
         title = null,
         modifier = modifier,
@@ -274,26 +280,29 @@ internal fun DisclosureContent(
             )
         },
     ) {
-        item(key = "heading") {
-            Column(
-                modifier = Modifier
-                    .setupContentWidth()
-                    .padding(top = Spacing.Xl),
-                verticalArrangement = Arrangement.spacedBy(Spacing.Md),
-            ) {
-                FieldTapBrandMark(modifier = Modifier.size(Sizes.EmptyStateBadge))
-                Text(
-                    text = headingText,
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.semantics { heading() },
-                )
-                Text(
-                    text = introText,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        if (twoColumns) {
+            // What you agree to beside the full notice and the limits, so the first page holds the decision.
+            item(key = "columns") {
+                Row(
+                    modifier = Modifier.setupContentWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
+                ) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap)) {
+                        DisclosureHeading(headingText = headingText, introText = introText, short = true)
+                        if (acceptedText != null) StatusBanner(message = acceptedText, tone = StatusTone.SUCCESS)
+                        if (acceptState == AcceptState.FAILED) StatusBanner(message = saveFailedText, tone = StatusTone.ERROR)
+                        SummaryCard(title = consentTitle, summary = summary)
+                    }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap)) {
+                        FullNotice(paragraphs = notice, expanded = noticeExpanded, onToggle = { noticeExpanded = !noticeExpanded })
+                        LimitsStatementCard(title = limitsTitle, statement = limitsStatement)
+                    }
+                }
             }
+            return@SetupScreenScaffold
+        }
+        item(key = "heading") {
+            DisclosureHeading(headingText = headingText, introText = introText, short = short, modifier = Modifier.setupContentWidth())
         }
         if (acceptedText != null) {
             item(key = "accepted") {
@@ -306,9 +315,7 @@ internal fun DisclosureContent(
             }
         }
         item(key = "summary") {
-            SectionCard(title = consentTitle, icon = FieldTapIcons.Shield, modifier = Modifier.setupContentWidth()) {
-                summary.forEachIndexed { index, point -> SummaryPoint(topic = SummaryTopic.of(index), point = point) }
-            }
+            SummaryCard(title = consentTitle, summary = summary, modifier = Modifier.setupContentWidth())
         }
         item(key = "notice") {
             FullNotice(
@@ -321,6 +328,51 @@ internal fun DisclosureContent(
         item(key = "limits") {
             LimitsStatementCard(title = limitsTitle, statement = limitsStatement, modifier = Modifier.setupContentWidth())
         }
+    }
+}
+
+/**
+ * The brand mark, the heading and why precise location is asked for. In a short window (a phone in landscape) the mark is
+ * 40 dp beside a smaller heading, with less space above.
+ */
+@Composable
+private fun DisclosureHeading(headingText: String, introText: String, short: Boolean, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.padding(top = if (short) Spacing.Sm else Spacing.Xl),
+        verticalArrangement = Arrangement.spacedBy(Spacing.Md),
+    ) {
+        if (short) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.Md)) {
+                FieldTapBrandMark(modifier = Modifier.size(Sizes.BrandMarkCompact))
+                Text(
+                    text = headingText,
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.semantics { heading() },
+                )
+            }
+        } else {
+            FieldTapBrandMark(modifier = Modifier.size(Sizes.EmptyStateBadge))
+            Text(
+                text = headingText,
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.semantics { heading() },
+            )
+        }
+        Text(
+            text = introText,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** The four points of what you agree to, each with its icon. */
+@Composable
+private fun SummaryCard(title: String, summary: List<ConsentPoint>, modifier: Modifier = Modifier) {
+    SectionCard(title = title, icon = FieldTapIcons.Shield, modifier = modifier) {
+        summary.forEachIndexed { index, point -> SummaryPoint(topic = SummaryTopic.of(index), point = point) }
     }
 }
 
@@ -518,7 +570,7 @@ private fun DisclosureActions(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = Spacing.ScreenGutter, vertical = Spacing.Md),
+                .padding(horizontal = Spacing.ScreenGutter, vertical = Spacing.Sm),
             horizontalArrangement = Arrangement.spacedBy(Spacing.Sm, Alignment.End),
             verticalArrangement = Arrangement.spacedBy(Spacing.Sm),
             itemVerticalAlignment = Alignment.CenterVertically,
@@ -759,23 +811,32 @@ private fun permissionActionText(ui: PermissionUi): String? = when (ui.action) {
     PermissionAction.OPEN_NOTIFICATION_SETTINGS -> stringResource(R.string.permissions_action_notification_settings)
 }
 
+/**
+ * Continue, with why it is disabled beside it on the same row. Stacked, hint above button, the bar took 124 dp, a third of
+ * a landscape screen, and hid the location card's Allow button.
+ */
 @Composable
 private fun PermissionsContinueBar(enabled: Boolean, onContinue: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = Spacing.ScreenGutter, vertical = Spacing.Md),
-            horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(Spacing.Sm),
+                .padding(horizontal = Spacing.ScreenGutter, vertical = Spacing.Sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.Md),
         ) {
             if (!enabled) {
                 Text(
                     text = stringResource(R.string.permissions_continue_hint),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
+            } else {
+                Spacer(modifier = Modifier.weight(1f))
             }
             Button(onClick = onContinue, enabled = enabled, modifier = Modifier.heightIn(min = Sizes.MinTouchTarget)) {
                 Text(text = stringResource(R.string.permissions_continue))

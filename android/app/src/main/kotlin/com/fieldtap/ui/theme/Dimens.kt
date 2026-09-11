@@ -67,15 +67,40 @@ object Sizes {
     /** A metric tile is never narrower than this (times the font scale, when above 1). */
     val TileMinWidth: Dp = 148.dp
 
+    /** A compact tile of a four-tile headline (Session detail): two columns on a phone at font scale 1.3, four in landscape. */
+    val TileCompactMinWidth: Dp = 120.dp
+
     val PrimaryButtonHeight: Dp = 64.dp
     val ChartPanelHeight: Dp = 128.dp
+
+    /** The RSRP panel when the SINR panel folds to one line, so the trend takes the room SINR leaves. */
+    val ChartPanelTallHeight: Dp = 160.dp
+
+    /** A chart panel beside the session buttons in a short, wide window (a phone in landscape). */
+    val ChartPanelCompactHeight: Dp = 96.dp
     val SignalBarHeight: Dp = 8.dp
+
+    /** The value's mark on a signal bar, drawn over the bar's zones. */
+    val SignalMarkerWidth: Dp = 4.dp
+    val SignalMarkerHeight: Dp = 16.dp
+
+    /** From this width a signal bar names its thresholds under its zones. */
+    val SignalBarLabelsMinWidth: Dp = 280.dp
     val ListRowMinHeight: Dp = 72.dp
 
     /** Toggle, navigation and cell rows. */
     val SettingsRowMinHeight: Dp = 56.dp
     val KeyValueRowMinHeight: Dp = 40.dp
+
+    /** Rows of a dense card: Overview, Collection, Files, Serving cell, Cadence details. */
+    val KeyValueRowDenseMinHeight: Dp = 32.dp
     val BadgeMinHeight: Dp = 24.dp
+
+    /** The one-line status strip pinned under the Live top bar while a session runs. */
+    val StatusStripMinHeight: Dp = 40.dp
+
+    /** The brand mark beside the disclosure's heading in a short window. */
+    val BrandMarkCompact: Dp = 40.dp
 
     /** Centred prose (empty states) wraps at this width, even on wide screens. */
     val MaxTextWidth: Dp = 480.dp
@@ -92,8 +117,11 @@ object Sizes {
      */
     val ShortWindowMaxHeight: Dp = 480.dp
 
-    /** The column that holds a screen's primary actions beside its content in a short, wide window. */
-    val ActionRailWidth: Dp = 200.dp
+    /**
+     * The column that holds a screen's primary actions beside its content in a short, wide window: three 48 dp icon
+     * actions side by side at its top, the session buttons at its bottom.
+     */
+    val ActionRailWidth: Dp = 168.dp
 }
 
 /** Animation durations in milliseconds. Keep motion short: this is an instrument, not a toy. */

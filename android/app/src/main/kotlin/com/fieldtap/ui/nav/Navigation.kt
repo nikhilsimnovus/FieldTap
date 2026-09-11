@@ -40,6 +40,7 @@ import com.fieldtap.ui.sessions.SessionsScreen
 import com.fieldtap.ui.sessions.SessionsViewModel
 import com.fieldtap.ui.settings.SettingsScreen
 import com.fieldtap.ui.settings.SettingsViewModel
+import com.fieldtap.ui.settings.TestTargetsScreen
 import kotlinx.coroutines.CancellationException
 
 /**
@@ -56,6 +57,9 @@ object Routes {
     const val READINESS: String = "readiness"
     const val PROBE: String = "probe"
     const val SETTINGS: String = "settings"
+
+    /** The ping and download targets, a screen of their own under Settings. */
+    const val TEST_TARGETS: String = "settings/tests"
     const val ABOUT: String = "about"
 
     const val ARG_DIR_NAME: String = "dirName"
@@ -186,7 +190,15 @@ fun FieldTapNavHost(
         }
         composable(Routes.SETTINGS) {
             val viewModel: SettingsViewModel = viewModel(factory = graphViewModelFactory(graph) { SettingsViewModel(it) })
-            SettingsScreen(viewModel = viewModel, onBack = dropUnlessResumed { navController.popBackStack() })
+            SettingsScreen(
+                viewModel = viewModel,
+                onBack = dropUnlessResumed { navController.popBackStack() },
+                onOpenTestTargets = dropUnlessResumed { navController.navigate(Routes.TEST_TARGETS) { launchSingleTop = true } },
+            )
+        }
+        composable(Routes.TEST_TARGETS) {
+            val viewModel: SettingsViewModel = viewModel(factory = graphViewModelFactory(graph) { SettingsViewModel(it) })
+            TestTargetsScreen(viewModel = viewModel, onBack = dropUnlessResumed { navController.popBackStack() })
         }
         composable(Routes.ABOUT) {
             AboutScreen(appInfo = graph.appInfo, onBack = dropUnlessResumed { navController.popBackStack() })

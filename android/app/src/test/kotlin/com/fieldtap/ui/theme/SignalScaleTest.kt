@@ -66,6 +66,37 @@ class SignalScaleTest {
     }
 
     @Test
+    fun theBarSpansTheThresholdsNeighbourhoodInFourZones() {
+        assertEquals(-130..-50, SignalScale.barRange(SignalMetric.RSRP))
+        assertEquals(
+            listOf(
+                SignalZone(-130, -105, SignalQuality.POOR),
+                SignalZone(-105, -95, SignalQuality.FAIR),
+                SignalZone(-95, -85, SignalQuality.GOOD),
+                SignalZone(-85, -50, SignalQuality.EXCELLENT),
+            ),
+            SignalScale.zones(SignalMetric.RSRP, SignalScale.RSRP_BAR_RANGE),
+        )
+        // A panel fitted to steady values keeps only the zones it spans, cut at its ends.
+        assertEquals(
+            listOf(SignalZone(-100, -95, SignalQuality.FAIR), SignalZone(-95, -90, SignalQuality.GOOD)),
+            SignalScale.zones(SignalMetric.RSRP, -100..-90),
+        )
+        assertEquals(listOf(SignalZone(-10, 0, SignalQuality.POOR), SignalZone(0, 13, SignalQuality.FAIR), SignalZone(13, 20, SignalQuality.GOOD), SignalZone(20, 30, SignalQuality.EXCELLENT)), SignalScale.zones(SignalMetric.SINR, SignalScale.SINR_CHART_RANGE))
+    }
+
+    @Test
+    fun liveChartsKeepEveryThresholdInView() {
+        for ((metric, range) in listOf(SignalMetric.RSRP to SignalScale.RSRP_CHART_RANGE, SignalMetric.SINR to SignalScale.SINR_CHART_RANGE)) {
+            for (threshold in SignalScale.thresholds(metric).boundaries) {
+                assertEquals("$metric $threshold inside $range", true, threshold in range)
+            }
+            val display = SignalScale.displayRange(metric)
+            assertEquals("$metric chart range inside the display range", true, range.first >= display.first && range.last <= display.last)
+        }
+    }
+
+    @Test
     fun keyReferenceIsTheReportLine() {
         assertEquals(-105, SignalScale.keyReference(SignalMetric.RSRP))
         assertEquals(-15, SignalScale.keyReference(SignalMetric.RSRQ))

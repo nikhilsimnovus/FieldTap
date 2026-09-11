@@ -9,6 +9,8 @@ import com.fieldtap.core.export.SessionExporter
 import com.fieldtap.core.session.SessionListing
 import com.fieldtap.core.session.SessionPaths
 import com.fieldtap.core.session.SessionStore
+import com.fieldtap.core.session.SignalSummaries
+import com.fieldtap.core.session.SignalSummary
 import com.fieldtap.core.session.StoragePolicy
 import com.fieldtap.core.session.StorageStatus
 import com.fieldtap.core.session.StorageUsage
@@ -17,6 +19,7 @@ import com.fieldtap.format.SessionDirName
 import com.fieldtap.format.SessionFile
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -39,6 +42,9 @@ import kotlinx.coroutines.withContext
  * - [list], [detail] and [export] first call [closeStoppedSessions], which closes sessions the app stopped but could
  *   not finish writing (a full disk, say), so they do not wait for the next launch to become shareable. A failure
  *   there is ignored: the session stays open and the next call tries again.
+ * - `SessionSummary.signal` ([SignalSummaries.read] of kpi.csv) is kept in memory per session while kpi.csv keeps its
+ *   size and modification time, so a refresh reads only the sessions that changed. [list] leaves it null for the
+ *   running session; [detail] reads it for every session.
  *
  * Names always pass `SessionDirName.PATTERN` before they touch the file system, so a route argument can never
  * reach outside the sessions root.
@@ -55,13 +61,17 @@ class FileSessionRepository(
     private val activeDirName: () -> String?,
 ) : SessionRepository {
     private val exportLock = Mutex()
+    private val signalCache = ConcurrentHashMap<String, CachedSignal>()
 
     override suspend fun list(): List<SessionSummary> = withContext(Dispatchers.IO) {
         closeStoppedQuietly()
         val active = activeDirName()
-        store.list()
-            .sortedByDescending { it.dirName }
-            .map { summaryOf(it, active) }
+        val listings = store.list().sortedByDescending { it.dirName }
+        signalCache.keys.retainAll(listings.map { it.dirName }.toSet())
+        listings.map { listing ->
+            val summary = summaryOf(listing, active)
+            if (summary.recording) summary else summary.copy(signal = signalOf(listing))
+        }
     }
 
     override suspend fun detail(dirName: String): SessionDetail? = withContext(Dispatchers.IO) {
@@ -77,7 +87,7 @@ class FileSessionRepository(
             if (file != SessionFile.SESSION_JSON) rows[file] = dataRows(onDisk)
         }
         SessionDetail(
-            summary = summaryOf(listing, activeDirName()),
+            summary = summaryOf(listing, activeDirName()).copy(signal = signalOf(listing)),
             meta = listing.meta,
             fileSizes = sizes,
             rowCounts = rows,
@@ -88,7 +98,10 @@ class FileSessionRepository(
     override suspend fun delete(dirName: String): Boolean = withContext(Dispatchers.IO) {
         if (!isSessionName(dirName)) return@withContext false
         val deleted = store.delete(dirName, activeDirName())
-        if (deleted) File(exportDir, zipName(dirName)).delete()
+        if (deleted) {
+            File(exportDir, zipName(dirName)).delete()
+            signalCache.remove(dirName)
+        }
         deleted
     }
 
@@ -137,6 +150,21 @@ class FileSessionRepository(
             // As above: listing sessions must never fail because one could not be closed.
         }
     }
+
+    /** kpi.csv's signal summary, read again only when the file's size or modification time changed since the last read. */
+    private fun signalOf(listing: SessionListing): SignalSummary? {
+        val kpi = File(listing.directory, SessionFile.KPI.fileName)
+        val bytes = kpi.length()
+        val modifiedMs = kpi.lastModified()
+        signalCache[listing.dirName]?.let { cached ->
+            if (cached.bytes == bytes && cached.modifiedMs == modifiedMs) return cached.signal
+        }
+        val signal = SignalSummaries.read(kpi)
+        signalCache[listing.dirName] = CachedSignal(bytes, modifiedMs, signal)
+        return signal
+    }
+
+    private data class CachedSignal(val bytes: Long, val modifiedMs: Long, val signal: SignalSummary?)
 
     private fun summaryOf(listing: SessionListing, active: String?): SessionSummary {
         val meta = listing.meta

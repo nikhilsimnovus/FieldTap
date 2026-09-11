@@ -47,6 +47,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -57,6 +58,7 @@ import com.fieldtap.app.AppGraph
 import com.fieldtap.app.SessionDetail
 import com.fieldtap.app.SessionSummary
 import com.fieldtap.core.export.ExportResult
+import com.fieldtap.core.session.SignalSummary
 import com.fieldtap.core.session.StoragePolicy
 import com.fieldtap.core.session.StorageStatus
 import com.fieldtap.format.GapMeta
@@ -64,13 +66,16 @@ import com.fieldtap.format.LocationPrecision
 import com.fieldtap.format.SessionFile
 import com.fieldtap.format.SessionMeta
 import com.fieldtap.ui.FieldTapTheme
+import com.fieldtap.ui.common.DayDistance
 import com.fieldtap.ui.common.DisplayTime
 import com.fieldtap.ui.common.FileSharer
 import com.fieldtap.ui.common.StopKind
 import com.fieldtap.ui.common.StopReasons
 import com.fieldtap.ui.common.contentWidth
+import com.fieldtap.ui.common.ratName
 import com.fieldtap.ui.common.rememberDelayedVisibility
 import com.fieldtap.ui.common.screenGutter
+import com.fieldtap.ui.common.signalQualityLabels
 import com.fieldtap.ui.common.stopReasonText
 import com.fieldtap.ui.components.EmptyState
 import com.fieldtap.ui.components.FieldTapPreviews
@@ -82,16 +87,22 @@ import com.fieldtap.ui.components.MetricEmphasis
 import com.fieldtap.ui.components.MetricGrid
 import com.fieldtap.ui.components.MetricTile
 import com.fieldtap.ui.components.RadioRow
+import com.fieldtap.ui.components.RecordingChip
 import com.fieldtap.ui.components.SectionCard
 import com.fieldtap.ui.components.SessionListRow
 import com.fieldtap.ui.components.SessionRowStatus
+import com.fieldtap.ui.components.SignalQualityChip
+import com.fieldtap.ui.components.SignalQualityLabels
 import com.fieldtap.ui.components.StatusBanner
 import com.fieldtap.ui.components.TopBarAction
 import com.fieldtap.ui.theme.FieldTapIcons
 import com.fieldtap.ui.theme.Formats
+import com.fieldtap.ui.theme.SignalMetric
+import com.fieldtap.ui.theme.SignalScale
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
 import com.fieldtap.ui.theme.StatusTone
+import com.fieldtap.ui.theme.tabular
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -156,12 +167,16 @@ class SessionsViewModel(private val graph: AppGraph) : ViewModel() {
             }
         }
     }
+
+    /** The app's wall clock, so a row can say "Today" or "Yesterday". */
+    fun nowWallMs(): Long = graph.clock.wallMillis()
 }
 
 /**
- * Sessions list, newest first: name, start time (local display), duration, stopped by (with
- * "interrupted by Android: low memory" wording for exit reasons), handset, PLMNs, size. Unreadable
- * sessions are listed and can be deleted. Storage used against the cap.
+ * Sessions list, newest first, one row each: name with the median RSRP as a quality chip ("Good -92"), then one line of
+ * start time ("Today 6:19 PM"), duration and size, with "Interrupted" or "Unreadable" in place of the size; TalkBack
+ * reads the full stop reason ("interrupted by Android: low memory"). Unreadable sessions are listed and can be deleted.
+ * Storage is one line under the list, or a card with its bar above it when sessions cannot start or 80 % of the cap is used.
  *
  * Owner: workstream `ui-session`.
  */
@@ -176,6 +191,7 @@ fun SessionsScreen(
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
     SessionsContent(
         state = state,
+        nowUtcMs = viewModel.nowWallMs(),
         onOpenSession = onOpenSession,
         onBack = onBack,
         onRefresh = viewModel::refresh,
@@ -361,6 +377,7 @@ private const val UNKNOWN_VALUE: String = "—"
 @Composable
 private fun SessionsContent(
     state: SessionsUiState,
+    nowUtcMs: Long,
     onOpenSession: (String) -> Unit,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
@@ -412,15 +429,18 @@ private fun SessionsContent(
                         onAction = onBack,
                     )
                 }
-                else -> SessionsList(state = state, onOpenSession = onOpenSession)
+                else -> SessionsList(state = state, nowUtcMs = nowUtcMs, onOpenSession = onOpenSession)
             }
         }
     }
 }
 
 @Composable
-private fun SessionsList(state: SessionsUiState, onOpenSession: (String) -> Unit) {
+private fun SessionsList(state: SessionsUiState, nowUtcMs: Long, onOpenSession: (String) -> Unit) {
     val storage = state.storage
+    val labels = signalQualityLabels()
+    // The card with its bar only when storage needs attention: otherwise it sat above the sessions as the first thing read.
+    val storageCard = storage != null && SessionsPresentation.storageCardShown(storage)
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = screenGutter(), vertical = Spacing.Lg),
@@ -446,13 +466,39 @@ private fun SessionsList(state: SessionsUiState, onOpenSession: (String) -> Unit
                 )
             }
         }
-        if (storage != null) {
+        if (storage != null && storageCard) {
             item(key = "storage") { StorageCard(storage = storage, modifier = Modifier.contentWidth()) }
         }
         items(state.sessions, key = { it.dirName }) { summary ->
-            SessionRow(summary = summary, onOpen = { onOpenSession(summary.dirName) }, modifier = Modifier.contentWidth())
+            SessionRow(
+                summary = summary,
+                nowUtcMs = nowUtcMs,
+                labels = labels,
+                onOpen = { onOpenSession(summary.dirName) },
+                modifier = Modifier.contentWidth(),
+            )
+        }
+        if (storage != null && !storageCard) {
+            item(key = "storage-footer") { StorageFooter(storage = storage, modifier = Modifier.contentWidth()) }
         }
     }
+}
+
+/** "59.5 kB of 2.0 GB used · 6.9 GB free", one line under the list. */
+@Composable
+private fun StorageFooter(storage: StorageStatus, modifier: Modifier = Modifier) {
+    Text(
+        text = stringResource(
+            R.string.sessions_storage_footer,
+            Formats.decimalBytes(storage.usedBytes),
+            Formats.decimalBytes(storage.policy.capBytes),
+            Formats.decimalBytes(storage.freeBytes),
+        ),
+        style = MaterialTheme.typography.bodySmall.tabular(),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        modifier = modifier.padding(top = Spacing.Xs),
+    )
 }
 
 @Composable
@@ -480,10 +526,20 @@ private fun StorageCard(storage: StorageStatus, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * One session: its name with its signal as a chip, then when, how long and how big on one line. The handset and networks are
+ * on Session detail. TalkBack reads the full stop reason and the signal in words.
+ */
 @Composable
-private fun SessionRow(summary: SessionSummary, onOpen: () -> Unit, modifier: Modifier = Modifier) {
+private fun SessionRow(
+    summary: SessionSummary,
+    nowUtcMs: Long,
+    labels: SignalQualityLabels,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val status = StopReasons.rowStatus(summary)
-    val statusText = when (status) {
+    val fullStatus = when (status) {
         SessionRowStatus.RECORDING -> stringResource(R.string.stop_recording)
         SessionRowStatus.UNREADABLE -> stringResource(R.string.sessions_unreadable)
         SessionRowStatus.INTERRUPTED -> stopReasonText(StopReasons.describe(summary.stoppedBy))
@@ -492,22 +548,56 @@ private fun SessionRow(summary: SessionSummary, onOpen: () -> Unit, modifier: Mo
             if (description.kind == StopKind.APP_STOP) stopReasonText(description) else null
         }
     }
-    val separator = stringResource(R.string.value_separator)
-    val detailText = listOfNotNull(
-        summary.handsetModel,
-        summary.plmns.takeIf { it.isNotEmpty() }?.joinToString(", "),
-    ).joinToString(separator).ifEmpty { null }
+    val shortStatus = when (status) {
+        SessionRowStatus.INTERRUPTED -> stringResource(R.string.sessions_status_interrupted)
+        SessionRowStatus.UNREADABLE -> stringResource(R.string.sessions_status_unreadable)
+        SessionRowStatus.RECORDING, SessionRowStatus.COMPLETED -> null
+    }
+    val title = summary.name ?: summary.dirName
+    val startedText = summary.startedUtcMs?.let { startedWords(it, nowUtcMs) } ?: summary.dirName
+    val durationText = StopReasons.durationMs(summary.startedUtcMs, summary.stoppedUtcMs)?.let { Formats.elapsed(it) }
+    val sizeText = Formats.decimalBytes(summary.sizeBytes)
+    val signal = summary.signal
+    val quality = signal?.let { SignalScale.quality(SignalMetric.RSRP, it.medianRsrpDbm) }
+    val recordingWord = stringResource(R.string.stop_recording)
+    val noSignal = stringResource(R.string.sessions_no_signal)
+    val chipLabel = if (signal != null) stringResource(R.string.sessions_signal_chip, labels.of(quality), signal.medianRsrpDbm) else noSignal
+    val signalWords = when {
+        status == SessionRowStatus.RECORDING -> null
+        signal != null -> stringResource(R.string.sessions_signal_description, ratName(signal.rat.rat), signal.medianRsrpDbm, labels.of(quality))
+        else -> noSignal
+    }
     SessionListRow(
-        title = summary.name ?: summary.dirName,
-        startedText = summary.startedUtcMs?.let { DisplayTime.dateTime(it) } ?: summary.dirName,
+        title = title,
+        startedText = startedText,
+        separator = stringResource(R.string.value_separator),
         onClick = onOpen,
         modifier = modifier,
         status = status,
-        statusText = statusText,
-        detailText = detailText,
-        durationText = StopReasons.durationMs(summary.startedUtcMs, summary.stoppedUtcMs)?.let { Formats.elapsed(it) },
-        sizeText = Formats.decimalBytes(summary.sizeBytes),
+        durationText = durationText,
+        sizeText = sizeText,
+        statusText = shortStatus,
+        contentDescription = listOfNotNull(title, startedText, durationText, fullStatus, sizeText.takeIf { shortStatus == null }, signalWords)
+            .joinToString(", "),
+        trailing = {
+            // The running session's kpi.csv is still growing: it says so instead of a median that would move.
+            if (status == SessionRowStatus.RECORDING) {
+                RecordingChip(label = recordingWord)
+            } else {
+                SignalQualityChip(quality = quality, label = chipLabel)
+            }
+        },
     )
+}
+
+/** "Today 6:19 PM", "Yesterday 9:12 AM", "Wed 6:02 PM", "Sep 9", or "Sep 9, 2025" from another year: one line of a row. */
+@Composable
+private fun startedWords(utcMs: Long, nowUtcMs: Long): String = when (DisplayTime.dayDistance(utcMs, nowUtcMs)) {
+    DayDistance.TODAY -> stringResource(R.string.sessions_when_today, DisplayTime.time(utcMs))
+    DayDistance.YESTERDAY -> stringResource(R.string.sessions_when_yesterday, DisplayTime.time(utcMs))
+    DayDistance.THIS_WEEK -> stringResource(R.string.sessions_when_weekday, DisplayTime.weekday(utcMs), DisplayTime.time(utcMs))
+    DayDistance.THIS_YEAR -> DisplayTime.monthDay(utcMs)
+    DayDistance.EARLIER -> DisplayTime.date(utcMs)
 }
 
 @Composable
@@ -691,7 +781,7 @@ private fun DetailList(
                 )
             }
         }
-        item(key = "headline") { HeadlineStats(meta = meta, modifier = Modifier.contentWidth()) }
+        item(key = "headline") { HeadlineStats(meta = meta, signal = detail.summary.signal, modifier = Modifier.contentWidth()) }
         item(key = "overview") { OverviewCard(detail = detail, meta = meta, modifier = Modifier.contentWidth()) }
         item(key = "collection") { CollectionCard(meta = meta, modifier = Modifier.contentWidth()) }
         item(key = "gaps") { GapsCard(gaps = meta.collection.gaps, modifier = Modifier.contentWidth()) }
@@ -712,79 +802,116 @@ private fun DetailList(
     }
 }
 
-/** The numbers a session is judged by first. The top bar already names it, so no card repeats the name. */
+/**
+ * What a session is judged by first: how good its signal was (the median RSRP of one RAT with its level, and the share
+ * below the report's -105 dBm line), how long it ran, and whether sampling had gaps. Fresh samples and the median interval
+ * lead the Collection card. The top bar already names the session, so no card repeats the name.
+ */
 @Composable
-private fun HeadlineStats(meta: SessionMeta, modifier: Modifier = Modifier) {
-    val collection = meta.collection
-    MetricGrid(modifier = modifier.fillMaxWidth(), maxColumns = HEADLINE_COLUMNS) {
+private fun HeadlineStats(meta: SessionMeta, signal: SignalSummary?, modifier: Modifier = Modifier) {
+    val labels = signalQualityLabels()
+    val quality = signal?.let { SignalScale.quality(SignalMetric.RSRP, it.medianRsrpDbm) }
+    val gaps = meta.collection.gaps.size
+    val dbm = stringResource(R.string.unit_dbm)
+    val medianLabel = if (signal != null) {
+        stringResource(R.string.detail_row_median_rsrp, ratName(signal.rat.rat))
+    } else {
+        stringResource(R.string.detail_row_median_rsrp_unknown)
+    }
+    MetricGrid(modifier = modifier.fillMaxWidth(), minCellWidth = Sizes.TileCompactMinWidth, maxColumns = HEADLINE_COLUMNS) {
+        MetricTile(
+            label = medianLabel,
+            value = signal?.medianRsrpDbm?.toString(),
+            unit = if (signal != null) dbm else null,
+            emphasis = MetricEmphasis.COMPACT,
+            contentDescription = if (signal != null) listOf(medianLabel, "${signal.medianRsrpDbm} $dbm", labels.of(quality)).joinToString(", ") else null,
+            // The level under the value: beside the label, in a half-width tile, it left the label no room.
+            footer = if (signal != null) {
+                { SignalQualityChip(quality = quality, label = labels.of(quality)) }
+            } else {
+                null
+            },
+        )
+        MetricTile(
+            label = stringResource(R.string.detail_row_below_fair),
+            value = signal?.let { DisplayTime.percent(it.belowFairPct) }?.let { stringResource(R.string.percent_value, it) },
+            emphasis = MetricEmphasis.COMPACT,
+            valueTone = signal?.let { SessionsPresentation.belowFairTone(it.belowFairPct) },
+        )
         MetricTile(
             label = stringResource(R.string.detail_row_duration),
             value = StopReasons.durationMs(meta.startedUtcMs, meta.stoppedUtcMs)?.let { Formats.elapsed(it) },
             emphasis = MetricEmphasis.COMPACT,
         )
         MetricTile(
-            label = stringResource(R.string.detail_row_fresh),
-            value = collection.freshSamples.toString(),
-            emphasis = MetricEmphasis.COMPACT,
-        )
-        MetricTile(
-            label = stringResource(R.string.detail_row_median),
-            value = collection.medianFreshIntervalMs?.let { stringResource(R.string.seconds_value, DisplayTime.seconds(it)) },
-            emphasis = MetricEmphasis.COMPACT,
-        )
-        MetricTile(
             label = stringResource(R.string.detail_section_gaps),
-            value = collection.gaps.size.toString(),
+            value = gaps.toString(),
             emphasis = MetricEmphasis.COMPACT,
+            valueTone = SessionsPresentation.gapsTone(gaps),
         )
     }
 }
 
-/** Four headline tiles: two columns on a phone, one row on a tablet or in landscape. */
+/**
+ * Four headline tiles of at least [Sizes.TileCompactMinWidth] each: two columns on a phone at any font scale up to 1.3, one
+ * row in landscape or on a tablet. At 148 dp a tile at font scale 1.3 needed 192 dp, so a phone showed one tile a row.
+ */
 private const val HEADLINE_COLUMNS: Int = 4
 
 @Composable
 private fun OverviewCard(detail: SessionDetail, meta: SessionMeta, modifier: Modifier = Modifier) {
-    val separator = stringResource(R.string.value_separator)
-    SectionCard(title = stringResource(R.string.detail_section_overview), icon = FieldTapIcons.File, modifier = modifier) {
-        meta.note?.let { KeyValueRow(key = stringResource(R.string.detail_row_note), value = it, tabular = false) }
-        meta.location?.let { KeyValueRow(key = stringResource(R.string.detail_row_place), value = it, tabular = false) }
-        KeyValueRow(key = stringResource(R.string.detail_row_started), value = DisplayTime.dateTime(meta.startedUtcMs))
+    val dense = Sizes.KeyValueRowDenseMinHeight
+    SectionCard(
+        title = stringResource(R.string.detail_section_overview),
+        icon = FieldTapIcons.File,
+        modifier = modifier,
+        itemGap = Spacing.Sm,
+    ) {
+        meta.note?.let { KeyValueRow(key = stringResource(R.string.detail_row_note), value = it, tabular = false, minHeight = dense) }
+        meta.location?.let { KeyValueRow(key = stringResource(R.string.detail_row_place), value = it, tabular = false, minHeight = dense) }
+        KeyValueRow(key = stringResource(R.string.detail_row_started), value = DisplayTime.dateTime(meta.startedUtcMs), minHeight = dense)
         KeyValueRow(
             key = stringResource(R.string.detail_row_stopped),
             value = meta.stoppedUtcMs?.let { DisplayTime.dateTime(it) } ?: stringResource(R.string.stop_recording),
+            minHeight = dense,
         )
         KeyValueRow(
             key = stringResource(R.string.detail_row_stopped_by),
             value = stopReasonText(StopReasons.describe(meta.summary.stoppedBy, detail.summary.recording)),
             tabular = false,
+            minHeight = dense,
         )
+        // The model, then the Android version on a line of its own, so no separator ends a line.
         val handset = listOfNotNull(
             listOfNotNull(meta.handset.manufacturer, meta.handset.model).joinToString(" ").ifEmpty { null },
             meta.handset.androidVersion?.let { "Android $it" },
-        ).joinToString(separator)
-        KeyValueRow(key = stringResource(R.string.detail_row_handset), value = handset.ifEmpty { UNKNOWN_VALUE }, tabular = false)
+        ).joinToString("\n")
+        KeyValueRow(key = stringResource(R.string.detail_row_handset), value = handset.ifEmpty { UNKNOWN_VALUE }, tabular = false, minHeight = dense)
         KeyValueRow(
             key = stringResource(R.string.detail_row_app),
             value = stringResource(R.string.detail_app_version_value, meta.transport.appVersion, meta.transport.versionCode),
+            minHeight = dense,
         )
         if (meta.summary.plmns.isNotEmpty()) {
+            // Beside its key like every other row, one line per network.
             KeyValueRow(
                 key = stringResource(R.string.detail_row_networks),
                 value = meta.summary.plmns.entries.map { (plmn, rows) ->
                     pluralStringResource(R.plurals.detail_plmn_rows, rows, plmn, rows)
                 }.joinToString("\n"),
-                stacked = true,
+                minHeight = dense,
             )
         }
         KeyValueRow(
             key = stringResource(R.string.detail_row_precision),
             value = stringResource(precisionNameRes(meta.privacy.locationPrecision)),
             tabular = false,
+            minHeight = dense,
         )
         KeyValueRow(
             key = stringResource(R.string.detail_row_consent),
             value = SessionsPresentation.consentVersionText(meta.privacy.consentVersion),
+            minHeight = dense,
         )
     }
 }
@@ -792,13 +919,25 @@ private fun OverviewCard(detail: SessionDetail, meta: SessionMeta, modifier: Mod
 @Composable
 private fun CollectionCard(meta: SessionMeta, modifier: Modifier = Modifier) {
     val collection = meta.collection
-    SectionCard(title = stringResource(R.string.detail_section_collection), icon = FieldTapIcons.Timer, modifier = modifier) {
-        KeyValueRow(key = stringResource(R.string.detail_row_repeats), value = collection.repeatsDropped.toString())
+    val dense = Sizes.KeyValueRowDenseMinHeight
+    SectionCard(
+        title = stringResource(R.string.detail_section_collection),
+        icon = FieldTapIcons.Timer,
+        modifier = modifier,
+        itemGap = Spacing.Sm,
+    ) {
+        KeyValueRow(key = stringResource(R.string.detail_row_fresh), value = collection.freshSamples.toString(), minHeight = dense)
+        KeyValueRow(
+            key = stringResource(R.string.detail_row_median),
+            value = collection.medianFreshIntervalMs?.let { stringResource(R.string.seconds_value, DisplayTime.seconds(it)) } ?: UNKNOWN_VALUE,
+            minHeight = dense,
+        )
+        KeyValueRow(key = stringResource(R.string.detail_row_repeats), value = collection.repeatsDropped.toString(), minHeight = dense)
         PercentRow(R.string.detail_row_short_interval, collection.shortIntervalPct)
         PercentRow(R.string.detail_row_screen_on, collection.screenOnPct)
         PercentRow(R.string.detail_row_wifi, collection.wifiConnectedPct)
         PercentRow(R.string.detail_row_charging, collection.chargingPct)
-        KeyValueRow(key = stringResource(R.string.detail_row_zone_pauses), value = meta.privacy.zonePauses.toString())
+        KeyValueRow(key = stringResource(R.string.detail_row_zone_pauses), value = meta.privacy.zonePauses.toString(), minHeight = dense)
     }
 }
 
@@ -807,6 +946,7 @@ private fun PercentRow(@StringRes key: Int, value: Double?) {
     KeyValueRow(
         key = stringResource(key),
         value = DisplayTime.percent(value)?.let { stringResource(R.string.percent_value, it) } ?: UNKNOWN_VALUE,
+        minHeight = Sizes.KeyValueRowDenseMinHeight,
     )
 }
 
@@ -935,7 +1075,7 @@ private fun BuildButton(onBuild: () -> Unit) {
 
 @Composable
 private fun FilesCard(detail: SessionDetail, modifier: Modifier = Modifier) {
-    SectionCard(title = stringResource(R.string.detail_section_files), icon = FieldTapIcons.File, modifier = modifier) {
+    SectionCard(title = stringResource(R.string.detail_section_files), icon = FieldTapIcons.File, modifier = modifier, itemGap = Spacing.Sm) {
         for (file in SessionFile.BUNDLE) {
             val size = detail.fileSizes[file] ?: continue
             val rows = detail.rowCounts[file]
@@ -946,6 +1086,7 @@ private fun FilesCard(detail: SessionDetail, modifier: Modifier = Modifier) {
                 } else {
                     Formats.decimalBytes(size)
                 },
+                minHeight = Sizes.KeyValueRowDenseMinHeight,
             )
         }
     }
@@ -1012,6 +1153,7 @@ private fun SessionsContentPreview() {
                 ),
                 storage = StorageStatus(usedBytes = 5_112_000, freeBytes = 38_000_000_000, policy = StoragePolicy()),
             ),
+            nowUtcMs = started + 3_600_000,
             onOpenSession = {},
             onBack = {},
             onRefresh = {},
@@ -1025,6 +1167,7 @@ private fun SessionsEmptyPreview() {
     FieldTapTheme {
         SessionsContent(
             state = SessionsUiState(loading = false, sessions = emptyList(), storage = null),
+            nowUtcMs = 1_789_050_600_000L,
             onOpenSession = {},
             onBack = {},
             onRefresh = {},

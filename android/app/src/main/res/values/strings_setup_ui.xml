@@ -225,6 +225,14 @@
     <string name="settings_tests_network_note">Tests run on the mobile network only, never on Wi-Fi.</string>
     <string name="settings_tests_default">Run tests by default</string>
     <string name="settings_tests_default_supporting">You can still change this each time you start a session.</string>
+    <!-- The row in Settings that opens the test targets, and that screen's title. -->
+    <string name="settings_test_targets">Test targets</string>
+    <!-- %1$s is the ping target, %2$s the interval in seconds, e.g. Ping 10.0.2.2 every 20 s. -->
+    <string name="settings_test_targets_ping">Ping %1$s every %2$s s</string>
+    <string name="settings_test_targets_ping_off">Ping off</string>
+    <!-- %1$s is the cap in MB, %2$s the interval in minutes, e.g. 1 MB download every 1 min. -->
+    <string name="settings_test_targets_download">%1$s MB download every %2$s min</string>
+    <string name="settings_test_targets_download_off">Download off</string>
     <string name="settings_ping_heading">Ping</string>
     <string name="settings_ping_target">Target</string>
     <string name="settings_ping_target_supporting">Host name or IPv4 address. Leave empty to turn ping off.</string>
@@ -233,8 +241,8 @@
     <string name="settings_download_heading">Download</string>
     <string name="settings_download_url">HTTPS address</string>
     <string name="settings_download_url_supporting">Leave empty to turn the download off.</string>
-    <!-- %1$s is a host name, e.g. speed.cloudflare.com. -->
-    <string name="settings_download_host">Downloads from %1$s</string>
+    <!-- %1$s is a host name, e.g. speed.cloudflare.com. The address field's one helper line. -->
+    <string name="settings_download_host">Downloads from %1$s. Leave empty to turn it off.</string>
     <string name="settings_download_off">The download test is off.</string>
     <string name="settings_download_interval">Download every</string>
     <string name="settings_download_cap">Stop each download at</string>

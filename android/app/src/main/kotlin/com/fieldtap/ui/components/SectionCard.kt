@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.FieldTapIcons
 import com.fieldtap.ui.theme.ShapeRoles
@@ -40,7 +41,8 @@ import com.fieldtap.ui.theme.Spacing
  * "Privacy zones". Screens are a vertical stack of these, [Spacing.SectionGap] apart.
  *
  * The title is a TalkBack heading, so users can jump between sections. Content is a column with
- * [Spacing.ItemGap] between items.
+ * [itemGap] between items: [Spacing.ItemGap], or [Spacing.Sm] for a dense card of [KeyValueRow]s given
+ * `minHeight = Sizes.KeyValueRowDenseMinHeight` (Overview, Collection, Files, Serving cell).
  *
  * @param trailing an optional action at the end of the header (an icon button or a text button).
  */
@@ -52,6 +54,7 @@ fun SectionCard(
     icon: ImageVector? = null,
     trailing: (@Composable () -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(Spacing.CardPadding),
+    itemGap: Dp = Spacing.ItemGap,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Surface(
@@ -61,7 +64,7 @@ fun SectionCard(
     ) {
         Column(
             modifier = Modifier.padding(contentPadding),
-            verticalArrangement = Arrangement.spacedBy(Spacing.ItemGap),
+            verticalArrangement = Arrangement.spacedBy(itemGap),
         ) {
             if (title != null) {
                 Row(
@@ -107,8 +110,12 @@ fun SectionCard(
  * value under the key, for long values such as a SHA-256 or a URL. [selectable] lets the user copy the
  * value. TalkBack reads "key, value" as one item, or [contentDescription].
  *
+ * A value of several lines (a phone model, then its Android version) is broken by the caller with "\n", so no separator
+ * is left at the end of a line.
+ *
  * @param valueColor defaults to onSurface; pass a [com.fieldtap.ui.theme.StatusColors.color] or a
  *   signal level's `content` colour for a value that carries a state, and say the state in words too.
+ * @param minHeight [Sizes.KeyValueRowMinHeight], or [Sizes.KeyValueRowDenseMinHeight] in a dense card.
  */
 @Composable
 fun KeyValueRow(
@@ -123,6 +130,7 @@ fun KeyValueRow(
     selectable: Boolean = false,
     trailing: (@Composable () -> Unit)? = null,
     contentDescription: String? = null,
+    minHeight: Dp = Sizes.KeyValueRowMinHeight,
 ) {
     val valueStyle = if (tabular) FieldTapDesign.numeric.body else MaterialTheme.typography.bodyLarge
     val resolvedValueColor = valueColor.takeOrElse { MaterialTheme.colorScheme.onSurface }
@@ -140,7 +148,7 @@ fun KeyValueRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = Sizes.KeyValueRowMinHeight)
+            .heightIn(min = minHeight)
             .then(semantics),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Spacing.Md),

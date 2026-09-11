@@ -75,6 +75,8 @@
     <string name="live_menu_about">About</string>
 
     <string name="live_start">Start session</string>
+    <!-- The Start button's label in the narrow rail beside the content in landscape; TalkBack reads live_start. -->
+    <string name="live_start_short">Start</string>
     <string name="live_checking">Checking readiness…</string>
     <string name="live_starting">Starting…</string>
     <string name="live_stop">Stop</string>
@@ -92,6 +94,8 @@
     <string name="live_rsrq_nr">SS-RSRQ</string>
     <string name="live_sinr_nr">SS-SINR</string>
     <string name="live_not_reported">Not reported</string>
+    <!-- %1$s and %2$s are the RSRQ and SINR labels, e.g. SS-RSRQ and SS-SINR. -->
+    <string name="live_rsrq_sinr_not_reported">%1$s and %2$s not reported by this cell</string>
     <string name="live_waiting_first_measurement">Waiting for the first cell measurement</string>
     <string name="live_no_lte_nr_badge">No LTE or NR cell</string>
     <string name="live_absence_location_off">Location is off</string>
@@ -143,12 +147,15 @@
     <string name="live_cadence_charging">Charging keeps 2 s with Wi-Fi on</string>
     <string name="live_cadence_screen_on">Screen on, Wi-Fi off</string>
     <string name="live_row_measured_interval">Time between fresh samples</string>
+    <string name="live_row_cadence_reason">Why this cadence</string>
     <string name="live_walk_mode">Walk mode</string>
-    <string name="live_walk_mode_supporting">Keeps the screen on, dark, for 2 s updates.</string>
+    <!-- The walk mode icon's state for TalkBack. -->
+    <string name="live_walk_mode_on">On</string>
+    <string name="live_walk_mode_off">Off</string>
     <string name="live_walk_mode_details_action">How walk mode works</string>
     <string name="live_walk_mode_details">Walk mode keeps the screen on with a dark surface, so Android can refresh cell information every 2 s. Brightness follows your phone, and no wake lock is used. In a pocket with the screen off, Android refreshes only every 10 s and, on battery, sends no signal-strength updates.</string>
     <string name="live_walk_mode_details_close">Close</string>
-    <string name="live_section_conditions">Cadence and network</string>
+    <string name="live_section_cadence_details">Cadence details</string>
     <string name="live_walk_wifi_prompt">Wi-Fi is connected and the phone is not charging, so Android refreshes cell info only every 10 s. Turn Wi-Fi off for 2 s updates. A charger helps only once Android counts the phone as charging, which can take 15 minutes.</string>
     <string name="live_action_wifi_settings">Wi-Fi settings</string>
 
@@ -166,7 +173,8 @@
     <string name="live_listener_data">mobile data</string>
     <string name="live_listener_other">radio</string>
 
-    <string name="live_section_chart">Last 5 minutes</string>
+    <!-- Beside the chart's RSRP title. -->
+    <string name="chart_window">last 5 min</string>
     <string name="chart_rsrp">RSRP</string>
     <string name="chart_sinr">SINR</string>
     <string name="chart_window_start">5 min ago</string>
@@ -225,12 +233,15 @@
     <!-- %1$s is the session name. -->
     <string name="live_recovered_stopped_message">“%1$s” stopped but could not be saved at the time. It is closed now, with everything it recorded.</string>
     <string name="live_action_open_session">Open session</string>
+    <!-- The recording strip: one line at any font scale, so each state is a few words. -->
     <string name="live_strip_paused">Paused in a privacy zone</string>
-    <string name="live_strip_waiting">Waiting for a location fix</string>
-    <string name="live_strip_location_off">Location off: not recording</string>
-    <plurals name="live_strip_samples">
-        <item quantity="one">%1$d fresh sample</item>
-        <item quantity="other">%1$d fresh samples</item>
+    <string name="live_strip_waiting">Waiting for a fix</string>
+    <string name="live_strip_location_off">Not recording: location off</string>
+    <string name="live_strip_saving">Saving</string>
+    <!-- %1$s is the count of fresh samples, grouped for the locale, e.g. 1,234. -->
+    <plurals name="live_strip_recording">
+        <item quantity="one">Recording · %1$s sample</item>
+        <item quantity="other">Recording · %1$s samples</item>
     </plurals>
     <string name="live_strip_gps_fix">GPS fix</string>
     <string name="live_strip_gps_lost">GPS lost</string>
@@ -332,8 +343,23 @@
     <!-- %1$s used, %2$s the cap, both from Formats.decimalBytes. -->
     <string name="sessions_used_value">%1$s of %2$s</string>
     <string name="sessions_row_free">Free on this phone</string>
+    <!-- %1$s used, %2$s the cap, %3$s free on the phone, all from Formats.decimalBytes. One line under the list. -->
+    <string name="sessions_storage_footer">%1$s of %2$s used · %3$s free</string>
     <string name="sessions_storage_full">New sessions cannot start: storage is full. Share and delete old sessions to make room.</string>
     <string name="sessions_unreadable">Could not read session.json</string>
+    <!-- The status word in a row's one secondary line; the full reason is read by TalkBack and shown on the detail. -->
+    <string name="sessions_status_interrupted">Interrupted</string>
+    <string name="sessions_status_unreadable">Unreadable</string>
+    <!-- %1$s is the local time, e.g. 6:19 PM. -->
+    <string name="sessions_when_today">Today %1$s</string>
+    <string name="sessions_when_yesterday">Yesterday %1$s</string>
+    <!-- %1$s a short weekday, e.g. Wed, %2$s the local time. -->
+    <string name="sessions_when_weekday">%1$s %2$s</string>
+    <!-- %1$s the level word, e.g. Good, %2$d the median RSRP in dBm. -->
+    <string name="sessions_signal_chip">%1$s %2$d</string>
+    <!-- %1$s the RAT (LTE or NR), %2$d the median RSRP in dBm, %3$s its level word. Read by TalkBack. -->
+    <string name="sessions_signal_description">median %1$s RSRP %2$d dBm, %3$s</string>
+    <string name="sessions_no_signal">No signal</string>
 
     <!-- Session detail -->
     <string name="detail_title">Session</string>
@@ -362,11 +388,16 @@
     <!-- %1$s version name, %2$d version code. -->
     <string name="detail_app_version_value">%1$s (%2$d)</string>
     <string name="detail_row_networks">Networks (PLMN)</string>
-    <!-- %1$s is a PLMN such as 311480, %2$d the KPI rows recorded on it. -->
+    <!-- %1$s is a PLMN such as 311480, %2$d the KPI rows recorded on it. One line per PLMN. -->
     <plurals name="detail_plmn_rows">
-        <item quantity="one">%1$s: %2$d row</item>
-        <item quantity="other">%1$s: %2$d rows</item>
+        <item quantity="one">%1$s · %2$d row</item>
+        <item quantity="other">%1$s · %2$d rows</item>
     </plurals>
+    <!-- %1$s is the RAT the median is of, LTE or NR: kpi.csv keeps an NSA session's LTE and NR rows apart. -->
+    <string name="detail_row_median_rsrp">Median %1$s RSRP</string>
+    <string name="detail_row_median_rsrp_unknown">Median RSRP</string>
+    <!-- The share of the RSRP values below the report's -105 dBm line. -->
+    <string name="detail_row_below_fair">Below -105 dBm</string>
     <string name="detail_row_precision">Location precision</string>
     <string name="detail_row_consent">Consent version</string>
 

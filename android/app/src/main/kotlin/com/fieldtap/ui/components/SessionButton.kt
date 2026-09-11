@@ -7,6 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -68,6 +69,10 @@ enum class SessionButtonState {
  *
  * Full width, 64 dp tall. Stopping ends the session for good, so confirm it with a dialog in the
  * screen before calling the view model.
+ *
+ * [stacked], for the narrow action rail beside the content in landscape: IDLE puts the play icon above a one-line
+ * [startLabel] that shrinks to 14 sp before it would wrap; pass a short label ("Start") and the full words as
+ * [startContentDescription] ("Start session"), which TalkBack reads instead.
  */
 @Composable
 fun SessionButton(
@@ -81,6 +86,8 @@ fun SessionButton(
     recordingLabel: String? = null,
     elapsedText: String? = null,
     enabled: Boolean = true,
+    stacked: Boolean = false,
+    startContentDescription: String? = null,
 ) {
     val colors = FieldTapDesign.colors
     val recording = state == SessionButtonState.RECORDING
@@ -102,10 +109,11 @@ fun SessionButton(
             .fillMaxWidth()
             .heightIn(min = Sizes.PrimaryButtonHeight)
             .then(
-                if (recording) {
-                    Modifier.semantics { contentDescription = listOfNotNull(recordingLabel, elapsedText, stopLabel).joinToString(", ") }
-                } else {
-                    Modifier
+                when {
+                    recording -> Modifier.semantics { contentDescription = listOfNotNull(recordingLabel, elapsedText, stopLabel).joinToString(", ") }
+                    state == SessionButtonState.IDLE && startContentDescription != null ->
+                        Modifier.semantics { contentDescription = startContentDescription }
+                    else -> Modifier
                 },
             ),
         shape = ShapeRoles.Pill,
@@ -115,10 +123,22 @@ fun SessionButton(
             disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
             disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ),
-        contentPadding = PaddingValues(horizontal = Spacing.Xl, vertical = Spacing.Sm),
+        contentPadding = PaddingValues(horizontal = if (stacked) Spacing.Md else Spacing.Xl, vertical = Spacing.Sm),
     ) {
         when (state) {
-            SessionButtonState.IDLE -> {
+            SessionButtonState.IDLE -> if (stacked) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Spacing.Xxs)) {
+                    Icon(imageVector = FieldTapIcons.Play, contentDescription = null, modifier = Modifier.size(Sizes.Icon))
+                    val labelStyle = MaterialTheme.typography.titleMedium
+                    Text(
+                        text = startLabel,
+                        style = labelStyle,
+                        maxLines = 1,
+                        softWrap = false,
+                        autoSize = TextAutoSize.StepBased(minFontSize = MIN_STACKED_LABEL_SP.sp, maxFontSize = labelStyle.fontSize, stepSize = 1.sp),
+                    )
+                }
+            } else {
                 Icon(imageVector = FieldTapIcons.Play, contentDescription = null, modifier = Modifier.size(Sizes.Icon))
                 Spacer(modifier = Modifier.width(Spacing.Sm))
                 Text(text = startLabel, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -177,6 +197,9 @@ internal val RecordingFullContentWidth: Dp = 168.dp
 
 /** The smallest the elapsed time shrinks to before it would clip, for hours on a narrow button. */
 private const val MIN_ELAPSED_FONT_SIZE_SP: Int = 12
+
+/** The smallest a stacked button's label shrinks to before it would clip. */
+private const val MIN_STACKED_LABEL_SP: Int = 14
 
 /**
  * Whether the recording state leaves out its label and the Stop word to keep the elapsed time whole: when the

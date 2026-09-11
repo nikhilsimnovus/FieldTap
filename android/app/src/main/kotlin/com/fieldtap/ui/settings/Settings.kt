@@ -2,7 +2,6 @@ package com.fieldtap.ui.settings
 
 import android.app.Activity
 import android.content.Context
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,7 +20,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
@@ -57,7 +55,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -76,11 +73,11 @@ import com.fieldtap.platform.Permissions
 import com.fieldtap.ui.components.EmptyState
 import com.fieldtap.ui.components.FieldTapPreviews
 import com.fieldtap.ui.components.LoadingState
+import com.fieldtap.ui.components.NavigationRow
 import com.fieldtap.ui.components.PermissionStatus
 import com.fieldtap.ui.components.PreviewSurface
 import com.fieldtap.ui.components.SectionCard
 import com.fieldtap.ui.components.SectionDivider
-import com.fieldtap.ui.components.StatusBanner
 import com.fieldtap.ui.components.ToggleRow
 import com.fieldtap.ui.setup.PermissionAction
 import com.fieldtap.ui.setup.PermissionRules
@@ -89,7 +86,6 @@ import com.fieldtap.ui.setup.SettingsIntents
 import com.fieldtap.ui.setup.SetupFormats
 import com.fieldtap.ui.setup.SetupParagraph
 import com.fieldtap.ui.setup.SetupScreenScaffold
-import com.fieldtap.ui.setup.SetupSubheading
 import com.fieldtap.ui.setup.setupContentWidth
 import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.FieldTapIcons
@@ -277,15 +273,13 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
 }
 
 /**
- * Settings: tests opt-in default, ping target, download URL (HTTPS only), intervals, cap and per-session
- * budget; privacy zones (label, radius, "here" from the current fix, or typed coordinates), with a note
- * that zones apply to new sessions and nothing is written inside them. No map tiles.
+ * Settings, in the order they are changed: Measurement ("Instant cell updates", the only place the Phone permission is
+ * asked for, android/ARCHITECTURE.md decision 9, and walk mode's default); privacy zones (label, radius, "here" from the
+ * current fix, or typed coordinates), with a note that zones apply to new sessions and nothing is written inside them,
+ * and no map tiles; the ping and download tests, as their default and a row that opens [TestTargetsScreen] with the
+ * targets summarised; then withdrawing consent (decision 2). A zone's name never leaves this screen.
  *
- * Also "Instant cell updates", the only place the Phone permission is asked for (android/ARCHITECTURE.md decision 9),
- * walk mode's default, and withdrawing consent (decision 2). A zone's name never leaves this screen.
- *
- * Switches save at once; the test fields save with Save. Leaving the screen, by the top bar or Back, with test edits
- * that are not saved asks whether to discard them.
+ * Switches save at once; the test targets save on their own screen.
  *
  * Owner: workstream `ui-setup`.
  */
@@ -293,11 +287,11 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
 fun SettingsScreen(
     viewModel: SettingsViewModel,
     onBack: () -> Unit,
+    onOpenTestTargets: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val loadFailed by viewModel.loadFailed.collectAsStateWithLifecycle()
-    val testProblems by viewModel.testProblems.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val activity = LocalActivity.current
     val scope = rememberCoroutineScope()
@@ -315,13 +309,6 @@ fun SettingsScreen(
     var confirmPhoneOff by rememberSaveable { mutableStateOf(false) }
     var confirmWithdraw by rememberSaveable { mutableStateOf(false) }
     var editor by rememberSaveable(stateSaver = ZoneEditorStateSaver) { mutableStateOf<ZoneEditorState?>(null) }
-    // The test fields as typed, null until edited. Held here rather than in the card, so leaving can ask first.
-    var testsEdit by rememberSaveable(stateSaver = TestSettingsFormSaver) { mutableStateOf<TestSettingsForm?>(null) }
-    var confirmDiscard by rememberSaveable { mutableStateOf(false) }
-    val storedTests = state.settings?.tests
-    val unsavedTests = storedTests != null && testsEdit?.hasUnsavedChanges(storedTests) == true
-    val leave: () -> Unit = { if (unsavedTests) confirmDiscard = true else onBack() }
-    BackHandler(enabled = unsavedTests) { confirmDiscard = true }
 
     LifecycleResumeEffect(context) {
         phone = PhoneSnapshot.read(context, activity)
@@ -359,14 +346,11 @@ fun SettingsScreen(
     SettingsContent(
         state = state,
         loadFailed = loadFailed,
-        testsRejected = testProblems.isNotEmpty(),
         phone = phoneUi,
         preciseLocation = phone.preciseLocation,
-        onBack = leave,
+        onBack = onBack,
         onRetryLoad = viewModel::retryLoad,
-        testsForm = testsEdit,
-        onTestsFormChange = { form -> testsEdit = form },
-        onSaveTests = viewModel::updateTests,
+        onOpenTestTargets = onOpenTestTargets,
         onTestsDefaultOnChange = viewModel::setTestsDefaultOn,
         onWalkModeDefaultChange = viewModel::setWalkModeDefault,
         onInstantUpdatesChange = { turnOn ->
@@ -473,28 +457,6 @@ fun SettingsScreen(
             text = { Text(text = stringResource(R.string.settings_consent_withdraw_body)) },
         )
     }
-    if (confirmDiscard) {
-        AlertDialog(
-            onDismissRequest = { confirmDiscard = false },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmDiscard = false
-                        testsEdit = null
-                        onBack()
-                    },
-                ) {
-                    Text(text = stringResource(R.string.settings_discard_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDiscard = false }) { Text(text = stringResource(R.string.settings_discard_keep)) }
-            },
-            icon = { Icon(imageVector = FieldTapIcons.Warning, contentDescription = null) },
-            title = { Text(text = stringResource(R.string.settings_discard_title)) },
-            text = { Text(text = stringResource(R.string.settings_discard_body)) },
-        )
-    }
 }
 
 /** The Settings screen without its view model, dialogs or permission launcher, for previews. */
@@ -502,14 +464,11 @@ fun SettingsScreen(
 internal fun SettingsContent(
     state: SettingsUiState,
     loadFailed: Boolean,
-    testsRejected: Boolean,
     phone: PermissionUi,
     preciseLocation: Boolean,
     onBack: () -> Unit,
     onRetryLoad: () -> Unit,
-    testsForm: TestSettingsForm?,
-    onTestsFormChange: (TestSettingsForm) -> Unit,
-    onSaveTests: (TestSettings) -> Unit,
+    onOpenTestTargets: () -> Unit,
     onTestsDefaultOnChange: (Boolean) -> Unit,
     onWalkModeDefaultChange: (Boolean) -> Unit,
     onInstantUpdatesChange: (Boolean) -> Unit,
@@ -543,18 +502,8 @@ internal fun SettingsContent(
                 }
             }
         } else {
-            item(key = "tests") {
-                TestsCard(
-                    tests = settings.tests,
-                    edited = testsForm,
-                    testsDefaultOn = settings.testsDefaultOn,
-                    rejected = testsRejected,
-                    onTestsDefaultOnChange = onTestsDefaultOnChange,
-                    onFormChange = onTestsFormChange,
-                    onSave = onSaveTests,
-                    modifier = Modifier.setupContentWidth(),
-                )
-            }
+            // What changes how a walk is measured comes first. The ping and download form took the first screen and a half,
+            // though it rarely changes: it is one row now, opening a screen of its own.
             item(key = "measurement") {
                 MeasurementCard(
                     walkModeDefault = settings.walkModeDefault,
@@ -575,6 +524,15 @@ internal fun SettingsContent(
                     modifier = Modifier.setupContentWidth(),
                 )
             }
+            item(key = "tests") {
+                TestsCard(
+                    tests = settings.tests,
+                    testsDefaultOn = settings.testsDefaultOn,
+                    onTestsDefaultOnChange = onTestsDefaultOnChange,
+                    onOpenTestTargets = onOpenTestTargets,
+                    modifier = Modifier.setupContentWidth(),
+                )
+            }
             item(key = "consent") {
                 ConsentCard(consent = settings.consent, onWithdraw = onWithdrawConsent, modifier = Modifier.setupContentWidth())
             }
@@ -582,32 +540,18 @@ internal fun SettingsContent(
     }
 }
 
+/**
+ * The tests as Settings shows them: their default for new sessions, and one row naming the targets that opens
+ * [TestTargetsScreen]. Every toggle of this screen has a leading icon, so their words line up.
+ */
 @Composable
 private fun TestsCard(
     tests: TestSettings,
-    edited: TestSettingsForm?,
     testsDefaultOn: Boolean,
-    rejected: Boolean,
     onTestsDefaultOnChange: (Boolean) -> Unit,
-    onFormChange: (TestSettingsForm) -> Unit,
-    onSave: (TestSettings) -> Unit,
+    onOpenTestTargets: () -> Unit,
     modifier: Modifier,
 ) {
-    val form = edited ?: TestSettingsForm.from(tests)
-    val parsed = form.parse(tests)
-    val problems = (parsed as? TestSettingsParse.Invalid)?.problems.orEmpty()
-    val defaults = TestSettingsForm.from(TestSettings())
-    val unsaved = form.hasUnsavedChanges(tests)
-    val capMb = TestSettingsForm.parseWholeNumber(form.downloadCapMb) ?: 0L
-    val secondsUnit = stringResource(R.string.settings_unit_seconds)
-    val minutesUnit = stringResource(R.string.settings_unit_minutes)
-    val megabytesUnit = stringResource(R.string.settings_unit_megabytes)
-    val host = TestSettingsRules.downloadHost(form.downloadUrl)
-    val hostLine = when {
-        form.downloadUrl.isBlank() -> stringResource(R.string.settings_download_off)
-        host != null && problems.none { it.field == TestSettingsField.DOWNLOAD_URL } -> stringResource(R.string.settings_download_host, host)
-        else -> null
-    }
     SectionCard(
         title = stringResource(R.string.settings_section_tests),
         subtitle = stringResource(R.string.settings_tests_network_note),
@@ -619,145 +563,14 @@ private fun TestsCard(
             checked = testsDefaultOn,
             onCheckedChange = onTestsDefaultOnChange,
             supportingText = stringResource(R.string.settings_tests_default_supporting),
+            icon = FieldTapIcons.Transfer,
         )
-        SectionDivider()
-        SetupSubheading(text = stringResource(R.string.settings_ping_heading))
-        TestField(
-            value = form.pingTarget,
-            onValueChange = { onFormChange(form.copy(pingTarget = it)) },
-            label = stringResource(R.string.settings_ping_target),
-            problem = problemText(problems, TestSettingsField.PING_TARGET, capMb),
-            supportingText = stringResource(R.string.settings_ping_target_supporting),
-            keyboardType = KeyboardType.Uri,
+        NavigationRow(
+            title = stringResource(R.string.settings_test_targets),
+            onClick = onOpenTestTargets,
+            supportingText = testTargetsSummary(tests),
+            icon = FieldTapIcons.Tune,
         )
-        TestField(
-            value = form.pingIntervalS,
-            onValueChange = { onFormChange(form.copy(pingIntervalS = it)) },
-            label = stringResource(R.string.settings_ping_interval),
-            problem = problemText(problems, TestSettingsField.PING_INTERVAL, capMb),
-            suffix = secondsUnit,
-            keyboardType = KeyboardType.Number,
-        )
-        TestField(
-            value = form.pingCount,
-            onValueChange = { onFormChange(form.copy(pingCount = it)) },
-            label = stringResource(R.string.settings_ping_count),
-            problem = problemText(problems, TestSettingsField.PING_COUNT, capMb),
-            keyboardType = KeyboardType.Number,
-        )
-        SectionDivider()
-        SetupSubheading(text = stringResource(R.string.settings_download_heading))
-        TestField(
-            value = form.downloadUrl,
-            onValueChange = { onFormChange(form.copy(downloadUrl = it)) },
-            label = stringResource(R.string.settings_download_url),
-            problem = problemText(problems, TestSettingsField.DOWNLOAD_URL, capMb),
-            supportingText = stringResource(R.string.settings_download_url_supporting),
-            keyboardType = KeyboardType.Uri,
-        )
-        if (hostLine != null) SetupParagraph(text = hostLine)
-        TestField(
-            value = form.downloadIntervalMin,
-            onValueChange = { onFormChange(form.copy(downloadIntervalMin = it)) },
-            label = stringResource(R.string.settings_download_interval),
-            problem = problemText(problems, TestSettingsField.DOWNLOAD_INTERVAL, capMb),
-            suffix = minutesUnit,
-            keyboardType = KeyboardType.Number,
-        )
-        TestField(
-            value = form.downloadCapMb,
-            onValueChange = { onFormChange(form.copy(downloadCapMb = it)) },
-            label = stringResource(R.string.settings_download_cap),
-            problem = problemText(problems, TestSettingsField.DOWNLOAD_CAP, capMb),
-            suffix = megabytesUnit,
-            keyboardType = KeyboardType.Number,
-        )
-        TestField(
-            value = form.sessionBudgetMb,
-            onValueChange = { onFormChange(form.copy(sessionBudgetMb = it)) },
-            label = stringResource(R.string.settings_download_budget),
-            problem = problemText(problems, TestSettingsField.SESSION_BUDGET, capMb),
-            suffix = megabytesUnit,
-            keyboardType = KeyboardType.Number,
-            imeAction = ImeAction.Done,
-        )
-        if (rejected) StatusBanner(message = stringResource(R.string.settings_tests_rejected), tone = StatusTone.ERROR)
-        if (unsaved && !rejected) {
-            Text(
-                text = stringResource(R.string.settings_tests_unsaved),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.End,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.Sm, Alignment.End),
-            verticalArrangement = Arrangement.spacedBy(Spacing.Sm),
-        ) {
-            TextButton(
-                onClick = { onFormChange(defaults) },
-                enabled = form != defaults,
-                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
-            ) {
-                Text(text = stringResource(R.string.settings_tests_restore))
-            }
-            Button(
-                onClick = { (parsed as? TestSettingsParse.Valid)?.let { valid -> onSave(valid.settings) } },
-                enabled = unsaved && parsed is TestSettingsParse.Valid,
-                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
-            ) {
-                Text(text = stringResource(R.string.settings_tests_save))
-            }
-        }
-    }
-}
-
-@Composable
-private fun TestField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    label: String,
-    problem: String?,
-    keyboardType: KeyboardType,
-    supportingText: String? = null,
-    suffix: String? = null,
-    imeAction: ImeAction = ImeAction.Next,
-) {
-    val supporting = problem ?: supportingText
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = Modifier.fillMaxWidth(),
-        label = { Text(text = label) },
-        suffix = if (suffix != null) {
-            { Text(text = suffix) }
-        } else {
-            null
-        },
-        supportingText = if (supporting != null) {
-            { Text(text = supporting) }
-        } else {
-            null
-        },
-        isError = problem != null,
-        keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
-        singleLine = true,
-    )
-}
-
-@Composable
-private fun problemText(problems: List<TestSettingsProblem>, field: TestSettingsField, capMb: Long): String? {
-    val problem = problems.firstOrNull { it.field == field }
-    return when (problem?.kind) {
-        null -> null
-        TestSettingsProblemKind.NOT_A_WHOLE_NUMBER, TestSettingsProblemKind.OUT_OF_RANGE ->
-            stringResource(R.string.settings_problem_whole_number, field.displayRange.first, field.displayRange.last)
-        TestSettingsProblemKind.INVALID_HOST -> stringResource(R.string.settings_problem_host)
-        TestSettingsProblemKind.NOT_HTTPS -> stringResource(R.string.settings_problem_https)
-        TestSettingsProblemKind.INVALID_URL -> stringResource(R.string.settings_problem_url)
-        TestSettingsProblemKind.BUDGET_BELOW_CAP -> stringResource(R.string.settings_problem_budget, capMb)
     }
 }
 
@@ -811,10 +624,11 @@ private fun ZonesCard(
     SectionCard(title = stringResource(R.string.settings_section_zones), icon = FieldTapIcons.Shield, modifier = modifier) {
         SetupParagraph(text = stringResource(R.string.settings_zones_intro))
         if (zones.isEmpty()) {
+            // No louder than the explanation above it.
             Text(
                 text = stringResource(R.string.settings_zones_empty),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
             zones.forEachIndexed { index, zone ->
@@ -1080,34 +894,6 @@ private val ZoneEditorStateSaver: Saver<ZoneEditorState?, Any> = listSaver<ZoneE
     },
 )
 
-private const val FORM_SAVED_FIELDS = 7
-
-/** Keeps typed test settings across a rotation; nothing typed (null) saves as an empty list. */
-private val TestSettingsFormSaver: Saver<TestSettingsForm?, Any> = listSaver<TestSettingsForm?, String>(
-    save = { form ->
-        if (form == null) {
-            emptyList()
-        } else {
-            listOf(
-                form.pingTarget,
-                form.pingIntervalS,
-                form.pingCount,
-                form.downloadUrl,
-                form.downloadIntervalMin,
-                form.downloadCapMb,
-                form.sessionBudgetMb,
-            )
-        }
-    },
-    restore = { values ->
-        if (values.size != FORM_SAVED_FIELDS) {
-            null
-        } else {
-            TestSettingsForm(values[0], values[1], values[2], values[3], values[4], values[5], values[6])
-        }
-    },
-)
-
 /** The Phone permission facts behind "Instant cell updates", read on each resume and after each request. */
 private data class PhoneSnapshot(val granted: Boolean, val rationale: Boolean, val preciseLocation: Boolean) {
     companion object {
@@ -1133,14 +919,11 @@ private fun SettingsPreview() {
                 zoneProblems = emptyList(),
             ),
             loadFailed = false,
-            testsRejected = false,
             phone = PermissionUi(PermissionStatus.NOT_REQUESTED, PermissionAction.REQUEST),
             preciseLocation = true,
             onBack = {},
             onRetryLoad = {},
-            testsForm = null,
-            onTestsFormChange = {},
-            onSaveTests = {},
+            onOpenTestTargets = {},
             onTestsDefaultOnChange = {},
             onWalkModeDefaultChange = {},
             onInstantUpdatesChange = {},

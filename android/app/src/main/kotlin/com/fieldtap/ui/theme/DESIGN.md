@@ -75,6 +75,11 @@ One scale, `SignalScale`, identical to the report's route colours, with the same
   word on a surface.
 - Display ranges are for drawing only (RSRP -140..-40, RSRQ -30..0, SINR -25..40, the report's axes).
   Text always shows the measured value. The emphasised reference line is -105 dBm (0 dB for SINR).
+- A signal bar spans `SignalScale.barRange` (RSRP -130..-50) so its four zones are wide enough to tell apart; a Live chart
+  panel spans `ChartMath.fittedRange`: at least `RSRP_CHART_RANGE` (-120..-60) or `SINR_CHART_RANGE` (-10..30), grown to
+  the values it draws, at most the display range. `SignalScale.zones(metric, range)` gives the zones either draws.
+- Session statistics (`SignalSummary`, from kpi.csv) are of one RAT, as the report keeps LTE and NR apart: the median RSRP
+  and the share below -105 dBm, labelled with the RAT ("Median LTE RSRP").
 - Build one `SignalQualityLabels` per screen from string resources and pass `labels.of(quality)`
   wherever a level colour appears.
 
@@ -104,10 +109,16 @@ Any other text whose numbers change: `MaterialTheme.typography.titleSmall.tabula
 - `Sizes.MinTouchTarget` (48 dp) for everything tappable. Cap content at `Sizes.MaxContentWidth` (720 dp),
   centred, on tablets and in landscape; centred prose at `Sizes.MaxTextWidth`.
 - A window at least `Sizes.WideLayoutMinWidth` wide and lower than `Sizes.ShortWindowMaxHeight` (a phone in
-  landscape) has no room for a bottom action bar: primary actions move to a `Sizes.ActionRailWidth` column beside
-  the content, at its bottom, so the number a screen is about stays in view. Two panes need
-  `Sizes.WideLayoutMinWidth` beside that column; a smaller window keeps one pane.
+  landscape) has no room for a bottom action bar or a top bar: primary actions move to a `Sizes.ActionRailWidth`
+  (168 dp) column beside the content, at its bottom, and the bar's actions to its top, so the number a screen is about
+  stays in view. Two panes need `Sizes.WideLayoutMinWidth` beside that column; a smaller window keeps one pane. A dialog
+  with fields fills such a window (Close, the title and the confirm action in a bar over a scrolling form).
 - Words that explain a missing value wrap; a chip holds only a short state word, never a sentence.
+- Never let a separator (" · ") end a line: break a value of two parts with "\n" (a phone model, then its Android version;
+  a cell's identity, then its operator). A line that must stay one line (the recording strip, a list row's secondary line)
+  has `maxLines = 1` and gives up its least important words before it would be cut short.
+- Dense cards of labelled values (Overview, Collection, Files, Serving cell, Cadence details) use
+  `SectionCard(itemGap = Spacing.Sm)` and `KeyValueRow(minHeight = Sizes.KeyValueRowDenseMinHeight)`.
 - `Durations`: SHORT 150, MEDIUM 250, LONG 400 ms. Animate colour and state, never the numbers.
 
 ## Icons, words, numbers
@@ -124,23 +135,23 @@ Any other text whose numbers change: `MaterialTheme.typography.titleSmall.tabula
 
 | Component | Use it for |
 | --- | --- |
-| `FieldTapTopBar`, `TopBarAction`, `rememberTopBarScroll` | Every screen's top bar; screens need no experimental opt-in. Pass `rememberTopBarScroll()` and put `Modifier.nestedScroll(scroll.connection)` on the Scaffold, so the bar sets itself apart from content scrolled under it. |
-| `MetricTile`, `MetricGrid` | A live value with unit, quality chip, age badge and optional `footer` (a `SignalBar`). `MetricEmphasis.HERO` for the main number. The grid drops to one column at font scale 1.3 on a phone. |
-| `SecondaryMetricTile` | Two side by side under a hero tile: RSRQ and SINR on Live. A value the cell does not report shows the dash, no unit, and says why ("Not reported"). |
+| `FieldTapTopBar`, `TopBarAction`, `TopBarToggleAction`, `rememberTopBarScroll` | Every screen's top bar; screens need no experimental opt-in. Pass `rememberTopBarScroll()` and put `Modifier.nestedScroll(scroll.connection)` on the Scaffold, so the bar sets itself apart from content scrolled under it. `TopBarToggleAction` is a mode that is on or off (walk mode), in a tonal circle when on, with "On"/"Off" as its TalkBack state. `navigationIcon = FieldTapIcons.Close` for a full-screen dialog. |
+| `MetricTile`, `MetricGrid` | A live value with unit, quality chip, age badge and optional `footer` (a `SignalBar`, or a quality chip under a compact value). `MetricEmphasis.HERO` for the main number; `ageInHeader` puts the age beside the quality chip where the tile is wide; `valueTone` WARNING or ERROR colours a worse-than-expected number and adds the tone's icon. `MetricGrid(minCellWidth = Sizes.TileCompactMinWidth, maxColumns = 4)` keeps a four-tile headline at two columns on a phone at font scale 1.3. |
+| `SecondaryMetricTile` | Two side by side under a hero tile: RSRQ and SINR on Live. A value the cell does not report is one 48 dp line, the label and why ("Not reported"), with no dash; when the cell reports neither, Live shows no tiles and says so in the hero. The dash is only for no serving cell. |
 | `AgeIndicator` | "2.1 s old" from `LiveState.badge`: FRESH neutral, AGING amber with a timer, STALE red with a warning. |
 | `SignalQualityChip`, `SignalQualityLabels` | A swatch and its level word, wherever a signal colour appears. |
-| `SignalBar` | A value's place on the scale with threshold ticks, next to the number. |
+| `SignalBar` | A value's place on the scale, next to the number: the scale's four zones (the value's solid, the others pale) with a marker at the value, and the thresholds named under the gaps from 280 dp wide. |
 | `CellSignalRow`, `SignalBars` | A neighbour or the NSA leg: bars, identity, value, level word. |
-| `CadenceIndicator` | "2 s" (success) or "10 s" (warning), with the reason. |
+| `CadenceIndicator`, `cadenceTone` | "2 s" (success) or "10 s" (warning), with the reason. Live shows the cadence as a `StatusChip` in `cadenceTone` among the other chips, and the reason in its cadence details. |
 | `StatusBanner` | A condition with an optional fix: Wi-Fi forcing 10 s, a session interrupted, paused in a privacy zone, a refused listener. At the top of the content, one per cause; WARNING and ERROR announce themselves. |
 | `StatusChip` | Short states side by side: service, data, 5G icon, GPS. Its text has tabular figures, so a number that changes every second keeps the chip's width. |
-| `SectionCard`, `KeyValueRow`, `SectionDivider` | Titled groups of labelled values. `KeyValueRow(stacked = true, selectable = true)` for a SHA-256 or a URL. |
+| `SectionCard`, `KeyValueRow`, `SectionDivider` | Titled groups of labelled values. `KeyValueRow(stacked = true, selectable = true)` for a SHA-256 or a URL; `itemGap` and `minHeight` for a dense card. |
 | `ToggleRow`, `RadioRow`, `NavigationRow` | Settings rows: on or off (walk mode, tests, instant updates); one of several (share precision, inside `Modifier.selectableGroup()`); a link to a screen or system setting. |
 | `ChecklistRow` | A check with its level and fix: Readiness items, probe findings. |
 | `ReadinessSheet`, `ReadinessSheetContent`, `ReadinessProblems` | The pre-start sheet: named problems with fixes, blocking first, "Start anyway" only when nothing blocks. |
-| `SessionButton`, `RecordingDot` | Start, Starting, Recording (elapsed time, Stop), Stopping. Confirm Stop in a dialog. |
-| `SignalHistoryChart`, `TimeSeriesChart`, `ChartMath` | Five minutes of RSRP and SINR with reference lines, gaps left open, and a TalkBack summary. `sinrReported = false` shows SINR as one "Not reported by this cell" line instead of an empty panel. |
-| `SessionListRow` | A session: COMPLETED, RECORDING, INTERRUPTED or UNREADABLE. |
+| `SessionButton`, `RecordingDot` | Start, Starting, Recording (elapsed time, Stop), Stopping. Confirm Stop in a dialog. `stacked` in the landscape rail: the icon over a one-line short label, the full words for TalkBack. |
+| `SignalHistoryChart`, `TimeSeriesChart`, `ChartMath` | Five minutes of RSRP and SINR over the scale's zones as flat bands, with reference lines labelled as far as labels fit apart (the key line's first), gaps left open, and a TalkBack summary. `sinrReported = false` shows SINR as one "Not reported by this cell" line instead of an empty panel, and the RSRP panel takes `Sizes.ChartPanelTallHeight`. |
+| `SessionListRow`, `RecordingChip` | A session on one 72 dp row: status badge, name with its signal chip ("Good -92") or `RecordingChip`, and one line of start, duration and size, with "Interrupted" or "Unreadable" in its colour in the size's place. TalkBack reads the full stop reason. |
 | `EmptyState`, `LoadingState` | Nothing to show, waiting, or could not load (tone ERROR). Show loading only for waits over about 300 ms. |
 | `PermissionRationale` | A permission, why it is needed, its status and the fix button. |
 | `LimitsStatementCard` | `R.string.limits_statement`, word for word, never truncated. |
@@ -156,7 +167,7 @@ shape argument), `Button`, `TextButton`, `Snackbar`.
 | State | Component input |
 | --- | --- |
 | `LiveState.serving`, `servingAgeMs`, `badge` | Hero `MetricTile(value = rsrp?.toString(), quality = SignalScale.quality(SignalMetric.RSRP, rsrp), ageText = stringResource(R.string.age_old, Formats.ageSeconds(ageMs)), badge = badge) { SignalBar(SignalMetric.RSRP, rsrp) }` |
-| `LiveCell.rsrq`, `sinr` of the serving cell | Two `SecondaryMetricTile`s in a row under the hero, "SS-RSRQ" and "SS-SINR" on NR; null with a serving cell is "Not reported" |
+| `LiveCell.rsrq`, `sinr` of the serving cell | Two `SecondaryMetricTile`s in a row under the hero, "SS-RSRQ" and "SS-SINR" on NR; one null with a serving cell is "Not reported" on one line; both null is one line in the hero, "SS-RSRQ and SS-SINR not reported by this cell" |
 | `LiveState.nsaLeg`, `neighbours` | One `CellSignalRow` per cell, in the given order (strongest first) |
 | `LiveState.shortInterval` | `CadenceIndicator(shortInterval = ...)` and `ChartMath.gapThresholdMs(shortInterval)` |
 | `LiveState.rsrpSeries`, `sinrSeries`, `nowElapsedMs` | `SignalHistoryChart`, with the summary built from `ChartMath.stats` |
@@ -168,6 +179,7 @@ shape argument), `Button`, `TextButton`, `Snackbar`.
 | `ReadinessItem.level` OK, ADVICE, BLOCKER | `ChecklistRow(tone = SUCCESS, WARNING, ERROR)`, with a fix button unless `target` is NONE |
 | Problems found by Start | `ReadinessProblem(blocking = level == BLOCKER)`; the refusals NO_CONSENT, NO_PRECISE_LOCATION, LOCATION_OFF and STORAGE_FULL are blocking too |
 | `SessionSummary.recording`, `readable`, `stoppedBy` | `SessionRowStatus` RECORDING, UNREADABLE, INTERRUPTED (when `stoppedBy` is an Android exit reason), else COMPLETED |
+| `SessionSummary.signal` (`SignalSummary`) | The row's `SignalQualityChip` ("Good -92"), "No signal" when null; on Session detail the "Median LTE RSRP" and "Below -105 dBm" tiles, the share in WARNING above 10 % |
 
 ## Screen recipe
 

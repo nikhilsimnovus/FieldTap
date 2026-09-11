@@ -5,6 +5,7 @@ import com.fieldtap.app.SessionStatus
 import com.fieldtap.core.export.ExportException
 import com.fieldtap.core.session.StorageStatus
 import com.fieldtap.format.GapMeta
+import com.fieldtap.ui.theme.StatusTone
 
 /** The reasons [ExportState.Failed] carries: `ExportException.Reason` names, or [UNKNOWN]. */
 object ExportFailure {
@@ -39,12 +40,30 @@ object SessionsPresentation {
     /** How many sampling gaps the detail screen lists before pointing to session.json. */
     const val MAX_LISTED_GAPS: Int = 50
 
+    /** Above this share of the cap the Sessions list shows storage as a card with its bar, above the sessions. */
+    const val STORAGE_CARD_FRACTION: Float = 0.8f
+
+    /** Above this share of RSRP values below -105 dBm, in percent, Session detail draws the share in the warning tone. */
+    const val BELOW_FAIR_WARNING_PCT: Double = 10.0
+
     /** Used bytes as a share of the cap, 0..1; a cap of zero or less counts as full. */
     fun storageFraction(storage: StorageStatus): Float {
         val cap = storage.policy.capBytes
         if (cap <= 0) return 1f
         return (storage.usedBytes.toDouble() / cap).toFloat().coerceIn(0f, 1f)
     }
+
+    /**
+     * Whether storage needs the card with its bar: sessions cannot start, or more than [STORAGE_CARD_FRACTION] of the cap
+     * is used. Otherwise one line under the list says how much is used and free.
+     */
+    fun storageCardShown(storage: StorageStatus): Boolean = !storage.canStart || storageFraction(storage) > STORAGE_CARD_FRACTION
+
+    /** WARNING when more than [BELOW_FAIR_WARNING_PCT] of the RSRP values are below -105 dBm; otherwise no tone. */
+    fun belowFairTone(belowFairPct: Double): StatusTone? = if (belowFairPct > BELOW_FAIR_WARNING_PCT) StatusTone.WARNING else null
+
+    /** ERROR when sampling had any gap, since samples are missing for those seconds; otherwise no tone. */
+    fun gapsTone(gaps: Int): StatusTone? = if (gaps > 0) StatusTone.ERROR else null
 
     /** True when [dirName] is the running (or stopping) session, by its summary or by the session status. */
     fun isRunning(dirName: String, detail: SessionDetail?, status: SessionStatus): Boolean {

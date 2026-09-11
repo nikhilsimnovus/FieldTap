@@ -6,6 +6,7 @@ import com.fieldtap.core.probe.ProbeReport
 import com.fieldtap.core.readiness.ReadinessReport
 import com.fieldtap.core.session.RecorderSnapshot
 import com.fieldtap.core.session.SessionOutcome
+import com.fieldtap.core.session.SignalSummary
 import com.fieldtap.core.session.StartRefusal
 import com.fieldtap.core.session.StartRequest
 import com.fieldtap.core.session.StorageStatus
@@ -102,6 +103,11 @@ data class SessionSummary(
     val plmns: List<String>,
     val freshSamples: Long?,
     val sizeBytes: Long,
+    /**
+     * The median RSRP of kpi.csv and its share below -105 dBm, of one RAT; null when kpi.csv holds no RSRP value. The
+     * Sessions list leaves it null for the running session, whose kpi.csv is still growing.
+     */
+    val signal: SignalSummary? = null,
 )
 
 data class SessionDetail(

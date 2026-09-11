@@ -2,6 +2,7 @@ package com.fieldtap.ui.theme
 
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.util.Locale
 
@@ -61,6 +62,12 @@ object Formats {
             BigDecimal(value).setScale(0, RoundingMode.HALF_UP).toPlainString()
         }
         return "$text ${units[unit]}"
+    }
+
+    /** A count with [locale]'s grouping separator and ASCII digits: 1234 is "1,234" in English, "1.234" in German. */
+    fun count(value: Long, locale: Locale = Locale.getDefault()): String {
+        val symbols = DecimalFormatSymbols.getInstance(locale).apply { zeroDigit = '0' }
+        return DecimalFormat("#,##0", symbols).format(value)
     }
 
     /** One decimal, half up, never "-0.0": 88.25 is "88.3", -0.04 is "0.0". */

@@ -16,21 +16,28 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -38,6 +45,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -47,8 +55,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,13 +69,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -102,7 +120,6 @@ import com.fieldtap.ui.common.findActivity
 import com.fieldtap.ui.common.ratName
 import com.fieldtap.ui.common.screenGutter
 import com.fieldtap.ui.common.signalQualityLabels
-import com.fieldtap.ui.components.CadenceIndicator
 import com.fieldtap.ui.components.CellSignalRow
 import com.fieldtap.ui.components.ChartMath
 import com.fieldtap.ui.components.FieldTapPreviews
@@ -124,8 +141,9 @@ import com.fieldtap.ui.components.SignalHistoryChart
 import com.fieldtap.ui.components.SignalQualityLabels
 import com.fieldtap.ui.components.StatusBanner
 import com.fieldtap.ui.components.StatusChip
-import com.fieldtap.ui.components.ToggleRow
 import com.fieldtap.ui.components.TopBarAction
+import com.fieldtap.ui.components.TopBarToggleAction
+import com.fieldtap.ui.components.cadenceTone
 import com.fieldtap.ui.components.rememberTopBarScroll
 import com.fieldtap.ui.components.statusIcon
 import com.fieldtap.ui.settings.TestSettingsRules
@@ -522,11 +540,14 @@ fun LiveScreen(
 }
 
 /**
- * RSRP (dBm, -140..-40) and SINR (dB, -25..40) against time over the last 5 minutes, drawn on a Compose
- * Canvas (no chart library). Points only from fresh samples; gaps are not bridged.
+ * RSRP (dBm) and SINR (dB) against time over the last 5 minutes, drawn on a Compose Canvas (no chart library). Each panel's
+ * range fits the values it draws: at least -120..-60 dBm and -10..30 dB, so every threshold stays in view, at most the
+ * report's axes (-140..-40 and -25..40). Points only from fresh samples; gaps are not bridged. A cell that reports no SINR
+ * gives the RSRP panel the room.
  *
  * @param gapThresholdMs lines break where two points are further apart; pass
  *   `ChartMath.gapThresholdMs(live.shortInterval)` so a gap on the 2 s interval is not drawn as data.
+ * @param compact low panels, for the pane beside the session buttons in a short, wide window.
  *
  * Owner: workstream `ui-session`.
  */
@@ -537,6 +558,7 @@ fun SignalChart(
     nowElapsedMs: Long,
     modifier: Modifier = Modifier,
     gapThresholdMs: Long = ChartMath.DEFAULT_GAP_THRESHOLD_MS,
+    compact: Boolean = false,
 ) {
     val windowMs = LiveStateReducer.WINDOW_MS
     val rsrpStats = ChartMath.stats(rsrp, nowElapsedMs, windowMs)
@@ -565,12 +587,21 @@ fun SignalChart(
             windowEnd = stringResource(R.string.chart_window_end),
             noData = stringResource(R.string.chart_no_data),
             notReported = stringResource(R.string.chart_not_reported),
+            window = stringResource(R.string.chart_window),
         ),
         summary = "$rsrpSummary $sinrSummary",
         modifier = modifier,
         windowMs = windowMs,
         gapThresholdMs = gapThresholdMs,
         sinrReported = !sinrNotReported,
+        rsrpRange = ChartMath.fittedRange(rsrp, nowElapsedMs, windowMs, SignalScale.RSRP_CHART_RANGE, SignalScale.RSRP_DISPLAY_RANGE),
+        sinrRange = ChartMath.fittedRange(sinr, nowElapsedMs, windowMs, SignalScale.SINR_CHART_RANGE, SignalScale.SINR_DISPLAY_RANGE),
+        rsrpPanelHeight = when {
+            compact -> Sizes.ChartPanelCompactHeight
+            sinrNotReported -> Sizes.ChartPanelTallHeight
+            else -> Sizes.ChartPanelHeight
+        },
+        sinrPanelHeight = if (compact) Sizes.ChartPanelCompactHeight else Sizes.ChartPanelHeight,
     )
 }
 
@@ -636,6 +667,7 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
     var startDialogOpen by rememberSaveable { mutableStateOf(false) }
     var markDialogOpen by rememberSaveable { mutableStateOf(false) }
     var stopDialogOpen by rememberSaveable { mutableStateOf(false) }
+    var walkModeDetailsOpen by rememberSaveable { mutableStateOf(false) }
     val buttonState = LivePresentation.buttonState(state.status, state.prestart)
 
     val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -666,7 +698,14 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
         }
     }
 
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+    val liveTitle = stringResource(R.string.live_title)
+    val openWalkModeDetails = { walkModeDetailsOpen = true }
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            // Named for TalkBack in landscape too, where the screen has no top bar.
+            .semantics { paneTitle = liveTitle },
+    ) {
         // A phone in landscape: a bottom bar would leave too little height for the serving cell's value.
         val actionsBeside = LivePresentation.actionsBesideContent(maxWidth, maxHeight)
         val topBarScroll = rememberTopBarScroll()
@@ -675,19 +714,21 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
                 .fillMaxSize()
                 .nestedScroll(topBarScroll.connection),
             topBar = {
-                Column {
-                    FieldTapTopBar(
-                        scroll = topBarScroll,
-                        title = stringResource(R.string.live_title),
-                        actions = {
-                            TopBarAction(
-                                icon = FieldTapIcons.Sessions,
-                                contentDescription = stringResource(R.string.live_action_sessions),
-                                onClick = actions.onOpenSessions,
-                            )
-                            LiveOverflowMenu(actions)
-                        },
-                    )
+                Column(
+                    modifier = if (actionsBeside) {
+                        Modifier.windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                    } else {
+                        Modifier
+                    },
+                ) {
+                    // Beside the content the rail holds the bar's actions: in landscape a 64 dp bar took a fifth of the height.
+                    if (!actionsBeside) {
+                        FieldTapTopBar(
+                            scroll = topBarScroll,
+                            title = liveTitle,
+                            actions = { LiveBarActions(state, actions, openWalkModeDetails) },
+                        )
+                    }
                     // Pinned under the bar while a session runs: whether it is collecting stays in view however far the list scrolls.
                     LivePresentation.recordingStrip(state.status, state.live)?.let { RecordingStatusStrip(it) }
                 }
@@ -715,10 +756,12 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
                     {
                         LiveActionRail(
                             state = state,
+                            actions = actions,
                             buttonState = buttonState,
                             onStart = { startDialogOpen = true },
                             onStop = { stopDialogOpen = true },
                             onMark = { markDialogOpen = true },
+                            onWalkModeDetails = openWalkModeDetails,
                         )
                     }
                 } else {
@@ -729,11 +772,13 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
     }
 
     if (startDialogOpen) {
+        val window = LocalWindowInfo.current.containerDpSize
         StartSessionDialog(
             tests = state.tests,
             testsDefaultOn = state.testsDefaultOn,
             walkMode = state.walkMode,
             nowWallMs = actions.nowWallMs,
+            fullScreen = LivePresentation.actionsBesideContent(window.width, window.height),
             onDismiss = { startDialogOpen = false },
             onStart = { request ->
                 startDialogOpen = false
@@ -759,14 +804,48 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
             },
         )
     }
+    if (walkModeDetailsOpen) {
+        AlertDialog(
+            onDismissRequest = { walkModeDetailsOpen = false },
+            confirmButton = {
+                TextButton(onClick = { walkModeDetailsOpen = false }) {
+                    Text(text = stringResource(R.string.live_walk_mode_details_close))
+                }
+            },
+            icon = { Icon(imageVector = FieldTapIcons.Walk, contentDescription = null) },
+            title = { Text(text = stringResource(R.string.live_walk_mode)) },
+            text = { Text(text = stringResource(R.string.live_walk_mode_details)) },
+        )
+    }
     val review = state.prestart as? PrestartState.Review
     if (review != null) {
         PrestartSheet(review = review, actions = actions, requestPreciseLocation = requestPreciseLocation)
     }
 }
 
+/**
+ * Walk mode as an on-off icon, Sessions and the overflow menu: in the top bar upright, at the top of the action rail in
+ * landscape. Walk mode sat in a card above the trend, where its explanation took the trend's place on the first screen.
+ */
 @Composable
-private fun LiveOverflowMenu(actions: LiveActions) {
+private fun LiveBarActions(state: LiveUiState, actions: LiveActions, onWalkModeDetails: () -> Unit) {
+    TopBarToggleAction(
+        icon = FieldTapIcons.Walk,
+        contentDescription = stringResource(R.string.live_walk_mode),
+        checked = state.walkMode,
+        onCheckedChange = actions.onWalkModeChange,
+        stateDescription = stringResource(if (state.walkMode) R.string.live_walk_mode_on else R.string.live_walk_mode_off),
+    )
+    TopBarAction(
+        icon = FieldTapIcons.Sessions,
+        contentDescription = stringResource(R.string.live_action_sessions),
+        onClick = actions.onOpenSessions,
+    )
+    LiveOverflowMenu(actions, onWalkModeDetails)
+}
+
+@Composable
+private fun LiveOverflowMenu(actions: LiveActions, onWalkModeDetails: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         TopBarAction(
@@ -782,6 +861,10 @@ private fun LiveOverflowMenu(actions: LiveActions) {
             OverflowItem(R.string.live_menu_probe, FieldTapIcons.Search) {
                 expanded = false
                 actions.onOpenProbe()
+            }
+            OverflowItem(R.string.live_walk_mode_details_action, FieldTapIcons.Walk) {
+                expanded = false
+                onWalkModeDetails()
             }
             OverflowItem(R.string.live_menu_settings, FieldTapIcons.Tune) {
                 expanded = false
@@ -815,14 +898,18 @@ private class LiveParts(
     val requestPreciseLocation: () -> Unit,
     val openLocationSettings: () -> Unit,
     val openWifiSettings: () -> Unit,
+    /** Beside the session buttons in a short, wide window: the age badge in the hero's header, low chart panels. */
+    val compact: Boolean,
 )
 
 /**
- * Upright on a phone: the serving cell with its RSRQ and SINR on one row, then the cadence, network and GPS state in one
- * card, then the 5-minute trend, so what an engineer glances at while walking is on the first screen; the cell details
- * and neighbours follow. From [Sizes.WideLayoutMinWidth] (landscape phones, tablets) two panes: the serving cell and its
- * details on one side, the cadence, network state and trend on the other, both in view. [actionsBeside], in a short
- * wide window, is a column of session buttons at the end.
+ * Upright on a phone: the serving cell (its RSRQ and SINR in one row, or one line in the hero when the cell reports
+ * neither), then the cadence, service, data, 5G and GPS chips, then the 5-minute trend, so what an engineer glances at
+ * while walking is on the first screen at font scale 1.0 on a Pixel 7, as ScreenTourTest asserts; the cadence details,
+ * the cell details and neighbours follow. From [Sizes.WideLayoutMinWidth] (landscape phones, tablets) two panes: the
+ * serving cell and its details on one side, the trend first on the other, then the chips and cadence details.
+ * [actionsBeside], in a short wide window, is the rail at the end: the bar's actions at its top, the session buttons at
+ * its bottom.
  */
 @Composable
 private fun LiveList(
@@ -845,6 +932,7 @@ private fun LiveList(
         requestPreciseLocation = requestPreciseLocation,
         openLocationSettings = { SystemSettings.open(context, SettingsTarget.LOCATION_SOURCE) },
         openWifiSettings = { SystemSettings.open(context, SettingsTarget.WIFI) },
+        compact = actionsBeside != null,
     )
     val gutter = screenGutter()
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
@@ -874,8 +962,9 @@ private fun LiveList(
                     contentPadding = PaddingValues(vertical = Spacing.Lg),
                     verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
                 ) {
-                    conditionsItem(parts)
                     chartItem(parts)
+                    statusChipsItem(parts)
+                    cadenceDetailsItem(parts)
                     limitsItem(parts)
                 }
                 if (actionsBeside != null) ActionColumn(actionsBeside)
@@ -892,8 +981,9 @@ private fun LiveList(
                 ) {
                     bannerItems(parts)
                     servingTilesItem(parts)
-                    conditionsItem(parts)
+                    statusChipsItem(parts)
                     chartItem(parts)
+                    cadenceDetailsItem(parts)
                     servingCardItem(parts)
                     neighboursItem(parts)
                     limitsItem(parts)
@@ -904,15 +994,14 @@ private fun LiveList(
     }
 }
 
-/** The session buttons beside the content, at the bottom of their column where a thumb reaches them. */
+/** The rail beside the content: the bar's actions at its top, the session buttons at its bottom where a thumb reaches them. */
 @Composable
 private fun ActionColumn(content: @Composable () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .width(Sizes.ActionRailWidth)
             .fillMaxHeight()
-            .padding(vertical = Spacing.Lg),
-        contentAlignment = Alignment.BottomCenter,
+            .padding(vertical = Spacing.Sm),
     ) {
         content()
     }
@@ -1017,7 +1106,19 @@ private fun LazyListScope.bannerItems(parts: LiveParts) {
 
 private fun LazyListScope.servingTilesItem(parts: LiveParts) {
     item(key = "serving-tiles") {
-        ServingTiles(live = parts.state.live, labels = parts.labels, modifier = Modifier.contentWidth())
+        ServingTiles(live = parts.state.live, labels = parts.labels, ageInHeader = parts.compact, modifier = Modifier.contentWidth())
+    }
+}
+
+private fun LazyListScope.statusChipsItem(parts: LiveParts) {
+    item(key = "status-chips") {
+        StatusChips(live = parts.state.live, modifier = Modifier.contentWidth())
+    }
+}
+
+private fun LazyListScope.cadenceDetailsItem(parts: LiveParts) {
+    item(key = "cadence-details") {
+        CadenceDetailsCard(live = parts.state.live, notes = parts.notes, modifier = Modifier.contentWidth())
     }
 }
 
@@ -1029,29 +1130,19 @@ private fun LazyListScope.servingCardItem(parts: LiveParts) {
     }
 }
 
+/** The trend in a card without a title: "last 5 min" sits beside the RSRP title, which saves a row. */
 private fun LazyListScope.chartItem(parts: LiveParts) {
     item(key = "chart") {
         val live = parts.state.live
-        SectionCard(title = stringResource(R.string.live_section_chart), modifier = Modifier.contentWidth()) {
+        SectionCard(modifier = Modifier.contentWidth()) {
             SignalChart(
                 rsrp = live.rsrpSeries,
                 sinr = live.sinrSeries,
                 nowElapsedMs = live.nowElapsedMs,
                 gapThresholdMs = ChartMath.gapThresholdMs(live.shortInterval),
+                compact = parts.compact,
             )
         }
-    }
-}
-
-private fun LazyListScope.conditionsItem(parts: LiveParts) {
-    item(key = "conditions") {
-        ConditionsCard(
-            live = parts.state.live,
-            walkMode = parts.state.walkMode,
-            notes = parts.notes,
-            onWalkModeChange = parts.actions.onWalkModeChange,
-            modifier = Modifier.contentWidth(),
-        )
     }
 }
 
@@ -1074,7 +1165,7 @@ private fun LazyListScope.limitsItem(parts: LiveParts) {
 }
 
 @Composable
-private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, modifier: Modifier = Modifier) {
+private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, ageInHeader: Boolean, modifier: Modifier = Modifier) {
     val serving = live.serving
     val rsrpQuality = SignalScale.quality(SignalMetric.RSRP, serving?.rsrp)
     val rsrqQuality = SignalScale.quality(SignalMetric.RSRQ, serving?.rsrq)
@@ -1083,9 +1174,17 @@ private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, modifier:
     val absence = LivePresentation.servingAbsence(live)
     val problem = LivePresentation.servingProblem(live)
     val ageText = if (ageMs != null) stringResource(R.string.age_old, Formats.ageSeconds(ageMs)) else absenceBadge(absence)
-    // With a cell: its identity and operator, then why it may be ageing. Without: why there is none.
+    val rsrqLabel = stringResource(rsrqLabelRes(serving?.rat))
+    val sinrLabel = stringResource(sinrLabelRes(serving?.rat))
+    // A cell that reports neither gets one line in the hero, not a row of two tiles that only say so.
+    val neitherReported = serving != null && serving.rsrq == null && serving.sinr == null
+    // With a cell: its identity, its operator, what it does not report, then why it may be ageing. Without: why there is none.
     val supportingText = if (serving != null) {
-        listOfNotNull(servingSummary(serving), problem?.let { servingProblemLine(it) }).joinToString("\n")
+        listOfNotNull(
+            servingSummary(serving),
+            if (neitherReported) stringResource(R.string.live_rsrq_sinr_not_reported, rsrqLabel, sinrLabel) else null,
+            problem?.let { servingProblemLine(it) },
+        ).joinToString("\n")
     } else {
         absenceDetail(absence)
     }
@@ -1101,10 +1200,12 @@ private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, modifier:
             badge = live.badge,
             supportingText = supportingText,
             placeholder = UNKNOWN_VALUE,
+            ageInHeader = ageInHeader,
             modifier = Modifier.fillMaxWidth(),
         ) {
             SignalBar(metric = SignalMetric.RSRP, value = serving?.rsrp, stateDescription = labels.of(rsrpQuality))
         }
+        if (neitherReported) return@Column
         // One row, whatever the width or font scale: two stacked tiles pushed the trend and the cadence off the first screen.
         val notReported = stringResource(R.string.live_not_reported)
         Row(
@@ -1114,7 +1215,7 @@ private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, modifier:
             horizontalArrangement = Arrangement.spacedBy(Spacing.Md),
         ) {
             SecondaryMetricTile(
-                label = stringResource(rsrqLabelRes(serving?.rat)),
+                label = rsrqLabel,
                 value = serving?.rsrq?.toString(),
                 unit = stringResource(R.string.unit_db),
                 quality = rsrqQuality,
@@ -1126,7 +1227,7 @@ private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, modifier:
                     .fillMaxHeight(),
             )
             SecondaryMetricTile(
-                label = stringResource(sinrLabelRes(serving?.rat)),
+                label = sinrLabel,
                 value = serving?.sinr?.toString(),
                 unit = stringResource(R.string.unit_db),
                 quality = sinrQuality,
@@ -1157,30 +1258,35 @@ private fun secondaryQualityLabel(
 @Composable
 private fun ServingCard(live: LiveState, labels: SignalQualityLabels, modifier: Modifier = Modifier) {
     val serving = live.serving ?: return
+    val dense = Sizes.KeyValueRowDenseMinHeight
     SectionCard(
         title = stringResource(R.string.live_section_serving),
         icon = FieldTapIcons.SignalBars,
         modifier = modifier,
+        itemGap = Spacing.Sm,
     ) {
         val network = LivePresentation.servingNetwork(serving, live.nsaLeg)
         if (network != null) {
-            KeyValueRow(key = stringResource(R.string.live_row_network), value = stringResource(networkRes(network)), tabular = false)
+            KeyValueRow(key = stringResource(R.string.live_row_network), value = stringResource(networkRes(network)), tabular = false, minHeight = dense)
         }
-        KeyValueRow(key = stringResource(R.string.live_row_operator), value = operatorText(serving), tabular = false)
-        KeyValueRow(key = stringResource(R.string.live_row_pci), value = serving.pci?.toString() ?: UNKNOWN_VALUE)
+        KeyValueRow(key = stringResource(R.string.live_row_operator), value = operatorText(serving), tabular = false, minHeight = dense)
+        KeyValueRow(key = stringResource(R.string.live_row_pci), value = serving.pci?.toString() ?: UNKNOWN_VALUE, minHeight = dense)
         KeyValueRow(
             key = stringResource(R.string.live_row_channel),
             value = serving.arfcn?.let { stringResource(channelRes(serving.rat), it) } ?: UNKNOWN_VALUE,
+            minHeight = dense,
         )
         KeyValueRow(
             key = stringResource(R.string.live_row_band),
             value = serving.band?.let { if (serving.rat == Rat.NR) "n$it" else it.toString() } ?: UNKNOWN_VALUE,
+            minHeight = dense,
         )
         val report = LivePresentation.newerSignalReport(serving, live.signal, live.nowElapsedMs)
         if (report != null) {
             KeyValueRow(
                 key = stringResource(R.string.live_row_signal_report),
                 value = stringResource(R.string.live_signal_report_value, report.rsrpDbm, Formats.ageSeconds(report.ageMs)),
+                minHeight = dense,
             )
         }
         val leg = live.nsaLeg
@@ -1201,78 +1307,41 @@ private fun ServingCard(live: LiveState, labels: SignalQualityLabels, modifier: 
 }
 
 /**
- * How and how often Android measures, in one card: the cadence and its reason, the service, data, 5G-icon and GPS chips,
- * the measured interval and satellites, and walk mode with a one-line summary; its full explanation opens in a dialog.
+ * Why Android measures at the cadence the chips show, and how it is going: the reason, the measured time between fresh
+ * samples, the satellites, and any listener that did not register. Below the trend, in dense rows: none of it changes
+ * what an engineer does while walking.
  */
 @Composable
-private fun ConditionsCard(
-    live: LiveState,
-    walkMode: Boolean,
-    notes: List<ListenerNote>,
-    onWalkModeChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var walkModeDetailsOpen by rememberSaveable { mutableStateOf(false) }
+private fun CadenceDetailsCard(live: LiveState, notes: List<ListenerNote>, modifier: Modifier = Modifier) {
+    val dense = Sizes.KeyValueRowDenseMinHeight
     SectionCard(
-        title = stringResource(R.string.live_section_conditions),
+        title = stringResource(R.string.live_section_cadence_details),
         icon = FieldTapIcons.Timer,
         modifier = modifier,
+        itemGap = Spacing.Sm,
     ) {
-        CadenceIndicator(
-            intervalText = stringResource(
-                when (live.shortInterval) {
-                    true -> R.string.live_cadence_short
-                    false -> R.string.live_cadence_long
-                    null -> R.string.live_cadence_unknown
-                },
-            ),
-            shortInterval = live.shortInterval,
-            reason = stringResource(cadenceReasonRes(LivePresentation.cadenceReason(live.conditions))),
-            modifier = Modifier.fillMaxWidth(),
+        KeyValueRow(
+            key = stringResource(R.string.live_row_cadence_reason),
+            value = stringResource(cadenceReasonRes(LivePresentation.cadenceReason(live.conditions))),
+            tabular = false,
+            minHeight = dense,
         )
-        NetworkChips(live)
         KeyValueRow(
             key = stringResource(R.string.live_row_measured_interval),
             value = live.recentFreshIntervalMs?.let { stringResource(R.string.seconds_value, DisplayTime.seconds(it)) } ?: UNKNOWN_VALUE,
+            minHeight = dense,
         )
         val gnss = live.gnss
         if (gnss != null) {
             KeyValueRow(
                 key = stringResource(R.string.live_row_satellites),
                 value = stringResource(R.string.live_satellites_value, gnss.satellitesUsedInFix, gnss.satellitesVisible),
+                minHeight = dense,
             )
-        }
-        ToggleRow(
-            title = stringResource(R.string.live_walk_mode),
-            checked = walkMode,
-            onCheckedChange = onWalkModeChange,
-            supportingText = stringResource(R.string.live_walk_mode_supporting),
-            icon = FieldTapIcons.Walk,
-        )
-        TextButton(
-            onClick = { walkModeDetailsOpen = true },
-            modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
-        ) {
-            Icon(imageVector = FieldTapIcons.Info, contentDescription = null, modifier = Modifier.size(Sizes.IconSmall))
-            Spacer(modifier = Modifier.width(Spacing.Sm))
-            Text(text = stringResource(R.string.live_walk_mode_details_action))
         }
         for (note in notes) {
             ListenerNoteLine(note)
         }
-    }
-    if (walkModeDetailsOpen) {
-        AlertDialog(
-            onDismissRequest = { walkModeDetailsOpen = false },
-            confirmButton = {
-                TextButton(onClick = { walkModeDetailsOpen = false }) {
-                    Text(text = stringResource(R.string.live_walk_mode_details_close))
-                }
-            },
-            icon = { Icon(imageVector = FieldTapIcons.Walk, contentDescription = null) },
-            title = { Text(text = stringResource(R.string.live_walk_mode)) },
-            text = { Text(text = stringResource(R.string.live_walk_mode_details)) },
-        )
     }
 }
 
@@ -1301,18 +1370,33 @@ private fun ListenerNoteLine(note: ListenerNote) {
     }
 }
 
-/** Service, mobile data, the 5G icon and GPS, as chips. */
+/**
+ * The cadence, service, mobile data, the 5G icon and GPS, as chips in one flowing group under the serving cell, outside
+ * any card. The cadence's reason is in the cadence details below the trend; a chip holds only a short state.
+ */
 @Composable
-private fun NetworkChips(live: LiveState) {
+private fun StatusChips(live: LiveState, modifier: Modifier = Modifier) {
     val service = LivePresentation.serviceChip(live.service)
     val data = LivePresentation.dataChip(live.data)
     val dataNetwork = LivePresentation.dataNetworkName(live.data)
     val fiveG = LivePresentation.fiveGIcon(live.display)
     val gps = LivePresentation.gpsChip(live.lastFix, live.nowElapsedMs)
     FlowRow(
+        modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
         verticalArrangement = Arrangement.spacedBy(Spacing.Sm),
     ) {
+        StatusChip(
+            text = stringResource(
+                when (live.shortInterval) {
+                    true -> R.string.live_cadence_short
+                    false -> R.string.live_cadence_long
+                    null -> R.string.live_cadence_unknown
+                },
+            ),
+            tone = cadenceTone(live.shortInterval),
+            icon = FieldTapIcons.Timer,
+        )
         StatusChip(text = stringResource(serviceRes(service)), tone = service.tone)
         StatusChip(
             text = if (data == DataChip.CONNECTED && dataNetwork != null) {
@@ -1399,26 +1483,38 @@ private fun LiveActionBar(
     }
 }
 
-/** The session buttons stacked, for the column beside the content in a short, wide window. */
+/**
+ * The rail beside the content in a short, wide window: walk mode, Sessions and the menu at its top, where the top bar would
+ * have held them, and the session buttons at its bottom, the Start button's label on one line under its icon.
+ */
 @Composable
 private fun LiveActionRail(
     state: LiveUiState,
+    actions: LiveActions,
     buttonState: SessionButtonState,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onMark: () -> Unit,
+    onWalkModeDetails: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
-        if (buttonState == SessionButtonState.RECORDING) {
-            LiveMarkButton(
-                state,
-                onMark,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = Sizes.PrimaryButtonHeight),
-            )
+    Column(modifier = Modifier.fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                LiveBarActions(state, actions, onWalkModeDetails)
+            }
         }
-        LiveSessionButton(state, buttonState, onStart, onStop, modifier = Modifier.fillMaxWidth())
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
+            if (buttonState == SessionButtonState.RECORDING) {
+                LiveMarkButton(
+                    state,
+                    onMark,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = Sizes.PrimaryButtonHeight),
+                )
+            }
+            LiveSessionButton(state, buttonState, onStart, onStop, modifier = Modifier.fillMaxWidth(), stacked = true)
+        }
     }
 }
 
@@ -1429,11 +1525,14 @@ private fun LiveSessionButton(
     onStart: () -> Unit,
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
+    stacked: Boolean = false,
 ) {
     val elapsedMs = (state.status as? SessionStatus.Recording)?.snapshot?.elapsedMs
     SessionButton(
         state = buttonState,
-        startLabel = stringResource(R.string.live_start),
+        startLabel = stringResource(if (stacked) R.string.live_start_short else R.string.live_start),
+        stacked = stacked,
+        startContentDescription = if (stacked) stringResource(R.string.live_start) else null,
         stopLabel = stringResource(R.string.live_stop),
         onStart = onStart,
         onStop = onStop,
@@ -1464,12 +1563,19 @@ private fun LiveMarkButton(state: LiveUiState, onMark: () -> Unit, modifier: Mod
     }
 }
 
+/**
+ * Name, the tests choice, note and place, then Start. Upright it is an alert dialog. In a window lower than
+ * [Sizes.ShortWindowMaxHeight] ([fullScreen], a phone in landscape) the alert's scrolling text slot cut the fields mid-glyph
+ * and hid the tests choice, so it fills the screen instead: a bar with Close, the title and Start, over a scrolling form,
+ * note and place side by side from [Sizes.WideLayoutMinWidth].
+ */
 @Composable
 private fun StartSessionDialog(
     tests: TestSettings?,
     testsDefaultOn: Boolean,
     walkMode: Boolean,
     nowWallMs: () -> Long,
+    fullScreen: Boolean,
     onDismiss: () -> Unit,
     onStart: (StartRequest) -> Unit,
 ) {
@@ -1480,25 +1586,39 @@ private fun StartSessionDialog(
     var place by rememberSaveable { mutableStateOf("") }
     var testsEnabled by rememberSaveable { mutableStateOf(testsDefaultOn) }
     val nameValid = name.isNotBlank()
-    val nameError = stringResource(R.string.live_field_name_error)
-    val placeSupporting = stringResource(R.string.live_field_place_supporting)
+    val start: () -> Unit = {
+        onStart(
+            StartRequest(
+                name = name.trim(),
+                note = note.trim().ifEmpty { null },
+                location = place.trim().ifEmpty { null },
+                testsEnabled = testsEnabled,
+                walkMode = walkMode,
+            ),
+        )
+    }
+    val fields: @Composable (Boolean) -> Unit = { notesSideBySide ->
+        StartSessionFields(
+            name = name,
+            onNameChange = { name = it.take(MAX_TEXT_LENGTH) },
+            note = note,
+            onNoteChange = { note = it.take(MAX_TEXT_LENGTH) },
+            place = place,
+            onPlaceChange = { place = it.take(MAX_TEXT_LENGTH) },
+            testsEnabled = testsEnabled,
+            onTestsChange = { testsEnabled = it },
+            tests = tests,
+            notesSideBySide = notesSideBySide,
+        )
+    }
+    if (fullScreen) {
+        FullScreenStartDialog(nameValid = nameValid, onDismiss = onDismiss, onStart = start, fields = fields)
+        return
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(
-                onClick = {
-                    onStart(
-                        StartRequest(
-                            name = name.trim(),
-                            note = note.trim().ifEmpty { null },
-                            location = place.trim().ifEmpty { null },
-                            testsEnabled = testsEnabled,
-                            walkMode = walkMode,
-                        ),
-                    )
-                },
-                enabled = nameValid,
-            ) {
+            TextButton(onClick = start, enabled = nameValid) {
                 Text(text = stringResource(R.string.live_start_confirm))
             }
         },
@@ -1507,58 +1627,145 @@ private fun StartSessionDialog(
         },
         title = { Text(text = stringResource(R.string.live_start_dialog_title)) },
         text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(Spacing.Sm),
-            ) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it.take(MAX_TEXT_LENGTH) },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(text = stringResource(R.string.live_field_name)) },
-                    supportingText = { if (!nameValid) Text(text = nameError) },
-                    isError = !nameValid,
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = note,
-                    onValueChange = { note = it.take(MAX_TEXT_LENGTH) },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(text = stringResource(R.string.live_field_note)) },
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = place,
-                    onValueChange = { place = it.take(MAX_TEXT_LENGTH) },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(text = stringResource(R.string.live_field_place)) },
-                    supportingText = { Text(text = placeSupporting) },
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
-                    singleLine = true,
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = Sizes.MinTouchTarget)
-                        .toggleable(value = testsEnabled, role = Role.Checkbox, onValueChange = { testsEnabled = it }),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.Md),
-                ) {
-                    Checkbox(checked = testsEnabled, onCheckedChange = null)
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = stringResource(R.string.live_tests_title), style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            text = tests?.let { testsTargetsText(it) } ?: stringResource(R.string.live_tests_supporting),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                fields(false)
             }
         },
     )
+}
+
+@Composable
+private fun FullScreenStartDialog(
+    nameValid: Boolean,
+    onDismiss: () -> Unit,
+    onStart: () -> Unit,
+    fields: @Composable (Boolean) -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val scroll = rememberScrollState()
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                FieldTapTopBar(
+                    title = stringResource(R.string.live_start_dialog_title),
+                    onNavigateUp = onDismiss,
+                    navigateUpContentDescription = stringResource(R.string.action_cancel),
+                    navigationIcon = FieldTapIcons.Close,
+                    actions = {
+                        TextButton(onClick = onStart, enabled = nameValid, modifier = Modifier.heightIn(min = Sizes.MinTouchTarget)) {
+                            Text(text = stringResource(R.string.live_start_confirm))
+                        }
+                    },
+                )
+                // A hairline under the bar once the form moves beneath it. Derived, so scrolling recomposes only when
+                // the form leaves or reaches the top, not at every pixel.
+                val scrolled by remember(scroll) { derivedStateOf { scroll.value > 0 } }
+                if (scrolled) SectionDivider()
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                ) {
+                    val wide = maxWidth >= Sizes.WideLayoutMinWidth
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(scroll)
+                            .imePadding()
+                            .padding(horizontal = screenGutter(), vertical = Spacing.Lg),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Box(modifier = Modifier.contentWidth()) { fields(wide) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StartSessionFields(
+    name: String,
+    onNameChange: (String) -> Unit,
+    note: String,
+    onNoteChange: (String) -> Unit,
+    place: String,
+    onPlaceChange: (String) -> Unit,
+    testsEnabled: Boolean,
+    onTestsChange: (Boolean) -> Unit,
+    tests: TestSettings?,
+    notesSideBySide: Boolean,
+) {
+    val nameValid = name.isNotBlank()
+    val nameError = stringResource(R.string.live_field_name_error)
+    val placeSupporting = stringResource(R.string.live_field_place_supporting)
+    val noteField: @Composable (Modifier) -> Unit = { fieldModifier ->
+        OutlinedTextField(
+            value = note,
+            onValueChange = onNoteChange,
+            modifier = fieldModifier,
+            label = { Text(text = stringResource(R.string.live_field_note)) },
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
+            singleLine = true,
+        )
+    }
+    val placeField: @Composable (Modifier) -> Unit = { fieldModifier ->
+        OutlinedTextField(
+            value = place,
+            onValueChange = onPlaceChange,
+            modifier = fieldModifier,
+            label = { Text(text = stringResource(R.string.live_field_place)) },
+            supportingText = { Text(text = placeSupporting) },
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
+            singleLine = true,
+        )
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
+        OutlinedTextField(
+            value = name,
+            onValueChange = onNameChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(text = stringResource(R.string.live_field_name)) },
+            // Null while the name is valid: an always-present slot reserved an empty line and doubled the gap after Name.
+            supportingText = if (nameValid) null else { { Text(text = nameError) } },
+            isError = !nameValid,
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
+            singleLine = true,
+        )
+        // Right after the name: the choice that uses mobile data is never below the dialog's fold.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = Sizes.MinTouchTarget)
+                .toggleable(value = testsEnabled, role = Role.Checkbox, onValueChange = onTestsChange),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.Md),
+        ) {
+            Checkbox(checked = testsEnabled, onCheckedChange = null)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.live_tests_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // Never cut short: it says what the tests reach over mobile data.
+                Text(
+                    text = tests?.let { testsTargetsText(it) } ?: stringResource(R.string.live_tests_supporting),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (notesSideBySide) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.Md)) {
+                noteField(Modifier.weight(1f))
+                placeField(Modifier.weight(1f))
+            }
+        } else {
+            noteField(Modifier.fillMaxWidth())
+            placeField(Modifier.fillMaxWidth())
+        }
+    }
 }
 
 @Composable
@@ -1864,10 +2071,15 @@ private fun servingProblemLine(problem: ServingAbsence): String? = when (problem
     ServingAbsence.WaitingForAnswer, is ServingAbsence.NoLteOrNrServing -> null
 }
 
-/** "LTE · PCI 212 · EARFCN 66786 · band 66 · Verizon · 311480": the cell, then who runs it. */
+/**
+ * "LTE · PCI 212 · EARFCN 66786 · band 66", then "Verizon · 311480" on a line of its own: the cell, then who runs it. The
+ * explicit break keeps a separator from ending a line where the two did not fit on one ("…band n41 ·").
+ */
 @Composable
-private fun servingSummary(cell: LiveCell): String =
-    (listOf(cellIdentity(cell)) + listOfNotNull(cell.operator, cell.plmn)).joinToString(stringResource(R.string.value_separator))
+private fun servingSummary(cell: LiveCell): String {
+    val operator = listOfNotNull(cell.operator, cell.plmn).joinToString(stringResource(R.string.value_separator))
+    return listOf(cellIdentity(cell), operator).filter { it.isNotEmpty() }.joinToString("\n")
+}
 
 /** What the tests reach, as Settings has them, under the Start dialog's tests choice. */
 @Composable
@@ -1882,29 +2094,30 @@ private fun testsTargetsText(tests: TestSettings): String {
     }
 }
 
-/** The running session's state, its fresh samples and GPS, in one line under the top bar. */
+/**
+ * The running session's state and GPS in one line under the top bar, whatever the width or font scale: "Recording · 1,234
+ * samples" while it records, otherwise only what stops it ("Not recording: location off", "Waiting for a fix"), because a
+ * sample count beside a reason wrapped mid-phrase. Internal for RecordingStripTest.
+ */
 @Composable
-private fun RecordingStatusStrip(strip: RecordingStrip, modifier: Modifier = Modifier) {
+internal fun RecordingStatusStrip(strip: RecordingStrip, modifier: Modifier = Modifier) {
     val tone = when (strip.state) {
         RecordingState.RECORDING -> StatusTone.SUCCESS
         RecordingState.LOCATION_OFF -> StatusTone.ERROR
         RecordingState.PAUSED_IN_ZONE, RecordingState.WAITING_FOR_LOCATION, RecordingState.SAVING -> StatusTone.INFO
     }
     val family = FieldTapDesign.colors.status(tone)
-    val stateText = stringResource(
-        when (strip.state) {
-            RecordingState.RECORDING -> R.string.live_recording
-            RecordingState.PAUSED_IN_ZONE -> R.string.live_strip_paused
-            RecordingState.WAITING_FOR_LOCATION -> R.string.live_strip_waiting
-            RecordingState.LOCATION_OFF -> R.string.live_strip_location_off
-            RecordingState.SAVING -> R.string.live_stopping
-        },
-    )
-    val samples = pluralStringResource(
-        R.plurals.live_strip_samples,
-        strip.freshSamples.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
-        strip.freshSamples,
-    )
+    val stateText = when (strip.state) {
+        RecordingState.RECORDING -> pluralStringResource(
+            R.plurals.live_strip_recording,
+            strip.freshSamples.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt(),
+            Formats.count(strip.freshSamples),
+        )
+        RecordingState.PAUSED_IN_ZONE -> stringResource(R.string.live_strip_paused)
+        RecordingState.WAITING_FOR_LOCATION -> stringResource(R.string.live_strip_waiting)
+        RecordingState.LOCATION_OFF -> stringResource(R.string.live_strip_location_off)
+        RecordingState.SAVING -> stringResource(R.string.live_strip_saving)
+    }
     val gpsText = stringResource(
         when (strip.gps) {
             StripGps.FIX -> R.string.live_strip_gps_fix
@@ -1912,30 +2125,52 @@ private fun RecordingStatusStrip(strip: RecordingStrip, modifier: Modifier = Mod
             StripGps.WAITING -> R.string.live_strip_gps_waiting
         },
     )
+    val gutter = screenGutter()
+    val stateStyle = MaterialTheme.typography.labelLarge.tabular()
+    val gpsStyle = MaterialTheme.typography.labelLarge
+    val measurer = rememberTextMeasurer()
     Surface(color = family.container, contentColor = family.onContainer, modifier = modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .semantics(mergeDescendants = true) {}
-                .padding(horizontal = screenGutter(), vertical = Spacing.Xs),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
-        ) {
-            Icon(imageVector = statusIcon(tone), contentDescription = null, modifier = Modifier.size(Sizes.IconSmall))
-            Text(
-                text = stateText + stringResource(R.string.value_separator) + samples,
-                style = MaterialTheme.typography.labelLarge.tabular(),
-                modifier = Modifier.weight(1f),
-            )
-            Icon(
-                imageVector = if (strip.gps == StripGps.FIX) FieldTapIcons.GpsFixed else FieldTapIcons.GpsOff,
-                contentDescription = null,
-                modifier = Modifier.size(Sizes.IconSmall),
-            )
-            Text(text = gpsText, style = MaterialTheme.typography.labelLarge)
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            // Where the state and the GPS word do not fit side by side (font scale 1.3 on a 360 dp phone), the word goes
+            // first: its icon stays, and TalkBack reads the word as the icon's description. Only then does the state shrink.
+            val fixedPx = with(LocalDensity.current) { (gutter * 2 + Sizes.IconSmall * 2 + Spacing.Sm * 3).roundToPx() }
+            val stateWidth = measurer.measure(stateText, stateStyle, maxLines = 1).size.width
+            val gpsWidth = measurer.measure(gpsText, gpsStyle, maxLines = 1).size.width
+            val gpsWord = !constraints.hasBoundedWidth || stateWidth + gpsWidth + fixedPx <= constraints.maxWidth
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Sizes.StatusStripMinHeight)
+                    .semantics(mergeDescendants = true) {}
+                    .padding(horizontal = gutter, vertical = Spacing.Xs),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
+            ) {
+                Icon(imageVector = statusIcon(tone), contentDescription = null, modifier = Modifier.size(Sizes.IconSmall))
+                Text(
+                    text = stateText,
+                    style = stateStyle,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    autoSize = TextAutoSize.StepBased(minFontSize = MIN_STRIP_TEXT_SP.sp, maxFontSize = stateStyle.fontSize, stepSize = 0.5.sp),
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = if (strip.gps == StripGps.FIX) FieldTapIcons.GpsFixed else FieldTapIcons.GpsOff,
+                    contentDescription = if (gpsWord) null else gpsText,
+                    modifier = Modifier.size(Sizes.IconSmall),
+                )
+                if (gpsWord) {
+                    Text(text = gpsText, style = gpsStyle, maxLines = 1)
+                }
+            }
         }
     }
 }
+
+/** The smallest the strip's state shrinks to, once its GPS word has gone, before it would be cut short. */
+private const val MIN_STRIP_TEXT_SP: Float = 11f
 
 /** "LTE · PCI 212 · EARFCN 66786 · band 66". */
 @Composable

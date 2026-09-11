@@ -6,9 +6,11 @@ import com.fieldtap.core.session.HeartbeatRecord
 import com.fieldtap.core.session.SessionPaths
 import com.fieldtap.core.session.SessionRecovery
 import com.fieldtap.core.session.SessionStore
+import com.fieldtap.core.session.SignalSummary
 import com.fieldtap.core.session.StoragePolicy
 import com.fieldtap.core.time.ManualClock
 import com.fieldtap.format.LocationPrecision
+import com.fieldtap.format.ServingRat
 import com.fieldtap.format.SessionFile
 import java.io.File
 import kotlinx.coroutines.runBlocking
@@ -114,6 +116,37 @@ class FileSessionRepositoryTest {
         assertEquals(100, detail.rowCounts[SessionFile.KPI])
         assertEquals(7, detail.rowCounts[SessionFile.EVENTS])
         assertEquals(2, detail.rowCounts[SessionFile.TRAFFIC])
+    }
+
+    @Test
+    fun listAndDetailSummariseTheSignalOfEachStoppedSession() {
+        copyGolden(GOLDEN_NAME)
+        copyGolden(OPEN_ACTIVE) { openJson(it) }
+        val repository = repository(active = OPEN_ACTIVE)
+
+        val sessions = runBlocking { repository.list() }.associateBy { it.dirName }
+
+        // The golden kpi.csv: 54 LTE values with median -89 dBm, none below -105 dBm, beside 46 NR leg values.
+        val golden = SignalSummary(ServingRat.LTE, samples = 54, medianRsrpDbm = -89, belowFairPct = 0.0)
+        assertEquals(golden, sessions.getValue(GOLDEN_NAME).signal)
+        assertNull("the running session's kpi.csv is still growing", sessions.getValue(OPEN_ACTIVE).signal)
+        assertEquals(golden, runBlocking { repository.detail(GOLDEN_NAME) }?.summary?.signal)
+        assertEquals(golden, runBlocking { repository.detail(OPEN_ACTIVE) }?.summary?.signal)
+    }
+
+    @Test
+    fun theSignalIsReadAgainWhenKpiCsvChanges() {
+        val directory = copyGolden(GOLDEN_NAME)
+        val repository = repository()
+        assertEquals(ServingRat.LTE, runBlocking { repository.list() }.single().signal?.rat)
+
+        val kpi = File(directory, SessionFile.KPI.fileName)
+        val lines = kpi.readText(Charsets.UTF_8).split("\r\n").filter { it.isNotEmpty() }
+        kpi.writeText((listOf(lines.first()) + lines.drop(1).filter { it.split(',')[2] == "nr" }).joinToString("") { it + "\r\n" })
+
+        val signal = runBlocking { repository.list() }.single().signal
+        assertEquals(ServingRat.NR, signal?.rat)
+        assertEquals(-96, signal?.medianRsrpDbm)
     }
 
     @Test

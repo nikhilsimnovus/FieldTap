@@ -20,18 +20,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -41,6 +45,7 @@ import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.ShapeRoles
 import com.fieldtap.ui.theme.SignalMetric
 import com.fieldtap.ui.theme.SignalScale
+import com.fieldtap.ui.theme.SignalZone
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
 
@@ -63,12 +68,19 @@ data class SignalChartLabels(
     val noData: String,
     /** In place of a panel whose values the serving cell does not report: "Not reported by this cell". */
     val notReported: String = noData,
+    /** Beside the RSRP title, the window the chart covers: "last 5 min". Null shows nothing there. */
+    val window: String? = null,
 )
 
 /**
- * Five minutes of serving RSRP and SINR, as two panels on one time axis (RSRP -140..-40 dBm, SINR
- * -25..40 dB, the report's axes). Dashed reference lines sit at the signal scale's thresholds, with
- * the report's -105 dBm line (and 0 dB for SINR) emphasised. Lines break at sampling gaps.
+ * Five minutes of serving RSRP and SINR, as two panels on one time axis. Behind each line the signal scale's four zones
+ * are flat bands in their level's colour; dashed reference lines sit at the thresholds, the report's -105 dBm line (0 dB
+ * for SINR) stronger. The thresholds are labelled as far as the labels fit apart, the key line's first
+ * ([ChartMath.labelOrder]). Lines break at sampling gaps.
+ *
+ * [rsrpRange] and [sinrRange] default to the report's axes (RSRP -140..-40 dBm, SINR -25..40 dB); Live passes
+ * `ChartMath.fittedRange`, so a steady signal is not squeezed into a fifth of the panel. With [sinrReported] false the SINR
+ * panel folds to one line; give the RSRP panel the room with [rsrpPanelHeight].
  *
  * TalkBack reads [summary] as the whole chart, for example "RSRP over the last 5 minutes: latest -92
  * dBm, lowest -104, highest -85. SINR: latest 12 dB, lowest 3, highest 18." Build it from
@@ -87,6 +99,10 @@ fun SignalHistoryChart(
     windowMs: Long = LiveStateReducer.WINDOW_MS,
     gapThresholdMs: Long = ChartMath.DEFAULT_GAP_THRESHOLD_MS,
     sinrReported: Boolean = true,
+    rsrpRange: IntRange = SignalScale.RSRP_DISPLAY_RANGE,
+    sinrRange: IntRange = SignalScale.SINR_DISPLAY_RANGE,
+    rsrpPanelHeight: Dp = Sizes.ChartPanelHeight,
+    sinrPanelHeight: Dp = Sizes.ChartPanelHeight,
 ) {
     val colors = FieldTapDesign.colors
     Column(
@@ -95,17 +111,25 @@ fun SignalHistoryChart(
             .clearAndSetSemantics { contentDescription = summary },
         verticalArrangement = Arrangement.spacedBy(Spacing.Sm),
     ) {
-        ChartPanelHeader(labels.rsrpTitle, labels.rsrpUnit, ChartMath.stats(rsrp, nowElapsedMs, windowMs), colors.chartRsrp)
+        ChartPanelHeader(
+            title = labels.rsrpTitle,
+            unit = labels.rsrpUnit,
+            stats = ChartMath.stats(rsrp, nowElapsedMs, windowMs),
+            lineColor = colors.chartRsrp,
+            window = labels.window,
+        )
         TimeSeriesChart(
             points = rsrp,
             nowElapsedMs = nowElapsedMs,
-            range = SignalScale.RSRP_DISPLAY_RANGE,
+            range = rsrpRange,
             lineColor = colors.chartRsrp,
             referenceLines = SignalScale.RSRP_THRESHOLDS.boundaries,
             keyReference = SignalScale.keyReference(SignalMetric.RSRP),
             windowMs = windowMs,
             gapThresholdMs = gapThresholdMs,
+            height = rsrpPanelHeight,
             noDataText = labels.noData,
+            zones = SignalScale.zones(SignalMetric.RSRP, rsrpRange),
         )
         Spacer(modifier = Modifier.height(Spacing.Xs))
         if (sinrReported) {
@@ -113,13 +137,15 @@ fun SignalHistoryChart(
             TimeSeriesChart(
                 points = sinr,
                 nowElapsedMs = nowElapsedMs,
-                range = SignalScale.SINR_DISPLAY_RANGE,
+                range = sinrRange,
                 lineColor = colors.chartSinr,
                 referenceLines = SignalScale.SINR_THRESHOLDS.boundaries,
                 keyReference = SignalScale.keyReference(SignalMetric.SINR),
                 windowMs = windowMs,
                 gapThresholdMs = gapThresholdMs,
+                height = sinrPanelHeight,
                 noDataText = labels.noData,
+                zones = SignalScale.zones(SignalMetric.SINR, sinrRange),
             )
         } else {
             // An empty panel would say "not yet" for a value this cell never reports: one line says so instead.
@@ -136,20 +162,38 @@ fun SignalHistoryChart(
 }
 
 @Composable
-private fun ChartPanelHeader(title: String, unit: String, stats: SeriesStats?, lineColor: Color, trailing: String? = null) {
+private fun ChartPanelHeader(
+    title: String,
+    unit: String,
+    stats: SeriesStats?,
+    lineColor: Color,
+    window: String? = null,
+    trailing: String? = null,
+) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
         Box(
             modifier = Modifier
                 .size(width = 14.dp, height = 3.dp)
                 .background(lineColor, ShapeRoles.Bar),
         )
-        Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        if (window != null) {
+            Text(
+                text = window,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
         Spacer(modifier = Modifier.weight(1f))
         if (stats != null) {
             Text(
                 text = "${stats.latest} $unit",
                 style = FieldTapDesign.numeric.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
             )
         } else if (trailing != null) {
             Text(text = trailing, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -159,9 +203,11 @@ private fun ChartPanelHeader(title: String, unit: String, stats: SeriesStats?, l
 
 /**
  * One chart panel: a line of [points] against time over [windowMs] ending at [nowElapsedMs], on a
- * vertical [range], with dashed [referenceLines] labelled by their values and [keyReference] drawn
- * stronger. Single points between gaps are dots; the newest point has a marker. Draws in LTR in every
- * locale, like the report. Decorative for TalkBack: the caller describes it (see [SignalHistoryChart]).
+ * vertical [range], over [zones] drawn as flat bands in their level's colour, with dashed [referenceLines] and
+ * [keyReference] drawn stronger. The lines are labelled by their values in [ChartMath.labelOrder]; a label that would
+ * come within 2 dp of one already drawn is left out, so labels never overlap at any panel height or font scale. Single
+ * points between gaps are dots; the newest point has a marker. Draws in LTR in every locale, like the report. Decorative
+ * for TalkBack: the caller describes it (see [SignalHistoryChart]).
  */
 @Composable
 fun TimeSeriesChart(
@@ -176,8 +222,10 @@ fun TimeSeriesChart(
     gapThresholdMs: Long = ChartMath.DEFAULT_GAP_THRESHOLD_MS,
     height: Dp = Sizes.ChartPanelHeight,
     noDataText: String? = null,
+    zones: List<SignalZone> = emptyList(),
 ) {
     val colors = FieldTapDesign.colors
+    val signal = FieldTapDesign.signal
     val panel = MaterialTheme.colorScheme.surfaceContainerLowest
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
     val axisStyle = FieldTapDesign.numeric.axis
@@ -185,7 +233,9 @@ fun TimeSeriesChart(
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val lines = referenceLines.filter { it in range }
-    val labelLayouts = remember(lines, axisStyle, density) { lines.map { measurer.measure(it.toString(), axisStyle) } }
+    val labelLayouts = remember(lines, axisStyle, density) { lines.associateWith { measurer.measure(it.toString(), axisStyle) } }
+    val labelOrder = remember(lines, keyReference) { ChartMath.labelOrder(lines, keyReference) }
+    val zoneColors = zones.map { signal.of(it.quality).fill.copy(alpha = ZONE_ALPHA) }
     val noDataLayout = remember(noDataText, noDataStyle, density) { noDataText?.let { measurer.measure(it, noDataStyle) } }
     val segments = remember(points, nowElapsedMs, windowMs, gapThresholdMs) {
         ChartMath.segments(points, nowElapsedMs, windowMs, gapThresholdMs)
@@ -196,8 +246,9 @@ fun TimeSeriesChart(
             .fillMaxWidth()
             .height(height),
     ) {
-        drawRoundRect(color = panel, cornerRadius = CornerRadius(PanelCornerRadius.toPx()))
-        val labelWidth = labelLayouts.maxOfOrNull { it.size.width }?.toFloat() ?: 0f
+        val corner = CornerRadius(PanelCornerRadius.toPx())
+        drawRoundRect(color = panel, cornerRadius = corner)
+        val labelWidth = labelLayouts.values.maxOfOrNull { it.size.width }?.toFloat() ?: 0f
         val left = Spacing.Sm.toPx() + labelWidth + if (labelWidth > 0f) Spacing.Xs.toPx() else 0f
         val right = size.width - Spacing.Sm.toPx()
         val top = Spacing.Sm.toPx()
@@ -207,8 +258,19 @@ fun TimeSeriesChart(
         fun x(elapsedMs: Long) = left + ChartMath.xFraction(elapsedMs, nowElapsedMs, windowMs) * plotWidth
         fun y(value: Int) = bottom - ChartMath.yFraction(value, range) * plotHeight
 
+        if (zones.isNotEmpty()) {
+            // Clipped to the panel's rounded corners, which the plot's own corners would otherwise poke through.
+            val outline = Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, size.height, corner)) }
+            clipPath(outline) {
+                zones.forEachIndexed { i, zone ->
+                    val zoneTop = y(zone.to)
+                    drawRect(color = zoneColors[i], topLeft = Offset(left, zoneTop), size = Size(plotWidth, y(zone.from) - zoneTop))
+                }
+            }
+        }
+
         val dash = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))
-        lines.forEachIndexed { i, value ->
+        for (value in lines) {
             val key = value == keyReference
             val yy = y(value)
             drawLine(
@@ -218,12 +280,24 @@ fun TimeSeriesChart(
                 strokeWidth = if (key) 1.5.dp.toPx() else 1.dp.toPx(),
                 pathEffect = dash,
             )
-            val layout = labelLayouts[i]
+        }
+        val grow = LabelGap.toPx()
+        val drawnTops = ArrayList<Float>(labelOrder.size)
+        val drawnBottoms = ArrayList<Float>(labelOrder.size)
+        for (value in labelOrder) {
+            val layout = labelLayouts.getValue(value)
+            val labelHeight = layout.size.height.toFloat()
+            val labelTop = (y(value) - labelHeight / 2f).coerceIn(0f, (size.height - labelHeight).coerceAtLeast(0f))
+            val labelBottom = labelTop + labelHeight
+            val collides = drawnTops.indices.any { i -> ChartMath.labelCollides(labelTop, labelBottom, drawnTops[i], drawnBottoms[i], grow) }
+            if (collides) continue
             drawText(
                 textLayoutResult = layout,
                 color = labelColor,
-                topLeft = Offset(Spacing.Sm.toPx() + labelWidth - layout.size.width, yy - layout.size.height / 2f),
+                topLeft = Offset(Spacing.Sm.toPx() + labelWidth - layout.size.width, labelTop),
             )
+            drawnTops += labelTop
+            drawnBottoms += labelBottom
         }
 
         if (segments.isEmpty()) {
@@ -262,6 +336,12 @@ fun TimeSeriesChart(
 /** The chart panel's corner, matching [ShapeRoles.Tile]. */
 private val PanelCornerRadius: Dp = 14.dp
 
+/** How far apart two threshold labels must stay; a label closer to one already drawn is left out. */
+private val LabelGap: Dp = Spacing.Xxs
+
+/** The zones sit behind the line as a hint of the scale, never as strong as the line or a level's swatch. */
+private const val ZONE_ALPHA: Float = 0.12f
+
 @FieldTapPreviews
 @Composable
 private fun SignalHistoryChartPreview() {
@@ -272,25 +352,27 @@ private fun SignalHistoryChartPreview() {
     }
     val sinr = rsrp.map { ChartPoint(it.elapsedMs, (it.value + 110) / 2) }
     PreviewSurface {
-        SectionCard(title = "Last 5 minutes") {
+        SectionCard {
             SignalHistoryChart(
                 rsrp = rsrp,
                 sinr = sinr,
                 nowElapsedMs = now,
-                labels = SignalChartLabels("RSRP", "dBm", "SINR", "dB", "5 min ago", "Now", "No fresh samples yet"),
+                labels = SignalChartLabels("RSRP", "dBm", "SINR", "dB", "5 min ago", "Now", "No fresh samples yet", window = "last 5 min"),
                 summary = "RSRP over the last 5 minutes: latest -88 dBm.",
                 gapThresholdMs = ChartMath.gapThresholdMs(shortInterval = true),
+                rsrpRange = ChartMath.fittedRange(rsrp, now, LiveStateReducer.WINDOW_MS, SignalScale.RSRP_CHART_RANGE, SignalScale.RSRP_DISPLAY_RANGE),
             )
         }
         SectionCard(title = "Empty") {
             TimeSeriesChart(
                 points = emptyList(),
                 nowElapsedMs = now,
-                range = SignalScale.RSRP_DISPLAY_RANGE,
+                range = SignalScale.RSRP_CHART_RANGE,
                 lineColor = FieldTapDesign.colors.chartRsrp,
                 referenceLines = SignalScale.RSRP_THRESHOLDS.boundaries,
                 keyReference = -105,
                 noDataText = "No fresh samples yet",
+                zones = SignalScale.zones(SignalMetric.RSRP, SignalScale.RSRP_CHART_RANGE),
             )
         }
     }

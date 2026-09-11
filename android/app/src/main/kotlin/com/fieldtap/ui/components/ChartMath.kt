@@ -3,6 +3,7 @@ package com.fieldtap.ui.components
 import com.fieldtap.core.live.ChartPoint
 import com.fieldtap.core.radio.CadencePolicy
 import com.fieldtap.ui.theme.SignalScale
+import kotlin.math.abs
 
 /** Latest, lowest and highest value of a series in the chart window, for labels and TalkBack. */
 data class SeriesStats(val latest: Int, val min: Int, val max: Int, val count: Int)
@@ -65,6 +66,45 @@ object ChartMath {
 
     /** Vertical position: 0 at the bottom of [range], 1 at the top, clamped. */
     fun yFraction(value: Int, range: IntRange): Float = SignalScale.fraction(value, range)
+
+    /**
+     * The vertical range of a Live chart panel: at least [comfort], so the scale's thresholds keep their place, grown to
+     * take in every [visible] value with [margin] beyond the next multiple of [step], and never beyond [limits]. With
+     * nothing visible it is [comfort]. For RSRP: `min(-120, floor10(lowest) - 5)..max(-60, ceil10(highest) + 5)` within
+     * -140..-40.
+     */
+    fun fittedRange(
+        points: List<ChartPoint>,
+        nowElapsedMs: Long,
+        windowMs: Long,
+        comfort: IntRange,
+        limits: IntRange,
+        step: Int = 10,
+        margin: Int = 5,
+    ): IntRange {
+        val shown = stats(points, nowElapsedMs, windowMs) ?: return comfort
+        val lowest = Math.floorDiv(shown.min, step) * step - margin
+        val highest = -Math.floorDiv(-shown.max, step) * step + margin
+        val bottom = minOf(comfort.first, lowest).coerceAtLeast(limits.first)
+        val top = maxOf(comfort.last, highest).coerceAtMost(limits.last)
+        return bottom..top
+    }
+
+    /**
+     * The order reference labels are drawn in, so the ones that matter survive a crowded panel: [key] first, then the
+     * others from the farthest from it to the nearest. Without a key, the given order.
+     */
+    fun labelOrder(lines: List<Int>, key: Int?): List<Int> {
+        if (key == null) return lines
+        return lines.sortedWith(compareBy<Int> { it != key }.thenByDescending { abs(it - key) })
+    }
+
+    /**
+     * Whether a label from [top] to [bottom], grown by [grow] on both sides, overlaps one already drawn from [drawnTop] to
+     * [drawnBottom]. All in pixels, top smaller than bottom.
+     */
+    fun labelCollides(top: Float, bottom: Float, drawnTop: Float, drawnBottom: Float, grow: Float): Boolean =
+        top - grow < drawnBottom && drawnTop < bottom + grow
 
     /** Stats of the [visible] points, or null when there are none. */
     fun stats(points: List<ChartPoint>, nowElapsedMs: Long, windowMs: Long): SeriesStats? {

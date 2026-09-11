@@ -22,7 +22,7 @@ class RoutesTest {
     fun routesAreDistinct() {
         val routes = listOf(
             Routes.DISCLOSURE, Routes.PERMISSIONS, Routes.LIVE, Routes.SESSIONS, Routes.SESSION_DETAIL,
-            Routes.READINESS, Routes.PROBE, Routes.SETTINGS, Routes.ABOUT,
+            Routes.READINESS, Routes.PROBE, Routes.SETTINGS, Routes.TEST_TARGETS, Routes.ABOUT,
         )
         assertEquals(routes.size, routes.toSet().size)
     }

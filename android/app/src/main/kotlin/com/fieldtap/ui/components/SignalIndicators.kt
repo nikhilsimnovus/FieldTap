@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -17,19 +16,26 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.fieldtap.ui.theme.FieldTapDesign
@@ -67,7 +73,7 @@ data class SignalQualityLabels(
  * A quality level as a swatch plus its word ("Good"). Use it wherever a signal colour appears, so
  * colour is never the only cue. [quality] null shows the neutral swatch (for "No value").
  *
- * @param label the level's word, see [SignalQualityLabels].
+ * @param label the level's word, see [SignalQualityLabels]; a list row may add the value ("Good -92").
  */
 @Composable
 fun SignalQualityChip(
@@ -106,12 +112,15 @@ fun SignalQualityChip(
 }
 
 /**
- * A value on the signal scale as a horizontal bar: the filled length is the value's position in the
- * metric's display range (RSRP -140..-40 dBm, RSRQ -30..0 dB, SINR -25..40 dB), in the level's colour,
- * with ticks under the bar at the scale's three thresholds. Pair it with the number and a
- * [SignalQualityChip]; the bar alone is not the reading.
+ * A value's place on the signal scale, as a track of the scale's four zones over `SignalScale.barRange` (RSRP -130..-50
+ * dBm: POOR, FAIR, GOOD, EXCELLENT), each in its level's colour with a small gap between them. The zone the value is in
+ * is drawn solid and the others pale, and a marker stands at the value. From [Sizes.SignalBarLabelsMinWidth] wide the
+ * thresholds are named under the gaps ("-105", "-95", "-85"). A value beyond the range sits at the track's end. Pair it
+ * with the number and a [SignalQualityChip]; the bar alone is not the reading.
  *
  * TalkBack gets a range value and [stateDescription] (for example "Good").
+ *
+ * @param showThresholds false leaves the threshold labels out at any width.
  */
 @Composable
 fun SignalBar(
@@ -121,22 +130,31 @@ fun SignalBar(
     stateDescription: String? = null,
     showThresholds: Boolean = true,
 ) {
+    val range = SignalScale.barRange(metric)
+    val zones = remember(metric) { SignalScale.zones(metric, range) }
     val quality = SignalScale.quality(metric, value)
-    val level = FieldTapDesign.signal.of(quality)
-    val track = MaterialTheme.colorScheme.surfaceContainerHighest
-    val trackEdge = MaterialTheme.colorScheme.outlineVariant
-    val tick = MaterialTheme.colorScheme.outline
-    val range = SignalScale.displayRange(metric)
-    val thresholds = SignalScale.thresholds(metric).boundaries
-    val fraction = value?.let { SignalScale.fraction(it, range) }
-    val barHeight = Sizes.SignalBarHeight
-    val tickGap = Spacing.Xxs
-    val tickLength = if (showThresholds) Spacing.Xs else 0.dp
+    val signal = FieldTapDesign.signal
+    val level = signal.of(quality)
+    val halo = MaterialTheme.colorScheme.surfaceContainerLow
+    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val labelStyle = FieldTapDesign.numeric.axis
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val thresholds = remember(metric) { SignalScale.thresholds(metric).boundaries.sorted() }
+    val labelLayouts = remember(thresholds, labelStyle, density) { thresholds.map { measurer.measure(it.toString(), labelStyle) } }
+    val labelHeightPx = labelLayouts.maxOfOrNull { it.size.height } ?: 0
 
     Canvas(
         modifier = modifier
             .fillMaxWidth()
-            .height(barHeight + if (showThresholds) tickGap + tickLength else 0.dp)
+            .layout { measurable, constraints ->
+                // The labels take room only where they are drawn: decided from the width, before drawing.
+                val width = if (constraints.hasBoundedWidth) constraints.maxWidth else constraints.minWidth
+                val labelled = showThresholds && width >= Sizes.SignalBarLabelsMinWidth.roundToPx()
+                val height = Sizes.SignalMarkerHeight.roundToPx() + if (labelled) Spacing.Xxs.roundToPx() + labelHeightPx else 0
+                val placeable = measurable.measure(Constraints.fixed(width, height))
+                layout(width, height) { placeable.place(0, 0) }
+            }
             .semantics {
                 if (value != null) {
                     progressBarRangeInfo = ProgressBarRangeInfo(
@@ -148,42 +166,86 @@ fun SignalBar(
             },
     ) {
         val rtl = layoutDirection == LayoutDirection.Rtl
-        val h = barHeight.toPx()
-        val radius = CornerRadius(h / 2f)
-        fun xAt(f: Float): Float = if (rtl) size.width * (1f - f) else size.width * f
+        fun xAt(v: Int): Float = SignalScale.fraction(v, range).let { f -> if (rtl) size.width * (1f - f) else size.width * f }
+        val trackHeight = Sizes.SignalBarHeight.toPx()
+        val markerHeight = Sizes.SignalMarkerHeight.toPx()
+        val trackTop = (markerHeight - trackHeight) / 2f
+        val halfGap = ZoneGap.toPx() / 2f
+        val trackCorner = CornerRadius(trackHeight / 2f)
 
-        drawRoundRect(color = track, size = Size(size.width, h), cornerRadius = radius)
-        drawRoundRect(color = trackEdge, size = Size(size.width, h), cornerRadius = radius, style = Stroke(1.dp.toPx()))
+        zones.forEachIndexed { i, zone ->
+            val a = xAt(zone.from)
+            val b = xAt(zone.to)
+            var start = minOf(a, b)
+            var end = maxOf(a, b)
+            // The gap goes on the edges shared with a neighbour; in right-to-left the lowest zone is on the right.
+            val lowEdgeInner = i > 0
+            val highEdgeInner = i < zones.lastIndex
+            if (rtl) {
+                if (lowEdgeInner) end -= halfGap
+                if (highEdgeInner) start += halfGap
+            } else {
+                if (lowEdgeInner) start += halfGap
+                if (highEdgeInner) end -= halfGap
+            }
+            val colors = signal.of(zone.quality)
+            val active = value != null && zone.quality == quality
+            val zoneSize = Size((end - start).coerceAtLeast(0f), trackHeight)
+            drawRoundRect(
+                color = if (active) colors.fill else colors.fill.copy(alpha = ZONE_ALPHA),
+                topLeft = Offset(start, trackTop),
+                size = zoneSize,
+                cornerRadius = trackCorner,
+            )
+            if (active) {
+                val stroke = 1.dp.toPx()
+                drawRoundRect(
+                    color = colors.edge,
+                    topLeft = Offset(start + stroke / 2f, trackTop + stroke / 2f),
+                    size = Size((zoneSize.width - stroke).coerceAtLeast(0f), trackHeight - stroke),
+                    cornerRadius = CornerRadius((trackHeight - stroke) / 2f),
+                    style = Stroke(stroke),
+                )
+            }
+        }
 
-        if (fraction != null) {
-            val width = (size.width * fraction).coerceAtLeast(h)
-            val left = if (rtl) size.width - width else 0f
-            drawRoundRect(color = level.fill, topLeft = Offset(left, 0f), size = Size(width, h), cornerRadius = radius)
-            val stroke = 1.5.dp.toPx()
+        if (value != null) {
+            val markerWidth = Sizes.SignalMarkerWidth.toPx()
+            val haloWidth = markerWidth + 2 * MarkerHalo.toPx()
+            val center = xAt(value).coerceIn(haloWidth / 2f, (size.width - haloWidth / 2f).coerceAtLeast(haloWidth / 2f))
+            drawRoundRect(
+                color = halo,
+                topLeft = Offset(center - haloWidth / 2f, 0f),
+                size = Size(haloWidth, markerHeight),
+                cornerRadius = CornerRadius(haloWidth / 2f),
+            )
             drawRoundRect(
                 color = level.edge,
-                topLeft = Offset(left + stroke / 2f, stroke / 2f),
-                size = Size(width - stroke, h - stroke),
-                cornerRadius = CornerRadius((h - stroke) / 2f),
-                style = Stroke(stroke),
+                topLeft = Offset(center - markerWidth / 2f, 0f),
+                size = Size(markerWidth, markerHeight),
+                cornerRadius = CornerRadius(markerWidth / 2f),
             )
         }
 
-        if (showThresholds) {
-            val top = h + tickGap.toPx()
-            val strokeWidth = 1.dp.toPx()
-            for (t in thresholds) {
-                val x = xAt(SignalScale.fraction(t, range))
-                drawLine(
-                    color = tick,
-                    start = Offset(x, top),
-                    end = Offset(x, top + tickLength.toPx()),
-                    strokeWidth = strokeWidth,
-                )
+        if (showThresholds && size.width >= Sizes.SignalBarLabelsMinWidth.toPx()) {
+            val labelTop = markerHeight + Spacing.Xxs.toPx()
+            thresholds.forEachIndexed { i, threshold ->
+                val layout = labelLayouts[i]
+                val left = (xAt(threshold) - layout.size.width / 2f).coerceIn(0f, (size.width - layout.size.width).coerceAtLeast(0f))
+                drawText(textLayoutResult = layout, color = labelColor, topLeft = Offset(left, labelTop))
             }
         }
     }
 }
+
+/** The gap between two zones of a [SignalBar]. */
+private val ZoneGap: Dp = Spacing.Xxs
+
+/** The surface-coloured edge that keeps a [SignalBar]'s marker apart from the zone under it. */
+private val MarkerHalo: Dp = 1.5.dp
+
+/** A zone the value is not in: present, never louder than the one it is in. */
+private const val ZONE_ALPHA: Float = 0.25f
 
 /**
  * Four rising bars, filled to the quality level (Excellent 4 ... Poor 1, unknown 0), for compact rows
@@ -246,7 +308,7 @@ private fun SignalIndicatorsPreview() {
             SignalQualityChip(SignalQuality.POOR, labels.of(SignalQuality.POOR))
             SignalQualityChip(null, labels.of(null))
         }
-        SignalBar(SignalMetric.RSRP, -78, stateDescription = labels.excellent)
+        SignalBar(SignalMetric.RSRP, -49, stateDescription = labels.excellent)
         SignalBar(SignalMetric.RSRP, -92, stateDescription = labels.good)
         SignalBar(SignalMetric.RSRP, -101, stateDescription = labels.fair)
         SignalBar(SignalMetric.RSRP, -117, stateDescription = labels.poor)
