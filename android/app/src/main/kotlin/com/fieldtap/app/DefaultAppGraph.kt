@@ -101,6 +101,7 @@ class DefaultAppGraph(private val application: Application) : AppGraph {
             exporter = SessionExporter(),
             storagePolicy = storagePolicy,
             exportDir = exportDir,
+            closeStoppedSessions = { sessionRecovery.closeStoppedSessions(activeDirName()) },
             activeDirName = { activeDirName() },
         )
     }
@@ -129,6 +130,7 @@ class DefaultAppGraph(private val application: Application) : AppGraph {
             scope = scope,
             radioSource = radioSource(),
             locationSource = flow { emitAll(location.inputs()) },
+            clock = clock,
             onSourceError = { error -> Log.w(TAG, "A measurement source failed; restarting it", error) },
         )
     }
@@ -152,12 +154,18 @@ class DefaultAppGraph(private val application: Application) : AppGraph {
                 clock = clock,
                 appInfo = { appInfo },
                 // getDataNetworkType() needs the Phone permission; without it, the newest display info's
-                // network type from the live feed stands in. Called by prepare(), off the main thread.
-                handset = { HandsetInfoReader(application).read(fallbackNetworkType = live.state.value.display?.networkType) },
+                // network type stands in. Called by prepare(), off the main thread.
+                handset = {
+                    HandsetInfoReader(application).read(
+                        fallbackNetworkType = hub.currentDisplayInfo()?.networkType ?: live.state.value.display?.networkType,
+                    )
+                },
                 pid = { Process.myPid() },
                 storagePolicy = storagePolicy,
             ),
-            inputs = hub.inputs,
+            // A session starts from the Live screen, which already holds the sources: it must still learn the
+            // service, data and display state Android delivered when they registered.
+            inputs = hub.inputsWithCurrentState,
             radioInputs = hub.radioInputs,
             transport = transport,
             recoveryGate = { launchRecovery.run() },

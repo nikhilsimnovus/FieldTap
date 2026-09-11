@@ -212,7 +212,12 @@ internal class FakeTransport : NetTestTransport {
 }
 
 /** A [SessionRuntime] wired to fakes on the test scheduler, with the real `SessionStateMachine`. */
-internal class RuntimeHarness(scope: TestScope, gate: suspend () -> Unit = {}) {
+internal class RuntimeHarness(
+    scope: TestScope,
+    gate: suspend () -> Unit = {},
+    /** The inputs the runtime subscribes to; by default [inputs]. */
+    inputsFrom: Flow<MeasurementInput>? = null,
+) {
     val dispatcher = StandardTestDispatcher(scope.testScheduler)
     val clock = VirtualClock(scope.testScheduler)
     val platform = FakePlatform()
@@ -231,7 +236,7 @@ internal class RuntimeHarness(scope: TestScope, gate: suspend () -> Unit = {}) {
         settings = settings,
         storage = { storage },
         sessions = factory,
-        inputs = inputs,
+        inputs = inputsFrom ?: inputs,
         radioInputs = radioInputs,
         transport = transport,
         recoveryGate = gate,

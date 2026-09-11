@@ -2,12 +2,17 @@
 
 package com.fieldtap.service
 
+import com.fieldtap.app.MeasurementHub
 import com.fieldtap.app.SessionStatus
 import com.fieldtap.app.SoakState
 import com.fieldtap.app.StartResult
 import com.fieldtap.core.input.CellInfoAnswer
+import com.fieldtap.core.input.DataConnState
+import com.fieldtap.core.input.DataStateSnapshot
 import com.fieldtap.core.input.DeviceConditions
+import com.fieldtap.core.input.DisplayInfoSnapshot
 import com.fieldtap.core.input.LocationAvailability
+import com.fieldtap.core.input.MeasurementInput
 import com.fieldtap.core.input.ServiceRegState
 import com.fieldtap.core.input.ServiceStateSnapshot
 import com.fieldtap.core.nettest.TestSettings
@@ -32,6 +37,7 @@ import java.io.IOException
 import java.util.Collections
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -105,6 +111,40 @@ class SessionRuntimeTest {
         recorder.snapshot.value = recorder.snapshot.value.copy(freshSamples = 7)
         runCurrent()
         assertEquals(7L, (h.runtime.status.value as SessionStatus.Recording).snapshot.freshSamples)
+    }
+
+    @Test
+    fun aSessionStartedWhileTheLiveScreenHoldsTheSourcesStillLearnsTheStateAndroidDeliveredAtRegistration() = runTest {
+        val radio = MutableSharedFlow<MeasurementInput>(extraBufferCapacity = 16)
+        val location = MutableSharedFlow<MeasurementInput>(extraBufferCapacity = 16)
+        val hub = MeasurementHub(backgroundScope, radio, location, VirtualClock(testScheduler))
+        // The Live screen collects, and Android delivers service, data and display state once, at registration.
+        backgroundScope.launch { hub.inputs.collect {} }
+        runCurrent()
+        val data = DataStateSnapshot(DataConnState.CONNECTED, networkType = 20, observedWallMs = WALL_BASE, observedElapsedMs = ELAPSED_BASE)
+        val display = DisplayInfoSnapshot(networkType = 20, overrideNetworkType = 0, observedWallMs = WALL_BASE, observedElapsedMs = ELAPSED_BASE)
+        radio.emit(serviceState())
+        radio.emit(data)
+        radio.emit(display)
+        runCurrent()
+        advanceTimeBy(30_000)
+        val h = RuntimeHarness(this, inputsFrom = hub.inputsWithCurrentState)
+
+        val recorder = startRecording(h)
+
+        val seen = recorder.commandsOf<RecorderCommand.Measurement>().map { it.input }
+        val stampedAt = WALL_BASE + testScheduler.currentTime
+        assertEquals(
+            listOf(
+                serviceState().copy(observedWallMs = stampedAt, observedElapsedMs = ELAPSED_BASE + testScheduler.currentTime),
+                data.copy(observedWallMs = stampedAt, observedElapsedMs = ELAPSED_BASE + testScheduler.currentTime),
+                display.copy(observedWallMs = stampedAt, observedElapsedMs = ELAPSED_BASE + testScheduler.currentTime),
+            ),
+            seen,
+        )
+        radio.emit(serviceState())
+        runCurrent()
+        assertEquals("live inputs follow", 4, recorder.commandsOf<RecorderCommand.Measurement>().size)
     }
 
     @Test

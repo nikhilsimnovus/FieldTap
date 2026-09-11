@@ -62,7 +62,7 @@ private const val TELEPHONY_UNAVAILABLE = "telephony service unavailable"
  * - uses the `TelephonyManager` of `SubscriptionManager.getDefaultDataSubscriptionId()` (follows the
  *   default data SIM, records which one as `subId`); a change of default data SIM applies from the next
  *   collection;
- * - emits `getAllCellInfo()` once as a `request` answer for the first screen, then calls
+ * - emits `getAllCellInfo()` once as a `cached` answer (source `request`) for the first screen, then calls
  *   `requestCellInfoUpdate(executor, callback)` every [requestPeriodMs]; each `onCellInfo` becomes a
  *   `CellInfoAnswer` (source `request`, cells via [CellInfoMapper], conditions from [conditions] read at
  *   the callback), each `onError` a `CellInfoRequestFailed`;
@@ -258,7 +258,8 @@ class TelephonySource(
             try {
                 onRequest?.invoke()
                 val infos: List<CellInfo> = manager.allCellInfo.orEmpty()
-                deliverAnswer(CellInfoSource.REQUEST, infos)
+                // Android's cached list: whatever the last requester received. A session never writes it.
+                deliverAnswer(CellInfoSource.REQUEST, infos, cached = true)
             } catch (e: SecurityException) {
                 failed(TelephonyValues.securityDetail(e.message))
             } catch (e: RuntimeException) {
@@ -321,11 +322,11 @@ class TelephonySource(
             deliver(ListenerReport(listener, outcome, detail, clock.wallMillis(), clock.elapsedRealtimeMillis()))
         }
 
-        private fun deliverAnswer(source: CellInfoSource, infos: List<CellInfo>) {
+        private fun deliverAnswer(source: CellInfoSource, infos: List<CellInfo>, cached: Boolean = false) {
             val wallMs = clock.wallMillis()
             val elapsedMs = clock.elapsedRealtimeMillis()
             val atAnswer = conditions()
-            deliver(CellInfoAnswer(source, CellInfoMapper.mapAll(infos), target.subId, atAnswer, wallMs, elapsedMs))
+            deliver(CellInfoAnswer(source, CellInfoMapper.mapAll(infos), target.subId, atAnswer, wallMs, elapsedMs, cached = cached))
         }
 
         private fun failed(detail: String) {

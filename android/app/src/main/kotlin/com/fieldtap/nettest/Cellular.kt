@@ -18,6 +18,7 @@ import com.fieldtap.core.nettest.IcmpEcho
 import com.fieldtap.core.nettest.NetFailure
 import com.fieldtap.core.nettest.NetTestTransport
 import com.fieldtap.core.nettest.PingOutcome
+import com.fieldtap.core.nettest.interruptingOnCancel
 import com.fieldtap.core.time.Clock
 import java.io.FileDescriptor
 import java.io.IOException
@@ -107,7 +108,9 @@ class CellularNetworks(private val context: Context) {
  *   bytes, counts body bytes until `capBytes` or `timeoutMs`, then disconnects. `seconds` run from the request
  *   on the acquired network to the last byte, on the clock's elapsed time. The User-Agent names the app only,
  *   never the phone model or Android build.
- * - Blocking socket calls run on `Dispatchers.IO` in slices of at most 200 ms, so cancellation is prompt.
+ * - Cancellation is prompt: the ping's blocking socket calls run on `Dispatchers.IO` in slices of at most 200 ms, and a
+ *   download's connection is disconnected from another thread the moment its test is cancelled
+ *   ([interruptingOnCancel]), which fails its response wait or body read at once.
  *
  * Owner: workstream `service-and-tests`.
  */
@@ -261,48 +264,66 @@ class CellularTestTransport(
             ?: return DownloadOutcome.Failed(NetFailure.INVALID_URL, null, 0.0, null, null)
 
         val job = currentCoroutineContext()[Job]
-        val onCancel = job?.invokeOnCompletion { connection.disconnect() }
         var httpCode: Int? = null
         try {
-            val socketTimeoutMs = minOf(timeoutMs, SOCKET_TIMEOUT_MS).toInt()
-            connection.connectTimeout = socketTimeoutMs
-            connection.readTimeout = socketTimeoutMs
-            connection.instanceFollowRedirects = true
-            connection.useCaches = false
-            connection.setRequestProperty("Accept-Encoding", "identity")
-            connection.setRequestProperty("Cache-Control", "no-cache")
-            connection.setRequestProperty("User-Agent", USER_AGENT)
-            val code = connection.responseCode
-            httpCode = code
-            if (code != HttpURLConnection.HTTP_OK) {
-                return DownloadOutcome.Failed(NetFailure.HTTP_STATUS, code.toString(), secondsSince(startedMs), code, null)
-            }
-            val counted = connection.inputStream.use { input ->
-                BodyCounter.count(input, capBytes, clock, deadlineMs, isActive = { job?.isActive != false })
-            }
-            val seconds = secondsSince(startedMs)
-            return when (counted.end) {
-                BodyCount.End.COMPLETE, BodyCount.End.CAP, BodyCount.End.DEADLINE -> when {
-                    counted.bytes > 0 ->
-                        DownloadOutcome.Completed(counted.bytes, seconds, code, capped = counted.end != BodyCount.End.COMPLETE)
-                    counted.end == BodyCount.End.DEADLINE ->
-                        DownloadOutcome.Failed(NetFailure.TIMEOUT, null, seconds, code, 0)
-                    else ->
-                        DownloadOutcome.Failed(NetFailure.IO, EMPTY_BODY, seconds, code, 0)
-                }
-                BodyCount.End.CANCELLED -> {
-                    currentCoroutineContext().ensureActive()
-                    DownloadOutcome.Failed(NetFailure.IO, CANCELLED, seconds, code, counted.bytes)
-                }
-                BodyCount.End.ERROR -> failureOf(counted.error, seconds, code, counted.bytes)
+            // The response wait and the body reads block their thread and ignore cancellation. Disconnecting from
+            // another thread the moment the test is cancelled (Stop, the service destroyed) closes the socket, so
+            // they fail at once and the cellular request is released with the test, not at the 15 s read timeout.
+            return interruptingOnCancel(interrupt = { connection.disconnect() }) {
+                transfer(connection, capBytes, timeoutMs, startedMs, deadlineMs, job) { code -> httpCode = code }
             }
         } catch (e: IOException) {
             return failureOf(e, secondsSince(startedMs), httpCode, null)
         } catch (e: SecurityException) {
             return DownloadOutcome.Failed(NetFailure.IO, NOT_PERMITTED, secondsSince(startedMs), httpCode, null)
         } finally {
-            onCancel?.dispose()
             connection.disconnect()
+        }
+    }
+
+    /** The request and the body of one download on [connection]; blocking. [onResponse] learns the HTTP status. */
+    private suspend fun transfer(
+        connection: HttpURLConnection,
+        capBytes: Long,
+        timeoutMs: Long,
+        startedMs: Long,
+        deadlineMs: Long,
+        job: Job?,
+        onResponse: (Int) -> Unit,
+    ): DownloadOutcome {
+        val socketTimeoutMs = minOf(timeoutMs, SOCKET_TIMEOUT_MS).toInt()
+        connection.connectTimeout = socketTimeoutMs
+        connection.readTimeout = socketTimeoutMs
+        connection.instanceFollowRedirects = true
+        connection.useCaches = false
+        connection.setRequestProperty("Accept-Encoding", "identity")
+        connection.setRequestProperty("Cache-Control", "no-cache")
+        connection.setRequestProperty("User-Agent", USER_AGENT)
+        // Before the connection has an engine, a disconnect has nothing to close: a cancellation that came first stops here.
+        currentCoroutineContext().ensureActive()
+        val code = connection.responseCode
+        onResponse(code)
+        if (code != HttpURLConnection.HTTP_OK) {
+            return DownloadOutcome.Failed(NetFailure.HTTP_STATUS, code.toString(), secondsSince(startedMs), code, null)
+        }
+        val counted = connection.inputStream.use { input ->
+            BodyCounter.count(input, capBytes, clock, deadlineMs, isActive = { job?.isActive != false })
+        }
+        val seconds = secondsSince(startedMs)
+        return when (counted.end) {
+            BodyCount.End.COMPLETE, BodyCount.End.CAP, BodyCount.End.DEADLINE -> when {
+                counted.bytes > 0 ->
+                    DownloadOutcome.Completed(counted.bytes, seconds, code, capped = counted.end != BodyCount.End.COMPLETE)
+                counted.end == BodyCount.End.DEADLINE ->
+                    DownloadOutcome.Failed(NetFailure.TIMEOUT, null, seconds, code, 0)
+                else ->
+                    DownloadOutcome.Failed(NetFailure.IO, EMPTY_BODY, seconds, code, 0)
+            }
+            BodyCount.End.CANCELLED -> {
+                currentCoroutineContext().ensureActive()
+                DownloadOutcome.Failed(NetFailure.IO, CANCELLED, seconds, code, counted.bytes)
+            }
+            BodyCount.End.ERROR -> failureOf(counted.error, seconds, code, counted.bytes)
         }
     }
 

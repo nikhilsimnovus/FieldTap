@@ -685,7 +685,8 @@ class SessionRuntime internal constructor(
         coroutineScope {
             val answers = launch {
                 radioInputs.collect { input ->
-                    if (input is CellInfoAnswer) {
+                    // Android's cached list is not an answer the app received while the soak test ran.
+                    if (input is CellInfoAnswer && !input.cached) {
                         val classified = try {
                             classify(input)
                         } catch (e: RuntimeException) {

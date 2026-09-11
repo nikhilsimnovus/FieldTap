@@ -72,6 +72,8 @@ class DefaultSessionFactory(
         val sessionPaths = paths()
         val name = request.name.trim()
         val allocated = store().allocate(name)
+        // The session's start on elapsedRealtime: no sampling gap or interval may begin before it.
+        val startElapsedMs = clock.elapsedRealtimeMillis()
         return try {
             val identity = SessionIdentity(
                 sessionId = newSessionId(),
@@ -93,7 +95,7 @@ class DefaultSessionFactory(
                 config = RecorderConfig(identity = identity, session = allocated, pid = pid()),
                 clock = clock,
                 files = files,
-                radio = DefaultRadioPipeline(),
+                radio = DefaultRadioPipeline(sessionStartElapsedMs = startElapsedMs),
                 location = DefaultLocationPipeline(zones = current.zones, allowMockFixes = info.debuggable),
                 storage = {
                     StorageStatus(

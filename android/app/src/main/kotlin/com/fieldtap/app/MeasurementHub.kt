@@ -1,7 +1,11 @@
 package com.fieldtap.app
 
 import android.util.Log
+import com.fieldtap.core.input.DataStateSnapshot
+import com.fieldtap.core.input.DisplayInfoSnapshot
+import com.fieldtap.core.input.LocationAvailability
 import com.fieldtap.core.input.MeasurementInput
+import com.fieldtap.core.input.ServiceStateSnapshot
 import com.fieldtap.core.live.LiveState
 import com.fieldtap.core.live.LiveStateReducer
 import com.fieldtap.core.time.Clock
@@ -22,6 +26,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
@@ -32,8 +37,17 @@ import kotlinx.coroutines.flow.stateIn
  * [inputs] merges `TelephonySource.inputs()` and `LocationSource.inputs()` and shares them with
  * `SharingStarted.WhileSubscribed(5_000)`: the platform listeners run exactly while someone collects
  * (the Live screen while visible, the service while a session runs), and stop 5 s after the last collector
- * leaves. No replay: a new collector starts from the next callback. Collectors must not block; the recorder
- * forwards into its own channel.
+ * leaves. No replay: a new collector of [inputs] starts from the next callback. Collectors must not block; the
+ * recorder forwards into its own channel.
+ *
+ * Android delivers service state, data connection state and display info once when a listener registers and then
+ * only when they change, and the sources register once for all collectors. A collector that joins while the sources
+ * already run would never learn them, so a session started from the Live screen would miss the state it started in,
+ * and treat the first change as its baseline. [inputsWithCurrentState] is [inputs] preceded, for each new collector,
+ * by the newest service state, data state, display info and location availability the running sources delivered,
+ * stamped with the moment it subscribed. Cell-info answers, fixes and signal strengths are never replayed: freshness,
+ * the GPS join and the "newer signal report" all depend on when those really arrived. What the sources delivered is
+ * forgotten when they stop, so nothing from an earlier run is ever replayed.
  *
  * [radioInputs] is the telephony stream alone, for the soak test. Both streams share one registration per
  * source, so the soak test and the Live screen never register the telephony listeners twice.
@@ -49,28 +63,64 @@ class MeasurementHub internal constructor(
     scope: CoroutineScope,
     radioSource: Flow<MeasurementInput>,
     locationSource: Flow<MeasurementInput>,
+    private val clock: Clock,
     stopTimeoutMs: Long = STOP_TIMEOUT_MS,
     private val onSourceError: (Throwable) -> Unit = {},
 ) {
-    constructor(scope: CoroutineScope, telephony: TelephonySource, location: LocationSource) : this(
+    constructor(scope: CoroutineScope, telephony: TelephonySource, location: LocationSource, clock: Clock) : this(
         scope = scope,
         radioSource = flow { emitAll(telephony.inputs()) },
         locationSource = flow { emitAll(location.inputs()) },
+        clock = clock,
         onSourceError = ::logSourceError,
     )
 
+    private val radioState = CurrentState()
+    private val locationState = CurrentState()
+
     private val radioShared: SharedFlow<MeasurementInput> =
-        radioSource.restarting().shareIn(scope, SharingStarted.WhileSubscribed(stopTimeoutMillis = 0), replay = 0)
+        radioSource.remembering(radioState).restarting()
+            .shareIn(scope, SharingStarted.WhileSubscribed(stopTimeoutMillis = 0), replay = 0)
 
     private val locationShared: SharedFlow<MeasurementInput> =
-        locationSource.restarting().shareIn(scope, SharingStarted.WhileSubscribed(stopTimeoutMillis = 0), replay = 0)
+        locationSource.remembering(locationState).restarting()
+            .shareIn(scope, SharingStarted.WhileSubscribed(stopTimeoutMillis = 0), replay = 0)
 
     val inputs: SharedFlow<MeasurementInput> =
         merge(radioShared, locationShared)
             .shareIn(scope, SharingStarted.WhileSubscribed(stopTimeoutMillis = stopTimeoutMs), replay = 0)
 
+    /** [inputs], preceded for each collector by the current state of the running sources; see the class KDoc. */
+    val inputsWithCurrentState: Flow<MeasurementInput> = inputs.onSubscription {
+        val wallMs = clock.wallMillis()
+        val elapsedMs = clock.elapsedRealtimeMillis()
+        for (input in currentState()) emit(input.observedAt(wallMs, elapsedMs))
+    }
+
     /** Telephony inputs only; collecting it does not start the location source. */
     val radioInputs: SharedFlow<MeasurementInput> get() = radioShared
+
+    /** The newest display info of the running telephony source, or null when it is not running or has not reported. */
+    fun currentDisplayInfo(): DisplayInfoSnapshot? = radioState.display
+
+    /** Service state, data state, display info and location availability, as the running sources last delivered them. */
+    internal fun currentState(): List<MeasurementInput> = radioState.inputs() + locationState.inputs()
+
+    /** Keeps the newest state inputs of this source while it runs, and forgets them when it starts and stops. */
+    private fun Flow<MeasurementInput>.remembering(state: CurrentState): Flow<MeasurementInput> {
+        val source = this
+        return flow {
+            state.clear()
+            try {
+                source.collect { input ->
+                    state.remember(input)
+                    emit(input)
+                }
+            } finally {
+                state.clear()
+            }
+        }
+    }
 
     private fun Flow<MeasurementInput>.restarting(): Flow<MeasurementInput> {
         val source = this
@@ -89,6 +139,36 @@ class MeasurementHub internal constructor(
         }
     }
 
+    /** The newest state inputs of one source; written by its sharing coroutine, read by subscribing collectors. */
+    private class CurrentState {
+        @Volatile var service: ServiceStateSnapshot? = null
+
+        @Volatile var data: DataStateSnapshot? = null
+
+        @Volatile var display: DisplayInfoSnapshot? = null
+
+        @Volatile var availability: LocationAvailability? = null
+
+        fun remember(input: MeasurementInput) {
+            when (input) {
+                is ServiceStateSnapshot -> service = input
+                is DataStateSnapshot -> data = input
+                is DisplayInfoSnapshot -> display = input
+                is LocationAvailability -> availability = input
+                else -> Unit
+            }
+        }
+
+        fun clear() {
+            service = null
+            data = null
+            display = null
+            availability = null
+        }
+
+        fun inputs(): List<MeasurementInput> = listOfNotNull(service, data, display, availability)
+    }
+
     companion object {
         /** How long the sources keep running after the last collector leaves. */
         const val STOP_TIMEOUT_MS: Long = 5_000
@@ -101,13 +181,24 @@ class MeasurementHub internal constructor(
     }
 }
 
+/** A state input stamped as observed at [wallMs] and [elapsedMs]; other inputs unchanged. */
+private fun MeasurementInput.observedAt(wallMs: Long, elapsedMs: Long): MeasurementInput = when (this) {
+    is ServiceStateSnapshot -> copy(observedWallMs = wallMs, observedElapsedMs = elapsedMs)
+    is DataStateSnapshot -> copy(observedWallMs = wallMs, observedElapsedMs = elapsedMs)
+    is DisplayInfoSnapshot -> copy(observedWallMs = wallMs, observedElapsedMs = elapsedMs)
+    is LocationAvailability -> copy(observedWallMs = wallMs, observedElapsedMs = elapsedMs)
+    else -> this
+}
+
 /**
  * [LiveFeed] over the hub: folds inputs with `com.fieldtap.core.live.LiveStateReducer`, ticks once a
  * second, and exposes the result with `stateIn(scope, WhileSubscribed(0), LiveState())` on
  * `Dispatchers.Default`.
  *
  * - The fold continues from the last state when a collector returns (after a rotation, or back from another
- *   screen), so the chart keeps its 5-minute window.
+ *   screen), so the chart keeps its 5-minute window. It reads [MeasurementHub.inputsWithCurrentState], so the
+ *   service, data and 5G chips are current again at once, even when a session kept the sources running meanwhile
+ *   and no state changed.
  * - The feed stops folding as soon as nobody collects; the hub keeps the sources for its own 5 s, which is
  *   what [LiveFeed] promises ("they stop 5 s after the last collector leaves").
  * - A reducer that throws on one input is logged and that input skipped; the screen never freezes on it.
@@ -125,7 +216,8 @@ class HubLiveFeed internal constructor(
     context: CoroutineContext = Dispatchers.Default,
 ) : LiveFeed {
 
-    constructor(scope: CoroutineScope, hub: MeasurementHub, clock: Clock) : this(scope, hub.inputs, clock, LiveStateReducer())
+    constructor(scope: CoroutineScope, hub: MeasurementHub, clock: Clock) :
+        this(scope, hub.inputsWithCurrentState, clock, LiveStateReducer())
 
     internal constructor(
         scope: CoroutineScope,
