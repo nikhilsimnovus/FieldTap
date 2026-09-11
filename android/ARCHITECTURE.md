@@ -198,7 +198,7 @@ The KDoc of each stub is the full contract. This section is the summary an imple
 | An answer is fresh when its primary serving cell is fresh (no primary: any cell). `fresh_samples` counts fresh answers; `repeats_dropped` counts repeats. | `FreshnessEngine`, `CollectionStats` |
 | Age = elapsed at answer - `timestampMs` (clamped to 0). Measurement time = wall at answer - age. A repeat keeps the measurement time of its first sighting: the two clocks are read separately at each answer, so recomputing it moves the time. | `FreshnessEngine` |
 | The telephony adapter's one `getAllCellInfo` read when its listeners start is a `CellInfoAnswer` with `cached` true. Live shows it; the recorder and the soak test ignore it, because Android may have measured it long before. | `TelephonySource`, `SessionRecorder` |
-| Short interval (2 s) when screen on and (Wi-Fi off or charging); otherwise 10 s. KPI rows at most 2500 ms old on the short interval, 11000 ms on the long. | `CadencePolicy`, `RadioRows` |
+| Short interval (2 s) when screen on and (Wi-Fi off or charging); otherwise 10 s, each condition as Android's `DeviceStateMonitor` reads it (section 7): a display in `STATE_ON`, `BatteryManager.isCharging()`, a Wi-Fi network with internet. KPI rows at most 2500 ms old on the short interval, 11000 ms on the long. | `CadencePolicy`, `RadioRows` |
 | Primary serving = connection status 1 (vendors without statuses: first registered LTE or NR cell). NSA leg = NR cell with status 2 under an LTE primary. At most one KPI row per RAT per answer. | `ServingCellSelector`, `RadioRows` |
 | Emergency-only comes from service state only; emergency-camped samples are still KPI rows. | `ServingCellSelector` |
 | Values outside the schema's ranges are blank, never clipped; Android's unavailable values are null before they reach :core. | `RadioRows`, `CellValues` |
@@ -230,8 +230,8 @@ The KDoc of each stub is the full contract. This section is the summary an imple
 | `data_state` | `RadioEventDeriver.onDataState` | Observed | `Mobile data ...` (`connected, LTE`), warn on disconnect |
 | `nr_display` | `RadioEventDeriver.onDisplayInfo` | Observed | `5G icon on` / `5G icon off` (`override NR_NSA, network LTE`) |
 | `sampling_gap` | `SamplingGap.toEvent` | Ending answer's arrival | `Sampling gap` (`no fresh cell info for 14.0 s`), cause = reason |
-| `gps_lost` / `gps_restored` | `GpsEventDeriver` | Tick / fix observed | `GPS lost` / `GPS restored` |
-| `privacy_zone` | `PrivacyZoneGate` | Fix observed, or the tick that ends an overlong hold | `Logging paused in a privacy zone` / `Logging paused until the location is known` (`no location fix showed the phone outside every privacy zone`) / `Logging resumed`, never a place |
+| `gps_lost` / `gps_restored` | `GpsEventDeriver` | Tick / fix observed; held and dropped like any input (section 6.5) | `GPS lost` / `GPS restored` |
+| `privacy_zone` | `PrivacyZoneGate` | Fix observed, or the tick that ends an overlong wait for a fix | `Logging paused in a privacy zone` / `Logging paused until the location is known` (`no location fix showed the phone outside every privacy zone`) / `Logging resumed`, never a place |
 | `marker` | `SessionEvents.marker` | Tap | `Marker` (the note) |
 | `test_failed` | `SessionEvents.testFailed` via `TrafficRecords` | Test start | `Ping failed` / `Download failed` (error) |
 | `session_interrupted` | `SessionEvents.sessionInterrupted` via `SessionRecovery` | Last heartbeat | `Session interrupted`, cause = exit token |
@@ -254,19 +254,35 @@ row before them by at most the sample age (at most 11 s). `fieldtap validate` do
 
 - Each accepted fix is placed by `PrivacyZones.placement`: INSIDE a zone (distance at most radius plus up to 50 m
   of accuracy); else AMBIGUOUS when its whole accuracy circle, uncapped, reaches into a zone; else NEAR within
-  250 m of a zone's edge; else CLEAR.
+  250 m of a zone's edge; else CLEAR. NEAR is descriptive only: how long a fix outside keeps writes going follows
+  its distance, below.
 - Logging pauses at an INSIDE fix and resumes at a NEAR or CLEAR fix. An AMBIGUOUS fix neither pauses nor
   resumes, and becomes no track row and no join fix.
-- With zones set, the recorder holds cell answers, service, data and display state, test results and marks
-  (`LocationPipeline.holding`): before the first fix, from a NEAR fix until the next fix, and from an AMBIGUOUS
-  fix until a fix shows inside or outside. A fix that confirms the phone outside (`LocationStep.confirmsOutside`)
-  handles what was held as if it had just arrived; a pause drops it. A hold longer than 60 s pauses logging as
-  `Logging paused until the location is known`, counted in `zone_pauses` only once a fix inside a zone confirms
-  it. A session without zones never holds, and one that starts outside its zones writes what it wrote before.
+- Reach (`ZoneReach`). A fix outside every zone has a margin (`PrivacyZones.marginM`: the distance to the nearest zone
+  edge less the fix's whole accuracy) and a reach time: the least time to cover it, starting from the fix's speed plus
+  3 m/s and speeding up at 10 m/s² to 100 m/s, or at 100 m/s at once without a speed. That is faster than any road
+  vehicle or high-speed train, so a zone never counts as out of reach when it is not.
+- With zones set, every input the recorder writes (cell answers, service, data and display state, test results,
+  marks, `gps_lost` and `gps_restored`) carries the elapsed time it was observed, and is written only when observed by
+  `LocationPipeline.outsideUntilMs`: the newest fix outside every zone, plus 5 s when its reach time is at least 5 s,
+  and no later than an AMBIGUOUS fix after it. The 5 s has two values only (5 s or none), so where writing stops never
+  measures a zone's distance. Later inputs are held, in arrival order; nothing is written before the first fix outside.
+- Each fix outside every zone checks the stretch since the fix outside before it (before any, since the session
+  start): when the two reach times add up to no more than the time between them, the phone could have been in a zone
+  and back, and logging pauses at that fix as `Logging paused until the location is known`, dropping what was held.
+  Such a pause resumes at a later fix outside whose stretch from the fix outside before it holds no visit, so a phone
+  skirting a zone pauses once and resumes once. Otherwise the fix moves `outsideUntilMs` on and what was held is
+  handled as if it had just arrived (`LocationStep.confirmsOutside`).
+- No fix outside every zone for 60 s (before any, from the first tick) pauses logging the same way. A pause without
+  a fix counts in `zone_pauses` only once a fix inside a zone confirms it. Every `privacy_zone` event carries a fix's or
+  a tick's time, never one computed from a distance. A session without zones never holds.
+- Live says a marker tapped while inputs are held is kept until the location is known, and says so again if a pause
+  drops it (`RecorderSnapshot.holdingInputs`, `markersDropped`, `SessionOutcome.markersDropped`).
 - While paused, nothing is written to any file except the `privacy_zone` events. That includes
   kpi, cellinfo, track, traffic rows and markers, radio events and statistics. A fix inside a zone never
   enters the join buffer, so no row gets a position from inside a zone. When logging pauses, pending rows
-  measured after the newest fix outside every zone are dropped, not written with that fix.
+  measured after the newest fix outside every zone (for a pause without a fix inside a zone, after the
+  `outsideUntilMs` before it) are dropped, not written with that fix.
 - De-duplication and the latest service, data and display state keep updating while paused. On resume,
   the pipeline re-feeds that state stamped with the resume time, so the files learn what changed but not
   when. Nothing measured before the resume is written.
@@ -287,7 +303,7 @@ row before them by at most the sample age (at most 11 s). `fieldtap validate` do
 | --- | --- | --- |
 | kpi.csv, cellinfo.csv, track.csv, events.csv, traffic.csv | Append-only | Header at creation; flush every 1 s; `FileDescriptor.sync()` every 5 s. |
 | cells.csv | Rewritten atomically every 60 s and at stop | May hold only its header early on. |
-| session.json | Created at start; rewritten atomically every 60 s and at stop | `.tmp`, sync, atomic rename. While open: `stopped_utc` null and `summary.stopped_by` `recording`. |
+| session.json | Created at start; rewritten atomically every 60 s, when a privacy-zone pause is counted, and at stop | `.tmp`, sync, atomic rename. While open: `stopped_utc` null and `summary.stopped_by` `recording`. `stopped_utc` is never before a time a written row carries. |
 | `<filesDir>/session-state/<dir>.heartbeat` | Every 5 s, deleted at close | `v1 <wallMs> <elapsedMs> <pid>`; `v2 <wallMs> <elapsedMs> <pid> <stop token>` when the recorder stopped the session but could not write its final session.json (section 6.8). Outside the session directory. |
 
 - Root: `<getExternalFilesDir(null)>/sessions/`, pullable at `/sdcard/Android/data/<applicationId>/files/sessions`.
@@ -309,7 +325,11 @@ row before them by at most the sample age (at most 11 s). `fieldtap validate` do
   time minus 10 s, else `unknown`): `RecoveryAction.CloseInterrupted`. `SessionRecovery.close` cuts each CSV back
   to its last CR LF, appends `session_interrupted`, and rewrites session.json from the last snapshot with
   `summary.plmns`, cells.csv and `collection` rebuilt from the repaired rows (`SessionRebuild`), so a session killed
-  before its first 60 s snapshot still counts what it holds.
+  before its first 60 s snapshot still counts what it holds. The rebuild reads every CSV one record at a time
+  (`Csv.RecordReader`), so its memory does not grow with the session; when it fails for any reason, running out of
+  memory included, the snapshot's values stay and the session is still closed. `zone_pauses` is the larger of the
+  snapshot's and the pause events', and the stop is never before the newest row. `LaunchRecovery` catches every
+  failure per session and always finishes, so no start ever waits for, or crashes on, a session it cannot close.
 - When the recorder stops a session itself (`storage_full`, say) but cannot write its final session.json, it leaves
   a v2 heartbeat carrying the stop token. Such a session is `RecoveryAction.CloseStopped`: closed as that stop, with
   no `session_interrupted` event and no exit record matched, since Android stopped nothing.
@@ -350,7 +370,7 @@ has `ok` 0 and error `no cellular network`, plus a `test_failed` event. No tests
 | `TelephonySource` | `TelephonyManager.requestCellInfoUpdate` every 1 s; `getAllCellInfo` once; `registerTelephonyCallback` once per listener (SignalStrengths, ServiceState, DisplayInfo, DataConnectionState; CellInfo only with the Phone permission) | `CellInfoAnswer`, `CellInfoRequestFailed`, `ServiceStateSnapshot`, `DataStateSnapshot`, `DisplayInfoSnapshot`, `SignalSnapshot`, `ListenerReport` |
 | `CellInfoMapper`, `TelephonyStateMapper` | `CellInfo*`, `ServiceState`, `NetworkRegistrationInfo.getAvailableServices`, `TelephonyDisplayInfo`, `SignalStrength` | Plain values |
 | `LocationSource` | `LocationManager` GPS, fused and network via `LocationRequest.Builder`; `GnssStatus.Callback` | `FixSample`, `GnssSnapshot`, `LocationAvailability` |
-| `DeviceStateSource` | `PowerManager.isInteractive`, battery broadcasts, `ConnectivityManager` Wi-Fi transport callback | `DeviceConditions` |
+| `DeviceStateSource` | As Android's `DeviceStateMonitor`: `DisplayManager` display states and listener, `BatteryManager.isCharging()` with `ACTION_CHARGING`/`ACTION_DISCHARGING`, a `ConnectivityManager` Wi-Fi callback with `NET_CAPABILITY_INTERNET` | `DeviceConditions` |
 | `ExitReasonReader` | `ActivityManager.getHistoricalProcessExitReasons` | `ExitRecord` |
 | `HandsetInfoReader`, `AppInfoReader`, `Permissions` | `Build`, `TelephonyManager` operator fields, `PackageManager` | `HandsetMeta`, `AppInfo`, booleans |
 | `AndroidReadinessChecker` | Permissions, `LocationManager`, `PowerManager`, `ActivityManager`, `UsageStatsManager`, SIM state | `ReadinessReport` |
@@ -359,7 +379,9 @@ has `ok` 0 and error `no cellular network`, plus a `test_failed` event. No tests
 
 The public APIs these names rely on were checked against the installed `platforms;android-37.0`
 `android.jar`. `ServiceState` has no public `isEmergencyOnly()`: emergency-only is read from `getState()` and
-`NetworkRegistrationInfo.getAvailableServices()`.
+`NetworkRegistrationInfo.getAvailableServices()`. `getState()` is the voice registration only, so the snapshot's
+state is Android's combined one: a registered cellular data (`DOMAIN_PS`) registration keeps the phone in service and
+never emergency-only.
 
 ## 8. Screens and navigation
 
@@ -441,7 +463,7 @@ pulls after every run. `android/e2e/check_e2e.py` asserts what the files hold.
 | --- | --- | --- |
 | First run, in light, dark and font scale 1.3 (`cmd uimode night`, `font_scale`, each after `pm clear`) | `FirstRunScreensTest` | The disclosure shows before any permission prompt; nothing is granted before Allow |
 | The walk: consent, permissions in Android's dialog, Live, Settings (ping `10.0.2.2`, 1 MB download), Start through the pre-start sheet, a marker, Stop after 180 s, Build zip, Share | `EndToEndWalkTest`, while the host sends `adb emu geo fix` once a second and `adb emu gsm signal-profile` every 20 s | Live shows a serving cell with its age badge; leaving Settings with unsaved test edits asks first; walk mode keeps the screen on without overriding brightness; the zip's SHA-256 on screen is the file's; the share sheet opens |
-| Every screen in the three variants | `ScreenTourTest` | Live, Start dialog, Sessions, detail and Share card, Readiness, Probe, Settings, About |
+| Every screen in the three variants | `ScreenTourTest` | Live (its first screen, the trend and the serving cell below it, and in landscape with the session buttons beside the panes), Start dialog, Sessions, detail and Share card, Readiness, Probe, Settings, About |
 | Process death | The host: START through the automation hook, `am force-stop` (relaunch with `am start`) and `run-as <pkg> kill -9` (relaunch by `RecoveryUiTest`) | The session is closed with a `session_interrupted` event whose cause is the exit reason `dumpsys activity exit-info` gives for the killed pid, at the last heartbeat; Live names it |
 | The minified release build | `android/e2e/release_smoke.sh`, last, with the APK the build job signed with a key made for the run | It installs, launches, and still runs with no crash 15 s later |
 | The files | `python -m fieldtap validate DIR --upload`, `python -m fieldtap report DIR`, `fieldtap validate` on the zip, `check_e2e.py` | Every session validates; kpi rows are fresh serving-cell measurements in cellinfo.csv, never a modem timestamp twice for a cell, positioned from the nearest fix within 5 s; track fixes lie on the injected walk; serving_cell and the marker with its note; ping and download rows; `stopped_by` user, `layer3` false, collection statistics; cells.csv agrees with `summary.plmns`; the report has no Procedures or Call flow section |
@@ -663,6 +685,12 @@ Changes agreed at integration:
     `locationEnabled`, and `LiveState.locationEnabled`.
   - `MeasurementHub` takes the clock and adds `inputsWithCurrentState` and `currentDisplayInfo()`.
   - `app/build.gradle.kts` gains the R8 release build type, with `app/proguard-rules.pro`.
+- Review round 2 (2026-09-11) changed these shapes, each with a default so existing callers and fakes compile:
+  - `LocationPipeline.outsideUntilMs`; `DefaultLocationPipeline(sessionStartElapsedMs)`; `PrivacyZoneGate(startElapsedMs)`,
+    `PrivacyZoneGate.outsideUntilMs`; `PrivacyZones.marginM` and `ZoneReach` (section 6.5).
+  - `RecorderSnapshot.holdingInputs` and `markersDropped`; `SessionOutcome.markersDropped`.
+  - `Csv.RecordReader`, the streaming form of `Csv.records`, used by `SessionRebuild`.
+  - `TelephonyValues.combinedState`, `hasPacketDomain` and `emergencyOnly(wwanDataRegistered)` (section 7).
 
 Inside owned files, an implementer may add private or internal helpers, new files in owned packages, and
 tests. Public API added for one's own use is fine; public API another workstream needs goes through the
@@ -698,7 +726,14 @@ orchestrator.
 | Gap reasons `app_paused`, `no_service`, `screen_off`, `unknown` | The contract gives examples only. |
 | Heartbeat outside the session directory | The directory holds only the seven files. |
 | cells.csv and session.json snapshotted every 60 s; recovery rebuilds plmns, cells.csv and collection from the rows | The rows are the truth: a session killed in its first minute had 17 kpi rows but no operator, no fresh sample and no serving cell. |
-| Privacy pause is sticky until a fix outside, stops statistics too, and resume re-stamps state. With zones set, writes wait for a fix that places the phone outside, and a hold of 60 s becomes a pause | Nothing written inside a zone, including times, even before the first fix or when GPS is lost next to a zone. |
+| Privacy pause is sticky until a fix outside, stops statistics too, and resume re-stamps state. With zones set, an input is written only once fixes show the phone could not have reached a zone when it was observed (`ZoneReach`: from the fix's speed, 10 m/s² up to 100 m/s); a stretch between two fixes that could hold a visit pauses logging, and 60 s without a fix outside becomes a pause | Nothing written inside a zone, including times, before the first fix and however far from a zone GPS was lost. Review round 2 found writes going on after a fix far from a zone, and inputs held from a start inside a zone released by the first fix outside it. The window after a fix is 5 s or nothing, and every event time is a fix's or a tick's, so no written time measures a zone's distance. A GPS-only phone indoors pauses after a minute with zones set; fused and network fixes keep it logging. |
+| Recovery streams the CSVs and falls back to the snapshot on any failure, running out of memory included; launch recovery catches every failure per session and always finishes | A long session that Android killed exhausted the heap: it was never closed, could not be exported, and every Start crashed the app. |
+| No file goes back in time: a track row's time is never before the row above, and `stopped_utc` never before a written row, in the recorder and in recovery | Android sets the clock back by 2 s or more from the network, and validate rejects a track out of order and kpi rows after the stop. Deriving every file time from one wall-to-elapsed offset would remove the cause, but changes SESSION-FORMAT's rule that a row carries the wall clock at observation, so that is left to the lead. |
+| Screen, charging and Wi-Fi are read as Android's `DeviceStateMonitor` reads them | The cadence, its sampling gaps and the Wi-Fi advice must be Android's: plugged in below 90 % is not charging for up to 15 minutes, and a display the proximity sensor blanks is off. |
+| Service state is Android's combined one: a registered cellular data domain is in service | `getState()` is the voice registration; a data-only SIM measured and carried data while the app wrote `service_lost`. |
+| A marker tapped while inputs are held says it is kept until the location is known, and a pause that drops it is said | Nothing is lost silently. Refusing Mark during every short hold would disable it for a second after each fix near a zone. |
+| A counted zone pause writes session.json at once; recovery also counts the pause events | A recovered session's `zone_pauses` must not be up to 60 s old. |
+| Live, upright: the hero, then RSRQ and SINR on one row, then one card for cadence, network and GPS, then the trend; SINR a cell does not report says so in one line; in a short wide window the session buttons sit beside the panes | Review round 2: two empty stacked tiles and a "no fresh samples yet" panel pushed the trend, cadence and GPS below the fold, and a landscape car mount lost the RSRP value under the bottom bar. |
 | Mock fixes rejected in release builds | Honest tracks. Debug builds accept them for the emulator. |
 | No WorkManager or OkHttp | No upload in this version. `Network.openConnection` binds to cellular. |
 | The Live screen runs the sources while visible, with no session | Live is a screen of the plan. Location is while-in-use there. |

@@ -103,6 +103,9 @@ Any other text whose numbers change: `MaterialTheme.typography.titleSmall.tabula
   between cards, `ItemGap` and `CardPadding` inside them.
 - `Sizes.MinTouchTarget` (48 dp) for everything tappable. Cap content at `Sizes.MaxContentWidth` (720 dp),
   centred, on tablets and in landscape; centred prose at `Sizes.MaxTextWidth`.
+- A window at least `Sizes.WideLayoutMinWidth` wide and lower than `Sizes.ShortWindowMaxHeight` (a phone in
+  landscape) has no room for a bottom action bar: primary actions move to a `Sizes.ActionRailWidth` column beside
+  the content, at its bottom, so the number a screen is about stays in view.
 - `Durations`: SHORT 150, MEDIUM 250, LONG 400 ms. Animate colour and state, never the numbers.
 
 ## Icons, words, numbers
@@ -119,21 +122,22 @@ Any other text whose numbers change: `MaterialTheme.typography.titleSmall.tabula
 
 | Component | Use it for |
 | --- | --- |
-| `FieldTapTopBar`, `TopBarAction` | Every screen's top bar; screens need no experimental opt-in. |
+| `FieldTapTopBar`, `TopBarAction`, `rememberTopBarScroll` | Every screen's top bar; screens need no experimental opt-in. Pass `rememberTopBarScroll()` and put `Modifier.nestedScroll(scroll.connection)` on the Scaffold, so the bar sets itself apart from content scrolled under it. |
 | `MetricTile`, `MetricGrid` | A live value with unit, quality chip, age badge and optional `footer` (a `SignalBar`). `MetricEmphasis.HERO` for the main number. The grid drops to one column at font scale 1.3 on a phone. |
+| `SecondaryMetricTile` | Two side by side under a hero tile: RSRQ and SINR on Live. A value the cell does not report shows the dash, no unit, and says why ("Not reported"). |
 | `AgeIndicator` | "2.1 s old" from `LiveState.badge`: FRESH neutral, AGING amber with a timer, STALE red with a warning. |
 | `SignalQualityChip`, `SignalQualityLabels` | A swatch and its level word, wherever a signal colour appears. |
 | `SignalBar` | A value's place on the scale with threshold ticks, next to the number. |
 | `CellSignalRow`, `SignalBars` | A neighbour or the NSA leg: bars, identity, value, level word. |
 | `CadenceIndicator` | "2 s" (success) or "10 s" (warning), with the reason. |
 | `StatusBanner` | A condition with an optional fix: Wi-Fi forcing 10 s, a session interrupted, paused in a privacy zone, a refused listener. At the top of the content, one per cause; WARNING and ERROR announce themselves. |
-| `StatusChip` | Short states side by side: service, data, 5G icon, GPS. |
+| `StatusChip` | Short states side by side: service, data, 5G icon, GPS. Its text has tabular figures, so a number that changes every second keeps the chip's width. |
 | `SectionCard`, `KeyValueRow`, `SectionDivider` | Titled groups of labelled values. `KeyValueRow(stacked = true, selectable = true)` for a SHA-256 or a URL. |
 | `ToggleRow`, `RadioRow`, `NavigationRow` | Settings rows: on or off (walk mode, tests, instant updates); one of several (share precision, inside `Modifier.selectableGroup()`); a link to a screen or system setting. |
 | `ChecklistRow` | A check with its level and fix: Readiness items, probe findings. |
 | `ReadinessSheet`, `ReadinessSheetContent`, `ReadinessProblems` | The pre-start sheet: named problems with fixes, blocking first, "Start anyway" only when nothing blocks. |
 | `SessionButton`, `RecordingDot` | Start, Starting, Recording (elapsed time, Stop), Stopping. Confirm Stop in a dialog. |
-| `SignalHistoryChart`, `TimeSeriesChart`, `ChartMath` | Five minutes of RSRP and SINR with reference lines, gaps left open, and a TalkBack summary. |
+| `SignalHistoryChart`, `TimeSeriesChart`, `ChartMath` | Five minutes of RSRP and SINR with reference lines, gaps left open, and a TalkBack summary. `sinrReported = false` shows SINR as one "Not reported by this cell" line instead of an empty panel. |
 | `SessionListRow` | A session: COMPLETED, RECORDING, INTERRUPTED or UNREADABLE. |
 | `EmptyState`, `LoadingState` | Nothing to show, waiting, or could not load (tone ERROR). Show loading only for waits over about 300 ms. |
 | `PermissionRationale` | A permission, why it is needed, its status and the fix button. |
@@ -150,12 +154,14 @@ shape argument), `Button`, `TextButton`, `Snackbar`.
 | State | Component input |
 | --- | --- |
 | `LiveState.serving`, `servingAgeMs`, `badge` | Hero `MetricTile(value = rsrp?.toString(), quality = SignalScale.quality(SignalMetric.RSRP, rsrp), ageText = stringResource(R.string.age_old, Formats.ageSeconds(ageMs)), badge = badge) { SignalBar(SignalMetric.RSRP, rsrp) }` |
+| `LiveCell.rsrq`, `sinr` of the serving cell | Two `SecondaryMetricTile`s in a row under the hero, "SS-RSRQ" and "SS-SINR" on NR; null with a serving cell is "Not reported" |
 | `LiveState.nsaLeg`, `neighbours` | One `CellSignalRow` per cell, in the given order (strongest first) |
 | `LiveState.shortInterval` | `CadenceIndicator(shortInterval = ...)` and `ChartMath.gapThresholdMs(shortInterval)` |
 | `LiveState.rsrpSeries`, `sinrSeries`, `nowElapsedMs` | `SignalHistoryChart`, with the summary built from `ChartMath.stats` |
 | `LiveState.service`, `data`, `display`, `lastFix` | `StatusChip`s |
 | `SessionStatus` Idle, Starting, Recording, Stopping | `SessionButtonState`; `Formats.elapsed(snapshot.elapsedMs)` |
 | `RecorderSnapshot.paused` | `StatusBanner(tone = StatusTone.INFO)`; Mark disabled |
+| `RecorderSnapshot.holdingInputs`, `markersDropped` | Mark confirms "Marker kept until your location is known"; a rise in `markersDropped` is said in the snackbar |
 | `ReadinessItem.level` OK, ADVICE, BLOCKER | `ChecklistRow(tone = SUCCESS, WARNING, ERROR)`, with a fix button unless `target` is NONE |
 | Problems found by Start | `ReadinessProblem(blocking = level == BLOCKER)`; the refusals NO_CONSENT, NO_PRECISE_LOCATION, LOCATION_OFF and STORAGE_FULL are blocking too |
 | `SessionSummary.recording`, `readable`, `stoppedBy` | `SessionRowStatus` RECORDING, UNREADABLE, INTERRUPTED (when `stoppedBy` is an Android exit reason), else COMPLETED |
