@@ -15,6 +15,14 @@ kotlinxCoroutines = "1.11.0"
 kotlinxSerializationJson = "1.11.0"
 junit = "4.13.2"
 
+# Instrumented end-to-end tests only (app/src/androidTest, run on the CI emulator by android/e2e/run_e2e.sh).
+# Newest stable AndroidX Test releases on Google Maven. espresso-core is declared so the release that matches
+# runner 1.7.0 is resolved, not the older 3.5.0 that Compose UI testing depends on.
+androidxTestRunner = "1.7.0"
+androidxTestExtJunit = "1.3.0"
+espressoCore = "3.7.0"
+uiautomator = "2.4.0"
+
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
@@ -36,6 +44,12 @@ kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExtJunit" }
+androidx-test-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+androidx-test-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }
 
 [plugins]
 # AGP 9 compiles Kotlin itself (built-in Kotlin), so there is no org.jetbrains.kotlin.android.

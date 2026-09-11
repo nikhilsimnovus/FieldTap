@@ -25,6 +25,9 @@ android {
         }
         versionCode = 1
         versionName = "0.1.0"
+
+        // The instrumented end-to-end tests in src/androidTest; android/e2e/run_e2e.sh runs them on the CI emulator.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     // Java 17 bytecode; with built-in Kotlin, Kotlin's jvmTarget follows targetCompatibility.
@@ -72,4 +75,13 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+
+    // End-to-end tests: Compose UI testing drives the app's screens, UiAutomator Android's own dialogs.
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.espresso.core)
+    androidTestImplementation(libs.androidx.test.uiautomator)
+    androidTestImplementation(libs.junit)
 }
