@@ -465,13 +465,14 @@ pulls after every run. `android/e2e/check_e2e.py` asserts what the files hold.
 | The walk: consent, permissions in Android's dialog, Live, Settings (ping `10.0.2.2`, 1 MB download), Start through the pre-start sheet, a marker, Stop after 180 s, Build zip, Share | `EndToEndWalkTest`, while the host sends `adb emu geo fix` once a second and `adb emu gsm signal-profile` every 20 s | Live shows a serving cell with its age badge; leaving Settings with unsaved test edits asks first; walk mode keeps the screen on without overriding brightness; the zip's SHA-256 on screen is the file's; the share sheet opens |
 | Every screen in the three variants | `ScreenTourTest` | Live (its first screen, the trend and the cells below it, and in landscape with the session buttons beside the content), Start dialog, Sessions, detail and Share card, Readiness, Probe, Settings, About |
 | Process death | The host: START through the automation hook, `am force-stop` (relaunch with `am start`) and `run-as <pkg> kill -9` (relaunch by `RecoveryUiTest`) | The session is closed with a `session_interrupted` event whose cause is the exit reason `dumpsys activity exit-info` gives for the killed pid, at the last heartbeat; Live names it |
-| The minified release build | `android/e2e/release_smoke.sh`, last, with the APK the build job signed with a key made for the run | It installs, launches, and still runs with no crash 15 s later |
+| The signed, minified release build | The release job, on its own emulators at API 36 and API 31: Gradle signs `app-release.apk` with a key made in the job, and `android/e2e/release_smoke.sh` drives it with only `uiautomator dump` and `input tap` on the app's strings, while the host sends `adb emu geo fix` once a second | Installed with `adb install -r`, it is the version `app/build.gradle.kts` sets, not debuggable and without the hook; the disclosure shows first, About shows the version, a session with tests records 90 s and stops; `fieldtap validate --upload` and `fieldtap report` pass; the files hold GPS fixes, positioned measurements, test rows, the release's version and `stopped_by` user, plus kpi rows and `serving_cell` on API 36; no crash |
 | The files | `python -m fieldtap validate DIR --upload`, `python -m fieldtap report DIR`, `fieldtap validate` on the zip, `check_e2e.py` | Every session validates; kpi rows are fresh serving-cell measurements in cellinfo.csv, never a modem timestamp twice for a cell, positioned from the nearest fix within 5 s; track fixes lie on the injected walk; serving_cell and the marker with its note; ping and download rows; `stopped_by` user, `layer3` false, collection statistics; cells.csv agrees with `summary.plmns`; the report has no Procedures or Call flow section |
 
 The artifacts of each leg are `e2e-sessions-api<N>` (sessions with report.html, the exported zip),
 `e2e-screenshots-api<N>`, `e2e-logcat-api<N>` (redacted as the probe redacts) and `e2e-reports-api<N>` (summary, JUnit XML
-of each instrumentation run, fieldtap output, check results). The build job adds `release-apk`, the minified APK
-signed for the smoke test, and each leg adds `release-smoke-api<N>`.
+of each instrumentation run, fieldtap output, check results). Each leg of the release job adds `release-smoke-api<N>`
+(summary, a screenshot and window dump of each step, the session with report.html, redacted logcat) and
+`release-apk-api<N>` (the APK signed with that job's throwaway key, and R8's mapping.txt).
 
 ## 10. Workstreams
 
@@ -701,7 +702,10 @@ orchestrator.
 - Commands, from `android/`:
   `./gradlew :format:test :core:test :app:testDebugUnitTest :app:assembleDebug :app:lintDebug`; to compile only:
   `./gradlew :format:compileKotlin :core:compileKotlin :app:compileDebugKotlin`; the R8-minified release APK:
-  `./gradlew :app:assembleRelease`.
+  `./gradlew :app:assembleRelease`. It is signed only when the release key is configured through
+  `FIELDTAP_RELEASE_STORE_FILE` and `FIELDTAP_RELEASE_STORE_PASSWORD_FILE` (or the matching `fieldtap.release.*` Gradle
+  properties); [`README.md`](README.md), "Release key", says where the key lives. Without them it is
+  `app-release-unsigned.apk`.
 - In Bash, first `source /c/Users/Simnovus-Lab/tools/android-env.sh` and
   `export JAVA_TOOL_OPTIONS='-Djdk.net.unixdomain.tmpdir=C:\Users\Simnovus-Lab\.gradle\afunix'`. Without the
   second, JDK 21's selector cannot open its AF_UNIX pipe under `%TEMP%` on this PC.
@@ -744,7 +748,9 @@ orchestrator.
 | A cells.csv row may lack `pci` or `dl_earfcn` | SESSION-FORMAT.md: the cells must account for every row of kpi.csv, and `plausible` says which rows are incomplete. |
 | The hub replays the newest service, data and display state to each new collector, and nothing else | Android delivers them once, at registration, and a session starts after the Live screen registered. Answers and fixes are timed by their arrival, so they are never replayed. |
 | Location switched off during a session is shown on Live and in the notification, not written to the files | Writing it needs a new event token, and tokens are the lead's (decision 4). |
-| The release build runs R8 with resource shrinking and no keep rules; CI launches the minified APK on both emulators | 28 MB became 3.8 MB. A class R8 removed wrongly then fails on the emulator, not on a phone. |
+| The release build runs R8 with resource shrinking and no keep rules; CI's release job signs it with a key made in the job and drives it through a session on both emulators | 28 MB became 3.8 MB. A class R8 removed wrongly then fails on the emulator, not on a phone, and the driving uses nothing inside the APK, so the APK tested is the one a phone installs. |
+| Release signing reads the keystore and its password from the environment or `~/.gradle/gradle.properties`, never from the repository; with none set the release APK is unsigned, and a partial setting fails the build | The key stays on the release PC and its offline backups, CI needs no secret, and a release meant to be signed is never left unsigned without notice. |
+| Version 1.0.0, versionCode 1, for the first signed release | About and every `session.json` show it; each later APK that installs over it needs a higher versionCode. |
 | The debug automation hook requires `android.permission.DUMP` | The debug APK is the build alpha testers install; only the adb shell may drive it. |
 | Walk mode keeps the screen on but leaves brightness to the phone | Forcing 15 % overrode adaptive brightness outdoors, where the screen must stay readable. |
 | Settings saves its switches at once and the test fields with Save, and asks before leaving with unsaved test edits | The fields are validated before they are saved; the switches need no validation. |
