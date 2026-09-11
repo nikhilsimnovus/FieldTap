@@ -58,6 +58,22 @@ KDoc that disagrees.
 10. **Mock locations.** Release builds reject mock fixes; debug builds accept them.
 11. **Builds.** Implementers do not run Gradle while they work in parallel; the integrator builds.
 
+### Decisions of 2026-09-11
+
+These settle what review rounds 1 and 2 left to the lead. Where one of them and one of 2026-09-10 disagree, the later wins.
+
+12. **Phone-size screenshots.** The API 36 emulator legs run on a Pixel 7 profile (about 411 x 914 dp) and take every
+    screen in light, dark, font scale 1.3 and landscape, at full length. The API 31 legs keep the small screen as the
+    robustness check. The walk and the recovery scenarios are not repeated in extra orientations.
+13. **Disclosure.** Four scannable points with icons first: what is recorded; it stays on this phone and leaves only when
+    you share a zip; no phone or SIM identifiers are ever read; you can withdraw at any time in Settings. Then the full
+    consent text in an expandable section, then the actions. The consent text changed, so its version is
+    `2026-09-11-draft`; there are no existing users. The disclosure still shows before any permission prompt.
+14. **Location services switched off mid-session** are written with the existing `gps_lost` event (detail
+    `Location services turned off`), and `gps_restored` when location comes back, with no new event token.
+15. **Markers.** Mark from the notification confirms visibly (the notification text briefly reads "Marker 3 added at
+    10:05"), and markers dropped at Stop or by a pause are shown on the Session detail screen as well.
+
 ---
 
 ## 1. Modules
@@ -468,7 +484,7 @@ pulls after every run. `android/e2e/check_e2e.py` asserts what the files hold.
 
 | Step | Driven by | Must hold |
 | --- | --- | --- |
-| First run, in each variant: light, dark, font scale 1.3, and on API 36 landscape (`cmd uimode night`, `font_scale`, `user_rotation`, each after `pm clear`) | `FirstRunScreensTest` | The disclosure shows before any permission prompt; nothing is granted before Allow; each screen at every scroll position |
+| First run, in each variant: light, dark, font scale 1.3, and on API 36 landscape (`cmd uimode night`, `font_scale`, `user_rotation`, each after `pm clear`) | `FirstRunScreensTest` | The disclosure shows before any permission prompt, and again with its full notice open; nothing is granted before Allow; each screen at every scroll position |
 | The walk: consent, permissions in Android's dialog, Live, Settings (ping `10.0.2.2`, 1 MB download), Start through the pre-start sheet, a marker on Live and one from the notification's Mark, Stop after 180 s, Build zip, Share | `EndToEndWalkTest`, while the host sends `adb emu geo fix` once a second and `adb emu gsm signal-profile` every 20 s | Live shows a serving cell with its age badge; leaving Settings with unsaved test edits asks first; walk mode keeps the screen on without overriding brightness; the notification says `Marker 2 added at` its time, then its usual text again; the zip's SHA-256 on screen is the file's; the share sheet opens |
 | Every screen in each variant | `ScreenTourTest` | Live (and, upright, Live turned with the session buttons beside the content), Start dialog, Sessions, detail, Readiness, Probe, Settings, About, each at every scroll position (`Screens.shotFull`: `NAME-p1.png`, `NAME-p2.png` and on) |
 | Location services off mid-session, with a privacy zone 10 km from the walk | `LocationOffTest`, switching with `cmd location set-location-enabled` | `gps_lost` with `Location services turned off` at the switch; Live and the notification say location is off; a marker tapped while inputs wait for a fix is said to wait, then, when no fix came for 60 s, is dropped and said so on Live, in the notification and on Session detail; the first fix after location is back resumes logging and writes `gps_restored`; no fix while off |
@@ -756,7 +772,7 @@ orchestrator.
 | The Live screen runs the sources while visible, with no session | Live is a screen of the plan. Location is while-in-use there. |
 | Readiness never refuses a start; Start runs the checks and shows a pre-start sheet naming each problem, with "Start anyway" unless something blocks | Decision 7, replacing the earlier `READINESS_REQUIRED` refusal. |
 | Storage cap in decimal units | Matches "2 GB" and "10 MB" (the golden download is 10 000 000 bytes). |
-| Consent text `2026-09-10-draft` in `Consent.CURRENT`, worded per decision 2 | Not legally reviewed. Any change to the text needs a new version and the new SHA-256 pinned in `ConsentTest`, because stored consent records and every session's `consent_sha256` depend on the exact bytes. |
+| Consent text `2026-09-11-draft` in `Consent.CURRENT`: the four points of decision 13 (`Consent.SUMMARY`), then the full notice of `2026-09-10-draft`, unchanged (`Consent.NOTICE`), hashed as one text (`Consent.textOf`) | Not legally reviewed. Every word of the notice the disclosure shows is under the hash, the points included, so a point cannot promise more than what was agreed to. The intro saying why precise location is asked for, which the plan requires on the disclosure, is not part of it. Any change to the text needs a new version and the new SHA-256 pinned in `ConsentTest`, because stored consent records and every session's `consent_sha256` depend on the exact bytes. |
 | The sampling-gap threshold uses the interval in force when the previous fresh sample was measured | Only this reproduces the golden 14.0 s `screen_off` gap: the answer that delivered the previous fresh sample already reports the screen off. |
 | A cells.csv row may lack `pci` or `dl_earfcn` | SESSION-FORMAT.md: the cells must account for every row of kpi.csv, and `plausible` says which rows are incomplete. |
 | The hub replays the newest service, data and display state to each new collector, and nothing else | Android delivers them once, at registration, and a session starts after the Live screen registered. Answers and fixes are timed by their arrival, so they are never replayed. |
