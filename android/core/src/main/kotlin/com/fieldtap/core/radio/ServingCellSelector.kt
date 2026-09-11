@@ -1,12 +1,20 @@
 package com.fieldtap.core.radio
 
 import com.fieldtap.core.input.CellSnapshot
+import com.fieldtap.core.input.ServiceRegState
 import com.fieldtap.core.input.ServiceStateSnapshot
+import com.fieldtap.format.Rat
 
 /** The serving cells of one answer. */
 data class ServingSelection(
     val primary: CellSnapshot?,
     val nsaSecondary: CellSnapshot?,
+)
+
+/** Positions in an answer's cell list of its serving cells, so duplicates of equal value stay apart. */
+internal data class ServingIndices(
+    val primary: Int?,
+    val nsaSecondary: Int?,
 )
 
 /**
@@ -31,9 +39,38 @@ data class ServingSelection(
  * Owner: workstream `radio-core`.
  */
 object ServingCellSelector {
-    fun select(cells: List<CellSnapshot>): ServingSelection = TODO("radio-core")
+    fun select(cells: List<CellSnapshot>): ServingSelection {
+        val indices = selectIndices(cells)
+        return ServingSelection(
+            primary = indices.primary?.let { cells[it] },
+            nsaSecondary = indices.nsaSecondary?.let { cells[it] },
+        )
+    }
 
-    fun isEmergencyOnly(state: ServiceStateSnapshot): Boolean = TODO("radio-core")
+    fun isEmergencyOnly(state: ServiceStateSnapshot): Boolean =
+        state.state == ServiceRegState.EMERGENCY_ONLY || state.emergencyOnly
 
-    fun isOutOfService(state: ServiceStateSnapshot): Boolean = TODO("radio-core")
+    fun isOutOfService(state: ServiceStateSnapshot): Boolean =
+        (state.state == ServiceRegState.OUT_OF_SERVICE || state.state == ServiceRegState.POWER_OFF) &&
+            !isEmergencyOnly(state)
+
+    /** [select], as positions in [cells]. */
+    internal fun selectIndices(cells: List<CellSnapshot>): ServingIndices {
+        val primary = primaryIndex(cells)
+        val nsaSecondary = if (primary != null && cells[primary].rat == Rat.LTE) {
+            cells.indexOfFirst {
+                it.rat == Rat.NR && it.connectionStatus == CellSnapshot.CONNECTION_SECONDARY_SERVING
+            }.takeIf { it >= 0 }
+        } else {
+            null
+        }
+        return ServingIndices(primary, nsaSecondary)
+    }
+
+    private fun primaryIndex(cells: List<CellSnapshot>): Int? {
+        val byStatus = cells.indexOfFirst { it.connectionStatus == CellSnapshot.CONNECTION_PRIMARY_SERVING }
+        if (byStatus >= 0) return byStatus
+        if (cells.any { it.connectionStatus != null }) return null
+        return cells.indexOfFirst { it.registered && (it.rat == Rat.LTE || it.rat == Rat.NR) }.takeIf { it >= 0 }
+    }
 }

@@ -2,6 +2,7 @@ package com.fieldtap.core.location
 
 import com.fieldtap.core.input.FixSample
 import com.fieldtap.core.privacy.PrivacyZone
+import com.fieldtap.core.privacy.PrivacyZoneGate
 import com.fieldtap.format.EventRow
 import com.fieldtap.format.LatLon
 import com.fieldtap.format.TrackRow
@@ -49,8 +50,18 @@ interface LocationPipeline {
 }
 
 /**
- * The production [LocationPipeline]: [FixSelector] -> [com.fieldtap.core.privacy.PrivacyZoneGate] ->
- * [FixJoiner], [GpsEventDeriver], [TrackRows].
+ * The production [LocationPipeline]: [FixSelector] -> [PrivacyZoneGate] -> [FixJoiner],
+ * [GpsEventDeriver], [TrackRows].
+ *
+ * For each fix, in this order:
+ * 1. [FixSelector] rejects mock (unless [allowMockFixes]), 0,0, out-of-range, out-of-order and
+ *    redundant fallback fixes. A rejected fix produces nothing and changes no state.
+ * 2. [PrivacyZoneGate] decides the pause and yields the `privacy_zone` event, if any.
+ * 3. [GpsEventDeriver] sees every accepted fix, inside a zone or not; its `gps_restored` is kept only
+ *    when logging is not paused after this fix.
+ * 4. Only a fix outside every zone becomes a track row, a join candidate and [lastFix].
+ *
+ * The zones are copied at construction: a session keeps the zones it started with.
  *
  * Tests: a walk into a zone and out again gives exactly two privacy_zone rows without coordinates,
  * no track rows between them, zonePauses 1, and joins that never use a fix from inside the zone.
@@ -58,20 +69,51 @@ interface LocationPipeline {
  * Owner: workstream `location-privacy-core`.
  */
 class DefaultLocationPipeline(
-    private val zones: List<PrivacyZone>,
+    zones: List<PrivacyZone>,
     private val allowMockFixes: Boolean = false,
 ) : LocationPipeline {
-    override fun onFix(fix: FixSample): LocationStep = TODO("location-privacy-core")
+    private val selector = FixSelector(allowMock = allowMockFixes)
+    private val gate = PrivacyZoneGate(zones.toList())
+    private val joiner = FixJoiner()
+    private val gpsEvents = GpsEventDeriver()
+    private var newestOutside: FixSample? = null
 
-    override fun onTick(nowWallMs: Long, nowElapsedMs: Long): List<EventRow> = TODO("location-privacy-core")
+    override fun onFix(fix: FixSample): LocationStep {
+        if (!selector.accept(fix)) return REJECTED
 
-    override fun join(measurementElapsedMs: Long, nowElapsedMs: Long): JoinResult = TODO("location-privacy-core")
+        val zoneEvent = gate.onFix(fix)
+        val gpsEvent = gpsEvents.onFix(fix)
+        val paused = gate.paused
+        val events = when {
+            zoneEvent != null && gpsEvent != null && !paused -> listOf(zoneEvent, gpsEvent)
+            zoneEvent != null -> listOf(zoneEvent)
+            gpsEvent != null && !paused -> listOf(gpsEvent)
+            else -> emptyList()
+        }
+        if (paused) return LocationStep(track = null, events = events, pauseChanged = zoneEvent != null)
 
-    override fun joinFinal(measurementElapsedMs: Long): LatLon? = TODO("location-privacy-core")
+        joiner.add(fix)
+        newestOutside = fix
+        return LocationStep(track = TrackRows.of(fix), events = events, pauseChanged = zoneEvent != null)
+    }
 
-    override val paused: Boolean get() = TODO("location-privacy-core")
+    override fun onTick(nowWallMs: Long, nowElapsedMs: Long): List<EventRow> {
+        val lost = gpsEvents.onTick(nowWallMs, nowElapsedMs) ?: return emptyList()
+        return listOf(lost)
+    }
 
-    override val zonePauses: Int get() = TODO("location-privacy-core")
+    override fun join(measurementElapsedMs: Long, nowElapsedMs: Long): JoinResult =
+        joiner.join(measurementElapsedMs, nowElapsedMs)
 
-    override fun lastFix(): FixSample? = TODO("location-privacy-core")
+    override fun joinFinal(measurementElapsedMs: Long): LatLon? = joiner.joinFinal(measurementElapsedMs)
+
+    override val paused: Boolean get() = gate.paused
+
+    override val zonePauses: Int get() = gate.pauses
+
+    override fun lastFix(): FixSample? = newestOutside
+
+    private companion object {
+        val REJECTED = LocationStep(track = null, events = emptyList(), pauseChanged = false)
+    }
 }

@@ -20,8 +20,8 @@ object CellValues {
     fun csvCell(raw: Int): String = Csv.cell(raw.takeUnless { it == UNAVAILABLE })
 
     /** Null for `Integer.MAX_VALUE` and `Integer.MIN_VALUE` (both mean "unavailable" in telephony). */
-    fun intOrNull(raw: Int): Int? = TODO("radio-core")
+    fun intOrNull(raw: Int): Int? = if (raw == UNAVAILABLE || raw == Int.MIN_VALUE) null else raw
 
     /** Null for `Long.MAX_VALUE` and `Integer.MAX_VALUE` as a long. */
-    fun longOrNull(raw: Long): Long? = TODO("radio-core")
+    fun longOrNull(raw: Long): Long? = if (raw == UNAVAILABLE_LONG || raw == UNAVAILABLE.toLong()) null else raw
 }

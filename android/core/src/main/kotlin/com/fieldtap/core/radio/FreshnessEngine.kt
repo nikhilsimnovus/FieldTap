@@ -19,7 +19,18 @@ data class CellKey(
     val cellId: Long?,
 ) {
     companion object {
-        fun of(cell: CellSnapshot): CellKey = TODO("radio-core")
+        /** The key of [cell]: its RAT, PLMN (only when mcc and mnc are both known), PCI, ARFCN and cell id. */
+        fun of(cell: CellSnapshot): CellKey {
+            val mcc = cell.mcc
+            val mnc = cell.mnc
+            return CellKey(
+                rat = cell.rat,
+                plmn = if (mcc != null && mnc != null) mcc + mnc else null,
+                pci = cell.pci,
+                arfcn = cell.arfcn,
+                cellId = cell.cellId,
+            )
+        }
     }
 }
 
@@ -55,8 +66,11 @@ data class ClassifiedAnswer(
  *
  * Contract:
  * - A cell is stale when a cell with an equal [CellKey] and an equal `timestampMs` was already
- *   classified by any earlier answer, request or push. The first sighting is fresh.
- * - Seen keys are remembered for at least [historyMs] of elapsedRealtime after their last sighting.
+ *   classified by any earlier answer, request or push. The first sighting is fresh. Two equal cells
+ *   inside one answer are both judged against the earlier answers only.
+ * - Seen keys are remembered for at least [historyMs] of elapsedRealtime after their last sighting
+ *   (each sighting renews the memory). As a guard against a vendor that floods new timestamps, at most
+ *   65 536 measurements are remembered; the ones sighted longest ago are forgotten first.
  * - A stale cell keeps the measurement time of the measurement it repeats: `time_epoch` and
  *   `timestamp_ms` stay, only `seen_utc` and `age_ms` move on.
  * - [classify] never throws for vendor oddities. Timestamps that never advance make every later
@@ -71,8 +85,86 @@ data class ClassifiedAnswer(
  * Owner: workstream `radio-core`.
  */
 class FreshnessEngine(private val historyMs: Long = 120_000) {
-    fun classify(answer: CellInfoAnswer): ClassifiedAnswer = TODO("radio-core")
+    /** Each measurement seen, mapped to the elapsedRealtime of its last sighting; least recently sighted first. */
+    private val sightings = LinkedHashMap<Sighting, Long>()
+
+    init {
+        require(historyMs >= 0) { "historyMs must not be negative, was $historyMs" }
+    }
+
+    fun classify(answer: CellInfoAnswer): ClassifiedAnswer {
+        val nowMs = answer.observedElapsedMs
+        expire(nowMs)
+        val keys = answer.cells.map { Sighting(CellKey.of(it), it.timestampMs) }
+        val cells = answer.cells.mapIndexed { index, cell ->
+            val ageMs = ageOf(nowMs, cell.timestampMs)
+            ClassifiedCell(
+                cell = cell,
+                stale = sightings.containsKey(keys[index]),
+                ageMs = ageMs,
+                measurementWallMs = answer.observedWallMs - ageMs,
+            )
+        }
+        for (key in keys) {
+            // Re-inserting moves the sighting to the end, so the map stays ordered by last sighting.
+            sightings.remove(key)
+            sightings[key] = nowMs
+        }
+        trimToCapacity()
+
+        val serving = ServingCellSelector.selectIndices(answer.cells)
+        val primary = serving.primary?.let { cells[it] }
+        val nsaSecondary = serving.nsaSecondary?.let { cells[it] }
+        val fresh = if (primary != null) !primary.stale else cells.any { !it.stale }
+        return ClassifiedAnswer(
+            answer = answer,
+            cells = cells,
+            primary = primary,
+            nsaSecondary = nsaSecondary,
+            fresh = fresh,
+            repeat = cells.isNotEmpty() && !fresh,
+        )
+    }
 
     /** Forget every seen measurement. */
-    fun reset(): Unit = TODO("radio-core")
+    fun reset() {
+        sightings.clear()
+    }
+
+    private fun expire(nowMs: Long) {
+        val cutoffMs = nowMs - historyMs
+        val iterator = sightings.values.iterator()
+        while (iterator.hasNext()) {
+            if (iterator.next() < cutoffMs) iterator.remove() else break
+        }
+    }
+
+    private fun trimToCapacity() {
+        val iterator = sightings.keys.iterator()
+        while (sightings.size > MAX_SIGHTINGS && iterator.hasNext()) {
+            iterator.next()
+            iterator.remove()
+        }
+    }
+
+    private data class Sighting(val key: CellKey, val timestampMs: Long)
+}
+
+private const val MAX_SIGHTINGS: Int = 65_536
+
+/** `nowMs - timestampMs`, never negative, saturating instead of overflowing on a nonsense timestamp. */
+private fun ageOf(nowMs: Long, timestampMs: Long): Long {
+    if (timestampMs >= nowMs) return 0L
+    val age = nowMs - timestampMs
+    return if (age < 0L) Long.MAX_VALUE else age
+}
+
+/**
+ * The cell whose measurement time stands for a fresh answer in gap detection and interval statistics:
+ * the primary serving cell, or with no primary the newest fresh cell. Null when the answer is not fresh.
+ */
+internal fun ClassifiedAnswer.freshReference(): ClassifiedCell? {
+    if (!fresh) return null
+    primary?.let { return it }
+    return cells.filter { !it.stale }.maxByOrNull { it.cell.timestampMs }
 }
