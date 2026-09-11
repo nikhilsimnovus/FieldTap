@@ -54,32 +54,9 @@ class ServingCellSelectorTest {
     }
 
     @Test
-    fun aRegisteredCellReportedAsNotConnectedIsStillPrimary() {
-        // The Android 12 emulator, and HALs while idle, report CONNECTION_NONE for the cell they are registered on.
-        val neighbour = lte(0, pci = 7, status = CellSnapshot.CONNECTION_NONE, registered = false)
-        val camped = lte(0, pci = 1, status = CellSnapshot.CONNECTION_NONE, registered = true)
-        val selection = ServingCellSelector.select(listOf(neighbour, camped))
-        assertEquals(camped, selection.primary)
-        assertNull(selection.nsaSecondary)
-    }
-
-    @Test
-    fun aRegisteredCellWithoutAPrimaryKeepsItsNsaLeg() {
-        val anchor = lte(0, status = CellSnapshot.CONNECTION_NONE, registered = true)
-        val leg = nr(0, status = CellSnapshot.CONNECTION_SECONDARY_SERVING, registered = false)
-        val selection = ServingCellSelector.select(listOf(leg, anchor))
-        assertEquals(anchor, selection.primary)
-        assertEquals(leg, selection.nsaSecondary)
-    }
-
-    @Test
-    fun statusesWithoutAPrimaryOrARegisteredLteOrNrCellMeanNoPrimary() {
+    fun statusesWithoutAPrimaryMeanNoPrimary() {
         val selection = ServingCellSelector.select(
-            listOf(
-                lte(0, status = CellSnapshot.CONNECTION_NONE, registered = false),
-                gsm(0, status = CellSnapshot.CONNECTION_NONE),
-                nr(0, pci = 1, status = CellSnapshot.CONNECTION_SECONDARY_SERVING, registered = false),
-            ),
+            listOf(lte(0, status = CellSnapshot.CONNECTION_NONE, registered = true), lte(0, pci = 1, status = null, registered = true)),
         )
         assertNull(selection.primary)
         assertNull(selection.nsaSecondary)
