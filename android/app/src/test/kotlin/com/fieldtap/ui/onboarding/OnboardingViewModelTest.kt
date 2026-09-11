@@ -188,6 +188,12 @@ class OnboardingViewModelTest {
         val paragraphs = consentParagraphs(Consent.CURRENT.text)
         assertEquals(6, paragraphs.size)
         assertEquals(Consent.CURRENT.text, paragraphs.joinToString("\n\n"))
+        // Every paragraph has its own topic icon; a new text with more paragraphs needs the list extended.
+        assertEquals(paragraphs.size, ConsentTopic.CURRENT.size)
+        assertEquals(ConsentTopic.CURRENT.size, ConsentTopic.CURRENT.toSet().size)
+        assertEquals(ConsentTopic.GENERAL, ConsentTopic.of(paragraphs.size))
+        assertTrue(paragraphs[4].contains("IMEI"))
+        assertEquals(ConsentTopic.IDENTIFIERS, ConsentTopic.of(4))
     }
 
     private fun TestScope.collectAccepted(viewModel: OnboardingViewModel): MutableList<Unit> {

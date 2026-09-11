@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -278,12 +280,8 @@ internal fun DisclosureContent(
         }
         item(key = "consent") {
             SectionCard(title = consentTitle, icon = FieldTapIcons.Shield, modifier = Modifier.setupContentWidth()) {
-                paragraphs.forEach { paragraph ->
-                    Text(
-                        text = paragraph,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
+                paragraphs.forEachIndexed { index, paragraph ->
+                    ConsentPoint(topic = ConsentTopic.of(index), text = paragraph)
                 }
             }
         }
@@ -295,6 +293,58 @@ internal fun DisclosureContent(
 
 /** The consent text split into its paragraphs, word for word: joined with a blank line they are the text again. */
 internal fun consentParagraphs(text: String): List<String> = text.split(PARAGRAPH_BREAK).filter { it.isNotBlank() }
+
+/**
+ * What each paragraph of [Consent.CURRENT] is about, in order, so the notice scans point by point without a word added
+ * to the text it hashes: the session, what it records, location and privacy zones, where recordings go, identifiers,
+ * withdrawing. A paragraph past the list, from a later text, takes [GENERAL].
+ */
+internal enum class ConsentTopic {
+    SESSION,
+    RECORDED,
+    LOCATION,
+    SHARING,
+    IDENTIFIERS,
+    WITHDRAW,
+    GENERAL,
+    ;
+
+    companion object {
+        /** The topics of the current text's paragraphs, one each. */
+        val CURRENT: List<ConsentTopic> = listOf(SESSION, RECORDED, LOCATION, SHARING, IDENTIFIERS, WITHDRAW)
+
+        fun of(index: Int): ConsentTopic = CURRENT.getOrElse(index) { GENERAL }
+    }
+}
+
+/** One paragraph of the consent notice, word for word, after an icon for its topic. The icon is decoration: TalkBack reads the text. */
+@Composable
+private fun ConsentPoint(topic: ConsentTopic, text: String) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.Md)) {
+        Icon(
+            imageVector = when (topic) {
+                ConsentTopic.SESSION -> FieldTapIcons.Play
+                ConsentTopic.RECORDED -> FieldTapIcons.SignalBars
+                ConsentTopic.LOCATION -> FieldTapIcons.Location
+                ConsentTopic.SHARING -> FieldTapIcons.Share
+                ConsentTopic.IDENTIFIERS -> FieldTapIcons.Shield
+                ConsentTopic.WITHDRAW -> FieldTapIcons.Tune
+                ConsentTopic.GENERAL -> FieldTapIcons.Info
+            },
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .padding(top = Spacing.Xxs)
+                .size(Sizes.Icon),
+        )
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
 
 private const val PARAGRAPH_BREAK = "\n\n"
 
