@@ -622,6 +622,10 @@ Changes agreed at integration:
   found a fix within 5 s. `LocationValues.fixElapsedMillis` now takes a fix time later than its callback, or more than an
   hour older, as invalid and uses the callback's elapsed time instead; the proof checks that every track time lies
   within the session.
+- Found in the end-to-end screenshots: beside the Mark button on the 320 dp emulator screen the recording button showed
+  "Rec" and "1:", cutting off the elapsed time. `SessionButton` now leaves out its label and the Stop word when its
+  content is narrower than 168 dp times the font scale (`recordingIsCompact`), the time shrinks before it would clip,
+  and TalkBack reads "Recording, 12:34, Stop" in both layouts.
 
 Inside owned files, an implementer may add private or internal helpers, new files in owned packages, and
 tests. Public API added for one's own use is fine; public API another workstream needs goes through the
