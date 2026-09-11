@@ -74,7 +74,9 @@ class LaunchRecovery internal constructor(
                 withContext(dispatcher) { recoverAll() }
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // An Error as well as an Exception: a start waits for this run, so a failure here must never be one
+                // that every later start runs into again.
                 log("Launch recovery failed; open sessions stay open until the next launch (${e.javaClass.simpleName})")
                 emptyList()
             }
@@ -97,7 +99,9 @@ class LaunchRecovery internal constructor(
         if (open.isEmpty()) return emptyList()
         val exits = try {
             exitRecords()
-        } catch (e: Exception) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
             log("Could not read process exit reasons (${e.javaClass.simpleName})")
             emptyList()
         }
@@ -108,7 +112,10 @@ class LaunchRecovery internal constructor(
             if (action !is RecoveryAction.Close) continue
             try {
                 outcomes += close(action)
-            } catch (e: Exception) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // One session that cannot be closed, even for want of memory, never keeps the others open.
                 log("Could not close an interrupted session; it stays open until the next launch (${e.javaClass.simpleName})")
             }
         }

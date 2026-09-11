@@ -203,7 +203,8 @@ class FileSessionRepositoryTest {
     @Test
     fun listingClosesASessionTheAppStoppedButCouldNotFinishWriting() {
         copyGolden(GOLDEN_NAME) { openJson(it) }
-        val stoppedAt = 1_789_050_700_000L
+        // 14:32:00.000, after the golden session's last row (14:31:59.900): a stop is never before a row it holds.
+        val stoppedAt = 1_789_050_720_000L
         paths.heartbeat(GOLDEN_NAME).writeText(HeartbeatRecord(stoppedAt, 25_423_456L, 4242, stoppedBy = "storage_full").encode())
         val recovery = SessionRecovery(store, paths)
         val repository = FileSessionRepository(

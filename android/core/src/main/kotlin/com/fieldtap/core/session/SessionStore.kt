@@ -294,13 +294,16 @@ object RecoveryPlanner {
  * [close], in this order:
  * 1. [CsvRepair.truncateToLastLineEnd] on every CSV (a torn last row crashes the report); a CSV left
  *    empty, or missing, gets its header line back;
- * 2. for [RecoveryAction.CloseInterrupted] only, append a `session_interrupted` event at `stoppedUtcMs` with
- *    cause `stoppedBy` ([SessionEvents.sessionInterrupted]);
- * 3. remove stale `.tmp` files, rebuild `summary.plmns`, cells.csv and `collection` from the repaired CSV files
+ * 2. remove stale `.tmp` files and rebuild `summary.plmns`, cells.csv and `collection` from the repaired CSV files
  *    ([SessionRebuild]), so they agree with the rows the session holds and not with a snapshot up to 60 s older
- *    (empty when the process died in its first minute); when the CSV files cannot be read the last snapshot's
- *    values stay. Write cells.csv, then session.json, atomically, with `stopped_utc` and `summary.stopped_by` set;
- * 4. delete the heartbeat.
+ *    (empty when the process died in its first minute). When the rows cannot be rebuilt, whether a file cannot be
+ *    read or the phone lacks the memory, the last snapshot's values stay. `privacy.zone_pauses` becomes the larger of
+ *    the snapshot's count and the `Logging paused in a privacy zone` events;
+ * 3. the stop time is `stoppedUtcMs`, but never before `started_utc` nor before the newest time a row carries (a wall
+ *    clock set back mid-session); for [RecoveryAction.CloseInterrupted] only, append a `session_interrupted` event at
+ *    that time with cause `stoppedBy` ([SessionEvents.sessionInterrupted]);
+ * 4. write cells.csv, then session.json, atomically, with `stopped_utc` and `summary.stopped_by` set;
+ * 5. delete the heartbeat.
  * Closing twice is harmless: a session already closed is skipped. When an earlier attempt died after
  * step 2, the `session_interrupted` event already at the end of events.csv is reused, time and cause, so
  * the event is never written twice and `stopped_utc` always equals its time. Throws IOException when the
@@ -375,6 +378,13 @@ class SessionRecovery(private val store: SessionStore, private val paths: Sessio
             CsvRepair.repairWithHeader(File(directory, file.fileName), csvHeaderLine(file))
         }
 
+        for (file in listOf(SessionFile.SESSION_JSON, SessionFile.CELLS)) {
+            File(directory, file.fileName + AtomicFiles.TMP_SUFFIX).delete()
+        }
+        val derived = rebuild(directory, meta.startedUtcMs)
+        // A wall clock set back during the session leaves rows later than the heartbeat: the session ends after its newest row.
+        val newestRowUtcMs = derived?.newestRowUtcMs ?: Long.MIN_VALUE
+
         val stoppedUtcMs: Long
         val stoppedBy: String
         when (action) {
@@ -385,7 +395,7 @@ class SessionRecovery(private val store: SessionStore, private val paths: Sessio
                     stoppedUtcMs = earlier.timeUtcMs
                     stoppedBy = earlier.cause
                 } else {
-                    stoppedUtcMs = maxOf(action.stoppedUtcMs, meta.startedUtcMs)
+                    stoppedUtcMs = maxOf(action.stoppedUtcMs, meta.startedUtcMs, newestRowUtcMs)
                     stoppedBy = ExitReasons.tokenOrUnknown(action.stoppedBy)
                     val row = SessionEvents.sessionInterrupted(stoppedUtcMs, stoppedBy, action.exitDescription)
                     appendAndSync(events, EventsCsv.encode(row))
@@ -393,22 +403,11 @@ class SessionRecovery(private val store: SessionStore, private val paths: Sessio
             }
 
             is RecoveryAction.CloseStopped -> {
-                stoppedUtcMs = maxOf(action.stoppedUtcMs, meta.startedUtcMs)
+                stoppedUtcMs = maxOf(action.stoppedUtcMs, meta.startedUtcMs, newestRowUtcMs)
                 stoppedBy = ExitReasons.tokenOrUnknown(action.stoppedBy)
             }
         }
 
-        for (file in listOf(SessionFile.SESSION_JSON, SessionFile.CELLS)) {
-            File(directory, file.fileName + AtomicFiles.TMP_SUFFIX).delete()
-        }
-        val derived = try {
-            SessionRebuild.derive(directory, meta.startedUtcMs)
-        } catch (e: IOException) {
-            null
-        } catch (e: RuntimeException) {
-            // Rows this class cannot make sense of: the last snapshot's values are better than none.
-            null
-        }
         if (derived != null) {
             val cells = StringBuilder(CellsCsv.headerLine)
             for (row in derived.cells) cells.append(CellsCsv.encode(row))
@@ -418,6 +417,8 @@ class SessionRecovery(private val store: SessionStore, private val paths: Sessio
             stoppedUtcMs = stoppedUtcMs,
             summary = meta.summary.copy(stoppedBy = stoppedBy, plmns = derived?.plmns ?: meta.summary.plmns),
             collection = derived?.collection ?: meta.collection,
+            // A pause logged after the last snapshot is in events.csv; the snapshot may count one the events do not show.
+            privacy = meta.privacy.copy(zonePauses = maxOf(meta.privacy.zonePauses, derived?.zonePauseEvents ?: 0)),
         )
         AtomicFiles.write(
             File(directory, SessionFile.SESSION_JSON.fileName),
@@ -435,6 +436,24 @@ class SessionRecovery(private val store: SessionStore, private val paths: Sessio
             name = meta.name,
         )
     }
+
+    /**
+     * [SessionRebuild.derive], or null when the rows cannot be rebuilt, whatever the reason: unreadable files, rows this
+     * class cannot make sense of, or a device without the memory for it. The last snapshot's values are better than a
+     * session that is never closed.
+     */
+    private fun rebuild(directory: File, startedUtcMs: Long): SessionRebuild.Derived? =
+        try {
+            SessionRebuild.derive(directory, startedUtcMs)
+        } catch (e: IOException) {
+            null
+        } catch (e: RuntimeException) {
+            null
+        } catch (e: OutOfMemoryError) {
+            null
+        } catch (e: StackOverflowError) {
+            null
+        }
 
     private fun readHeartbeat(dirName: String): HeartbeatRecord? {
         val file = paths.heartbeat(dirName)

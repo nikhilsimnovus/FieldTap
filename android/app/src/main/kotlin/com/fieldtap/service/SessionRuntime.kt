@@ -528,7 +528,8 @@ class SessionRuntime internal constructor(
                 Result.success(prepared.recorder.run(onFilesCreated = { onFilesCreated(session) }))
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // An Error too: the runtime must leave RECORDING however the recorder ended.
                 Result.failure(e)
             }
             onRecorderFinished(session, result)

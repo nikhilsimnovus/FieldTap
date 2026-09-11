@@ -1,6 +1,7 @@
 package com.fieldtap.core.session
 
 import com.fieldtap.core.location.Golden
+import com.fieldtap.core.privacy.PrivacyZoneGate
 import com.fieldtap.core.session.SessionFixtures.DIR_NAME
 import com.fieldtap.core.session.SessionFixtures.PID
 import com.fieldtap.core.session.SessionFixtures.START_ELAPSED_MS
@@ -13,7 +14,11 @@ import com.fieldtap.core.session.SessionFixtures.kpiRow
 import com.fieldtap.core.time.ManualClock
 import com.fieldtap.format.CellsCsv
 import com.fieldtap.format.CollectionMeta
+import com.fieldtap.format.EventKind
+import com.fieldtap.format.EventRat
+import com.fieldtap.format.EventRow
 import com.fieldtap.format.EventsCsv
+import com.fieldtap.format.Severity
 import com.fieldtap.format.SessionFile
 import com.fieldtap.format.SessionJson
 import com.fieldtap.format.TrackCsv
@@ -247,12 +252,39 @@ class SessionRecoveryTest {
 
     @Test
     fun theStopIsNeverWrittenBeforeTheStart() {
-        val directory = killedSession()
+        val directory = paths.directory(DIR_NAME)
+        val files = FileSessionFiles(directory, paths.heartbeat(DIR_NAME))
+        files.create(SessionMetaFactory.open(identity()))
+        files.close()
 
         val outcome = recovery.close(interrupted(stoppedBy = "unknown", description = null, stoppedUtcMs = START_WALL_MS - 60_000))
 
         assertEquals(START_WALL_MS, outcome.stoppedUtcMs)
         assertEquals(START_WALL_MS, SessionJson.decode(File(directory, "session.json").readText()).stoppedUtcMs)
+    }
+
+    @Test
+    fun theStopIsNeverWrittenBeforeTheNewestRow() {
+        val directory = killedSession()
+
+        // The heartbeat's clock was set back: the marker at 45.2 s is the newest row, so the session ends there.
+        val outcome = recovery.close(interrupted(stoppedBy = "unknown", description = null, stoppedUtcMs = START_WALL_MS + 10_000))
+
+        assertEquals(START_WALL_MS + 45_200, outcome.stoppedUtcMs)
+        assertEquals(START_WALL_MS + 45_200, SessionJson.decode(File(directory, "session.json").readText()).stoppedUtcMs)
+        assertTrue(File(directory, "events.csv").readText().endsWith(EventsCsv.encode(SessionEvents.sessionInterrupted(START_WALL_MS + 45_200, "unknown", null))))
+    }
+
+    @Test
+    fun aZonePauseLoggedAfterTheLastSnapshotIsCounted() {
+        val directory = killedSession()
+        val paused = EventRow(START_WALL_MS + 70_000, EventRat.NONE, EventKind.PRIVACY_ZONE, Severity.INFO, PrivacyZoneGate.PAUSED_TITLE, null)
+        File(directory, "events.csv").appendText(EventsCsv.encode(paused))
+
+        recovery.close(interrupted())
+
+        val closed = SessionJson.decode(File(directory, "session.json").readText())
+        assertEquals("the snapshot said 0", 1, closed.privacy.zonePauses)
     }
 
     @Test

@@ -1,5 +1,7 @@
 package com.fieldtap.format
 
+import java.io.Closeable
+import java.io.Reader
 import java.math.BigDecimal
 import java.math.RoundingMode
 import kotlin.math.abs
@@ -260,6 +262,62 @@ object Csv {
         }
         if (start < text.length) out.add(text.substring(start))
         return out
+    }
+
+    /**
+     * [records] over a stream: [next] returns each record of [reader] without its line ending, a final record without
+     * one last, then null, splitting exactly as [records] does. It holds one record in memory at a time, so a session
+     * file of any size can be read back. [close] closes [reader].
+     */
+    class RecordReader(private val reader: Reader, bufferChars: Int = 64 * 1024) : Closeable {
+        private val buffer = CharArray(bufferChars.coerceAtLeast(1))
+        private var length = 0
+        private var position = 0
+        private var skipLineFeed = false
+        private var finished = false
+
+        fun next(): String? {
+            if (finished) return null
+            val record = StringBuilder()
+            var state = START_FIELD
+            var started = false
+            while (true) {
+                if (position == length) {
+                    val read = reader.read(buffer)
+                    if (read <= 0) {
+                        finished = true
+                        return if (started) record.toString() else null
+                    }
+                    length = read
+                    position = 0
+                }
+                val c = buffer[position++]
+                if (skipLineFeed) {
+                    skipLineFeed = false
+                    if (c == LF) continue
+                }
+                started = true
+                if (state == IN_QUOTED_FIELD) {
+                    if (c == QUOTE) state = QUOTE_IN_QUOTED_FIELD
+                    record.append(c)
+                    continue
+                }
+                when (c) {
+                    CR, LF -> {
+                        skipLineFeed = c == CR
+                        return record.toString()
+                    }
+                    QUOTE -> state = if (state == START_FIELD || state == QUOTE_IN_QUOTED_FIELD) IN_QUOTED_FIELD else IN_FIELD
+                    DELIMITER -> state = START_FIELD
+                    else -> state = IN_FIELD
+                }
+                record.append(c)
+            }
+        }
+
+        override fun close() {
+            reader.close()
+        }
     }
 
     /** The plain digits of an already rounded value, never with a sign on zero. */

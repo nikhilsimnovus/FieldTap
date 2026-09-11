@@ -199,6 +199,30 @@ class CsvTest {
     }
 
     @Test
+    fun theRecordReaderSplitsAStreamExactlyAsRecordsSplitsText() {
+        val texts = listOf(
+            "",
+            "h1,h2\r\n1,2\r\n",
+            "h1,h2\r\n1,2\r\n3,",
+            "a\r\n\r\nb\r\n",
+            "a\nb\rc\r\n",
+            "\r\n\r\n",
+            "a\r",
+            Csv.record(listOf("x", "c\r\nd")) + Csv.record(listOf("y", "e\nf")) + Csv.record(listOf("z", "\"q\",\r")),
+            "a,\"unterminated\r\nrest",
+            "\"\"\r\n\"a\"\"b\"x\r\nlast",
+        )
+        for (text in texts) {
+            for (bufferChars in listOf(1, 2, 3, 7, 64 * 1024)) {
+                val reader = Csv.RecordReader(java.io.StringReader(text), bufferChars)
+                val read = generateSequence { reader.next() }.toList()
+                assertEquals("buffer $bufferChars: ${text.replace("\r", "\\r").replace("\n", "\\n")}", Csv.records(text), read)
+                assertEquals("null after the last record", null, reader.next())
+            }
+        }
+    }
+
+    @Test
     fun recordsKeepLineBreaksInsideQuotedFields() {
         val text = Csv.record(listOf("x", "c\r\nd")) + Csv.record(listOf("y", "e\nf"))
         val records = Csv.records(text)

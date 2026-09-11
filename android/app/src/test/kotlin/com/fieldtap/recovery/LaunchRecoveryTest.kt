@@ -102,6 +102,41 @@ class LaunchRecoveryTest {
     }
 
     @Test
+    fun aSessionTooLargeToCloseNeitherKeepsTheOthersOpenNorRunsAgainAtTheNextStart() = runTest {
+        val events = synchronizedList()
+        val logs = synchronizedList()
+        val recovery = recovery(
+            events = events,
+            logs = logs,
+            findOpen = { listOf(a, c) },
+            close = { action ->
+                if (action.dirName == a.listing.dirName) throw OutOfMemoryError("rebuilding ${action.dirName}")
+                outcome(action.dirName)
+            },
+        )
+
+        val first = recovery.run()
+        val second = recovery.run()
+
+        assertEquals(listOf(c.listing.dirName), first.map { it.dirName })
+        assertEquals(first, second)
+        assertTrue(recovery.completed)
+        assertEquals("a start after the failure does not run recovery again", 1, events.count { it == "findOpen" })
+        assertTrue(logs.single().contains("OutOfMemoryError"))
+        assertFalse("logs never carry session content", logs.single().contains("_a"))
+    }
+
+    @Test
+    fun anErrorOutsideAnySessionStillCompletes() = runTest {
+        val logs = synchronizedList()
+        val recovery = recovery(logs = logs, findOpen = { throw StackOverflowError() })
+
+        assertTrue(recovery.run().isEmpty())
+        assertTrue(recovery.completed)
+        assertEquals(1, logs.size)
+    }
+
+    @Test
     fun aFailureToFindOpenSessionsStillCompletes() = runTest {
         val logs = synchronizedList()
         val recovery = recovery(logs = logs, findOpen = { throw SecurityException("no access") })
