@@ -612,10 +612,11 @@ Changes agreed at integration:
 - `CellRow.pci` and `CellRow.dlEarfcn` are nullable: a leg Android reports without them is still a cells.csv row,
   with the value blank and `plausible` False (docs/SESSION-FORMAT.md, cells.csv).
 - `StartRefusal.READINESS_REQUIRED` and `StartPreconditions.readinessRequired` are removed (decision 7).
-- Found by the end-to-end proof: `ServingCellSelector` takes the first registered LTE or NR cell as primary whenever no cell
-  reports primary serving, not only when no cell reports a status. The API 31 emulator reports its registered cell with
-  `CONNECTION_NONE`, as some HALs do while idle; the old rule chose no serving cell, so Live never showed one and a
-  session would have written no kpi row.
+- Found by the end-to-end proof: the API 31 emulator reports only a registered GSM cell (status 0) while its data runs on
+  HSPA, never an LTE or NR cell. Live said "Waiting for the first cell measurement" for as long as it ran; it now says
+  Android reports no LTE or NR serving cell, with the data network type (`LivePresentation.servingAbsence`). The
+  proof reads the registry first: the LTE and NR checks are required on API 36, and a modem without LTE or NR gets a
+  session checked to hold no kpi row. `ServingCellSelector` is unchanged.
 
 Inside owned files, an implementer may add private or internal helpers, new files in owned packages, and
 tests. Public API added for one's own use is fine; public API another workstream needs goes through the
