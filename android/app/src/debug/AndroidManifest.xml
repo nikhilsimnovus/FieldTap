@@ -2,6 +2,9 @@
 <!--
     Debug builds only: the end-to-end automation hook. The release variant has no src/release
     counterpart, so a release APK contains no exported automation entry point.
+    Callers must hold DUMP, which no installed app can: the adb shell has it, and the app's own
+    instrumentation runs as the app. Without it any app on a tester's phone could record consent,
+    start or stop sessions and change the test targets.
     Contract: android/ARCHITECTURE.md, "Debug automation hook". Owner: workstream ui-session.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -12,6 +15,7 @@
             android:excludeFromRecents="true"
             android:exported="true"
             android:noHistory="true"
+            android:permission="android.permission.DUMP"
             android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>
                 <action android:name="com.fieldtap.debug.START_SESSION" />
