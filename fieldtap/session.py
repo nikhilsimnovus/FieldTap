@@ -21,6 +21,10 @@ RAW_FILE = "capture.qmdl"
 PCAPNG_FILE = "capture.pcapng"
 GSMTAP_FILE = "capture_gsmtap.pcap"
 CELLS_FILE = "cells.csv"
+# cells.csv header, one row per serving cell. schema/columns.json repeats this
+# list; the Android app adds its own columns after these (fieldtap.contract).
+CELLS_COLUMNS = ["first_seen_utc", "rat", "plmn", "mcc", "mnc", "tac", "cell_id", "enb_id", "sector",
+                 "pci", "band", "dl_earfcn", "ul_earfcn", "dl_bw_mhz", "ul_bw_mhz", "version", "plausible"]
 
 
 def slugify(text: str) -> str:
@@ -161,13 +165,21 @@ class Session:
     def write_cells_csv(self) -> None:
         if not self._cells:
             return
-        columns = ["first_seen_utc", "rat", "plmn", "mcc", "mnc", "tac", "cell_id", "enb_id", "sector",
-                   "pci", "band", "dl_earfcn", "ul_earfcn", "dl_bw_mhz", "ul_bw_mhz", "version", "plausible"]
-        with open(self.path(CELLS_FILE), "w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
-            writer.writeheader()
-            for cell in self._cells:
-                writer.writerow(cell)
+        write_cells_file(self.path(CELLS_FILE), self._cells)
+
+
+def write_cells_file(path: str, cells: list, columns: Optional[list] = None) -> None:
+    """Write cell dicts as cells.csv. Keys outside `columns` are ignored and
+    missing keys are written blank."""
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=columns or CELLS_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        for cell in cells:
+            writer.writerow(cell)
+
+
+def _object(value) -> dict:
+    return value if isinstance(value, dict) else {}
 
 
 def list_sessions(root: str) -> list:
@@ -182,17 +194,21 @@ def list_sessions(root: str) -> list:
         try:
             with open(sidecar, encoding="utf-8") as fh:
                 meta = json.load(fh)
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             continue
-        summary = meta.get("summary", {})
+        if not isinstance(meta, dict):
+            continue
+        # One damaged sidecar must not break the list of every other session.
+        summary = _object(meta.get("summary"))
+        messages = _object(summary.get("messages"))
         sessions.append({
             "dir": os.path.join(root, entry),
             "name": meta.get("name"),
             "started_utc": meta.get("started_utc"),
             "stopped_utc": meta.get("stopped_utc"),
-            "handset": meta.get("handset", {}).get("model") or meta.get("modem", {}).get("build_id") or "",
-            "messages": sum(summary.get("messages", {}).values()),
-            "plmns": ",".join(summary.get("plmns", {}).keys()),
+            "handset": _object(meta.get("handset")).get("model") or _object(meta.get("modem")).get("build_id") or "",
+            "messages": sum(v for v in messages.values() if isinstance(v, int) and not isinstance(v, bool)),
+            "plmns": ",".join(str(key) for key in _object(summary.get("plmns"))),
             "note": meta.get("note") or "",
         })
     return sessions

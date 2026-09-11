@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from .diag import transport as tr
+from .isotime import parse_iso
 
 
 @dataclass
@@ -102,7 +103,7 @@ class Track:
             for row in csv.DictReader(fh):
                 def num(key):
                     return float(row[key]) if row.get(key) else None
-                track.add(Fix(datetime.fromisoformat(row["time_utc"]), float(row["lat"]), float(row["lon"]),
+                track.add(Fix(parse_iso(row["time_utc"]), float(row["lat"]), float(row["lon"]),
                               num("accuracy_m"), num("altitude_m"), num("speed_mps"),
                               row.get("provider", ""), row.get("source", "")))
         return track

@@ -1,0 +1,8 @@
+time_utc,rat,kind,severity,title,detail,frame,pci,arfcn,cause,setup_ms
+2026-09-10T14:30:00.400+00:00,lte,serving_cell,info,Serving cell,PLMN 311480 TAC 18704 eNB 84532 sector 1 PCI 212 EARFCN 66786 band 66,,212,66786,,
+2026-09-10T14:30:08.900+00:00,nr,nr_display,info,5G icon on,"override NR_NSA, network LTE",,,,,
+2026-09-10T14:30:45.200+00:00,-,marker,info,Marker,"North entrance – badge reader, door 3",,,,,
+2026-09-10T14:31:02.900+00:00,nr,nr_display,info,5G icon off,"override NONE, network LTE",,,,,
+2026-09-10T14:31:04.400+00:00,lte,serving_cell,info,Serving cell changed,PLMN 311480 TAC 18704 eNB 84532 sector 2 PCI 213 EARFCN 66786 band 66,,213,66786,,
+2026-09-10T14:31:10.900+00:00,nr,nr_display,info,5G icon on,"override NR_NSA, network LTE",,,,,
+2026-09-10T14:31:44.900+00:00,-,sampling_gap,warn,Sampling gap,no fresh cell info for 14.0 s,,,,screen_off,

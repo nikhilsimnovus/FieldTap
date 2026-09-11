@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from .diag import transport as tr
+from .isotime import parse_iso
 
 DEFAULT_PING_HOST = "8.8.8.8"
 DEFAULT_DOWNLOAD_URL = "https://speed.cloudflare.com/__down?bytes=25000000"
@@ -46,7 +47,7 @@ class TestResult:
                 self.target, m.get("loss_pct", "?"), m.get("rtt_avg_ms", "?"), m.get("rtt_min_ms", "?"), m.get("rtt_max_ms", "?"))
         if self.test == "download":
             return "download: %.2f Mbit/s, %s bytes in %.1f s, http %s" % (
-                m.get("mbps", 0.0), m.get("bytes", "?"), m.get("seconds", 0.0), m.get("http_code", "?"))
+                m.get("mbps", 0.0), m.get("bytes", "?"), m.get("seconds", self.seconds), m.get("http_code", "?"))
         if self.test == "iperf3":
             return "iperf3 %s: %.2f Mbit/s" % (self.target, m.get("mbps", 0.0))
         return "%s: %s" % (self.test, "ok" if self.ok else "failed")
@@ -81,7 +82,7 @@ def read_csv(path: str) -> list:
                 metrics["http_code"] = row["http_code"]
             if row.get("error"):
                 metrics["error"] = row["error"]
-            results.append(TestResult(datetime.fromisoformat(row["time_utc"]), row["test"], row["target"],
+            results.append(TestResult(parse_iso(row["time_utc"]), row["test"], row["target"],
                                       row["ok"] == "1", metrics, "", float(row.get("seconds") or 0)))
     return results
 
@@ -92,7 +93,8 @@ def summary(results: list) -> dict:
     if pings:
         ok = [r for r in pings if r.ok]
         avg = [r.metrics["rtt_avg_ms"] for r in ok if "rtt_avg_ms" in r.metrics]
-        loss = [r.metrics["loss_pct"] for r in ok if "loss_pct" in r.metrics]
+        # every run that measured loss, failed runs too: a ping that lost every packet failed with 100% loss
+        loss = [r.metrics["loss_pct"] for r in pings if "loss_pct" in r.metrics]
         out["ping"] = {"runs": len(pings), "failed": len(pings) - len(ok),
                        "rtt_avg_ms": round(sum(avg) / len(avg), 1) if avg else None,
                        "rtt_max_ms": max((r.metrics.get("rtt_max_ms", 0) for r in ok), default=None),

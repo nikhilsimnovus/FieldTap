@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from typing import Callable, Optional
 
 from .decode.records import CellInfo, DecodedMessage
+from .isotime import parse_iso
 
 # --- cause tables (subset of TS 24.301 annex A / TS 24.501 annex A) --------------------------
 
@@ -178,7 +179,7 @@ def read_csv(path: str) -> list:
     events = []
     with open(path, encoding="utf-8", newline="") as fh:
         for row in csv.DictReader(fh):
-            when = datetime.fromisoformat(row["time_utc"]) if row.get("time_utc") else None
+            when = parse_iso(row["time_utc"]) if row.get("time_utc") else None
             fields = {k: row[k] for k in ("pci", "arfcn", "cause", "setup_ms") if row.get(k)}
             events.append(Event(when, row["rat"], row["kind"], row["severity"], row["title"], row.get("detail", ""),
                                 int(row["frame"]) if row.get("frame") else None, fields))
