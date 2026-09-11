@@ -1,9 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    The 5gto6G mark: five rising signal bars (5G, here now) and a sixth, in the accent colour, that
-    leaps higher (6G, next). Everything sits inside the adaptive icon's 66 dp safe circle: the bars
-    span x 29..79 and y 33..75, and the farthest corner is 32.7 dp from the centre.
-    Same geometry as com.fieldtap.ui.theme.BrandMarkGeometry.
+    Themed-icon layer (Android 13+): the system tints it, so the accent colour cannot show. The sixth
+    bar is drawn as an outline instead, which keeps the "five, then the next one" reading.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -11,9 +9,10 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="@color/brand_mark_bars"
+        android:fillColor="#FFFFFFFF"
         android:pathData="M30.5,67H33.5A1.5,1.5 0,0 1,35 68.5V73.5A1.5,1.5 0,0 1,33.5 75H30.5A1.5,1.5 0,0 1,29 73.5V68.5A1.5,1.5 0,0 1,30.5 67Z M39.3,61H42.3A1.5,1.5 0,0 1,43.8 62.5V73.5A1.5,1.5 0,0 1,42.3 75H39.3A1.5,1.5 0,0 1,37.8 73.5V62.5A1.5,1.5 0,0 1,39.3 61Z M48.1,55H51.1A1.5,1.5 0,0 1,52.6 56.5V73.5A1.5,1.5 0,0 1,51.1 75H48.1A1.5,1.5 0,0 1,46.6 73.5V56.5A1.5,1.5 0,0 1,48.1 55Z M56.9,49H59.9A1.5,1.5 0,0 1,61.4 50.5V73.5A1.5,1.5 0,0 1,59.9 75H56.9A1.5,1.5 0,0 1,55.4 73.5V50.5A1.5,1.5 0,0 1,56.9 49Z M65.7,43H68.7A1.5,1.5 0,0 1,70.2 44.5V73.5A1.5,1.5 0,0 1,68.7 75H65.7A1.5,1.5 0,0 1,64.2 73.5V44.5A1.5,1.5 0,0 1,65.7 43Z" />
     <path
-        android:fillColor="@color/brand_mark_accent"
-        android:pathData="M74.5,33H77.5A1.5,1.5 0,0 1,79 34.5V73.5A1.5,1.5 0,0 1,77.5 75H74.5A1.5,1.5 0,0 1,73 73.5V34.5A1.5,1.5 0,0 1,74.5 33Z" />
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2"
+        android:pathData="M75,34H77A1,1 0,0 1,78 35V73A1,1 0,0 1,77 74H75A1,1 0,0 1,74 73V35A1,1 0,0 1,75 34Z" />
 </vector>

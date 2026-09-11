@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The window theme only; Compose draws everything inside it. -->
-    <style name="Theme.FieldTap" parent="android:Theme.Material.Light.NoActionBar" />
+    <!--
+        The window theme only; Compose draws everything inside it (com.fieldtap.ui.FieldTapTheme).
+        The window, the Android 12+ splash screen and the first Compose frame share one surface colour,
+        so launch has no white flash. System bars are handled by enableEdgeToEdge().
+    -->
+    <style name="Theme.FieldTap" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background_light</item>
+        <item name="android:colorBackground">@color/window_background_light</item>
+        <item name="android:colorPrimary">@color/brand_primary_light</item>
+        <item name="android:colorAccent">@color/brand_primary_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowSplashScreenBackground">@color/window_background_light</item>
+    </style>
 </resources>

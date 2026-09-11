@@ -1,0 +1,196 @@
+# 5gto6G FieldTap design system
+
+The rules every screen follows. Tokens live in `ui/theme`, components in `ui/components`, and the one
+entry point is `com.fieldtap.ui.FieldTapTheme`. Every component has `@FieldTapPreviews` previews: light,
+dark, and font scale 1.3.
+
+## Principles
+
+1. **Trust every number.** Live values use tabular figures, show their age, grey out when stale, and show
+   a dash (never 0) when unknown.
+2. **Colour is never the only cue.** Every signal colour has its level word, every tone its icon, every
+   state its words.
+3. **Glanceable in the field.** One hero number per screen, 48 dp targets, short motion.
+4. **Same on every phone.** Dynamic colour is off; the brand and the signal scale ignore the wallpaper.
+
+## Entry point
+
+```kotlin
+FieldTapTheme { /* activity content */ }     // follows the system light/dark setting
+FieldTapTheme(darkTheme = true) { /* */ }    // walk mode: forces the dark surface; bar icons follow
+```
+
+Never wrap content in a bare `MaterialTheme`, never call `dynamicLightColorScheme`, never set system bar
+colours yourself. The window theme (`res/values*/themes.xml`) paints the Compose surface colour, so launch
+has no flash; `BrandResourcesTest` keeps `res/values/colors.xml` equal to the Kotlin tokens.
+
+| Read | From |
+| --- | --- |
+| Material roles, type scale, shapes | `MaterialTheme.colorScheme`, `.typography`, `.shapes` |
+| Status tones, recording, chart colours | `FieldTapDesign.colors` |
+| Signal scale colours | `FieldTapDesign.signal.of(quality)` |
+| Tabular number styles | `FieldTapDesign.numeric` |
+| Spacing, sizes, shapes by role, motion | `Spacing`, `Sizes`, `ShapeRoles`, `Durations` |
+| Icons | `FieldTapIcons` |
+| Numbers as text | `Formats` |
+
+No literal `Color(...)`, `dp` or `sp` in screens: add a token here if one is missing.
+
+## Colour
+
+Radio blue (primary) leading into 6G violet (tertiary), on cool neutral surfaces. Blue and violet never
+collide with the signal scale (greens, orange, red) or with warnings (amber).
+
+- **Surfaces:** screen `background`; cards, tiles, rows and sheets `surfaceContainerLow`; chart panels
+  `surfaceContainerLowest`; chips and bar tracks `surfaceContainerHighest`.
+- **Text:** `onSurface` for values and titles, `onSurfaceVariant` for labels and secondary text.
+- **Status tones** (`StatusTone`, `FieldTapDesign.colors.status(tone)`, icon `statusIcon(tone)`): NEUTRAL;
+  INFO (brand); SUCCESS (granted, ready, 2 s cadence); WARNING (works but worse: 10 s cadence, an aging
+  sample, advice); ERROR (blocked, failed, stale, lost). Each family has `color` (text on any surface),
+  `onColor`, `container` and `onContainer`.
+- **Recording** (`colors.recording`) is the running session. Never use `error` for it.
+- **Charts:** RSRP `chartRsrp` (blue), SINR `chartSinr` (violet), grid `chartGrid`, reference lines
+  `chartReference`.
+
+`ThemeContrastTest` proves the palette in light and dark: every text role and tone colour at least 4.5:1
+on every surface, and `outline`, chart lines, signal marks and the brand mark at least 3:1. The tightest
+pairs sit on `surfaceDim` (orange mark 3.04, light-green word 4.57), so change a colour only with that
+test green.
+
+## Signal scale
+
+One scale, `SignalScale`, identical to the report's route colours, with the same thresholds for LTE and NR.
+
+| Level | RSRP (dBm) | RSRQ (dB) | SINR (dB) | Fill |
+| --- | --- | --- | --- | --- |
+| EXCELLENT | >= -85 | >= -10 | >= 20 | #1a9641 green |
+| GOOD | >= -95 | >= -15 | >= 13 | #a6d96a light green |
+| FAIR | >= -105 | >= -20 | >= 0 | #fdae61 orange |
+| POOR | below | below | below | #d7191c red (#f0443e in dark) |
+
+- `SignalScale.quality(metric, value)` is null for an unknown value: show the neutral swatch and the
+  unknown word.
+- `SignalLevelColors`: `fill` for swatches and bars (never text); `edge` around a fill, which keeps 3:1
+  where the pale green and orange are too light; `onFill` for text on a fill; `content` for the level
+  word on a surface.
+- Display ranges are for drawing only (RSRP -140..-40, RSRQ -30..0, SINR -25..40, the report's axes).
+  Text always shows the measured value. The emphasised reference line is -105 dBm (0 dB for SINR).
+- Build one `SignalQualityLabels` per screen from string resources and pass `labels.of(quality)`
+  wherever a level colour appears.
+
+## Typography
+
+The system font at Material 3 sizes in sp, so text follows the user's font scale; headlines and titles
+are semibold.
+
+| Numeric style | Use |
+| --- | --- |
+| `numeric.hero` 48 sp | The number a screen is about: serving RSRP on Live |
+| `numeric.large` 32 sp | Metric tiles |
+| `numeric.medium` 22 sp | Compact tiles, elapsed time, statistics |
+| `numeric.body`, `numeric.bodySmall` | Values in rows and lists |
+| `numeric.label` | Badges and chips |
+| `numeric.axis` | Chart axes |
+
+Any other text whose numbers change: `MaterialTheme.typography.titleSmall.tabular()`.
+
+## Shape, spacing, size, motion
+
+- `ShapeRoles`: `Tile` (14 dp) for tiles, list rows and chart panels; `Card` (20 dp) for section cards
+  and banners; `Sheet` (28 dp) for sheets and dialogs; `Field` (6 dp) for text fields and row ripples;
+  `Pill` for badges, chips and buttons; `Bar` for signal bars.
+- `Spacing` is a 4 dp grid: `ScreenGutter` 16 dp (`ScreenGutterWide` 24 dp from 600 dp), `SectionGap`
+  between cards, `ItemGap` and `CardPadding` inside them.
+- `Sizes.MinTouchTarget` (48 dp) for everything tappable. Cap content at `Sizes.MaxContentWidth` (720 dp),
+  centred, on tablets and in landscape; centred prose at `Sizes.MaxTextWidth`.
+- `Durations`: SHORT 150, MEDIUM 250, LONG 400 ms. Animate colour and state, never the numbers.
+
+## Icons, words, numbers
+
+- `FieldTapIcons` are 24 dp line icons (Material 3 1.4 bundles none and no icon library is added). An
+  icon that stands alone needs a content description; pass null when a label beside it says the same.
+- Components take every user-facing word as a parameter and add no strings. Screens take the words from
+  their own files (`strings_session_ui.xml`, `strings_setup_ui.xml`).
+- `Formats` makes the numbers; the words around them come from resources. `ageSeconds(ms)` gives "2.1"
+  for `<string name="age_old">%1$s s old</string>`; `elapsed` "12:34" or "1:02:03"; `decimalBytes`
+  "4.2 MB"; `oneDecimal` "88.3". Signal values are plain integers, and unknown stays null.
+
+## Components
+
+| Component | Use it for |
+| --- | --- |
+| `FieldTapTopBar`, `TopBarAction` | Every screen's top bar; screens need no experimental opt-in. |
+| `MetricTile`, `MetricGrid` | A live value with unit, quality chip, age badge and optional `footer` (a `SignalBar`). `MetricEmphasis.HERO` for the main number. The grid drops to one column at font scale 1.3 on a phone. |
+| `AgeIndicator` | "2.1 s old" from `LiveState.badge`: FRESH neutral, AGING amber with a timer, STALE red with a warning. |
+| `SignalQualityChip`, `SignalQualityLabels` | A swatch and its level word, wherever a signal colour appears. |
+| `SignalBar` | A value's place on the scale with threshold ticks, next to the number. |
+| `CellSignalRow`, `SignalBars` | A neighbour or the NSA leg: bars, identity, value, level word. |
+| `CadenceIndicator` | "2 s" (success) or "10 s" (warning), with the reason. |
+| `StatusBanner` | A condition with an optional fix: Wi-Fi forcing 10 s, a session interrupted, paused in a privacy zone, a refused listener. At the top of the content, one per cause; WARNING and ERROR announce themselves. |
+| `StatusChip` | Short states side by side: service, data, 5G icon, GPS. |
+| `SectionCard`, `KeyValueRow`, `SectionDivider` | Titled groups of labelled values. `KeyValueRow(stacked = true, selectable = true)` for a SHA-256 or a URL. |
+| `ToggleRow`, `RadioRow`, `NavigationRow` | Settings rows: on or off (walk mode, tests, instant updates); one of several (share precision, inside `Modifier.selectableGroup()`); a link to a screen or system setting. |
+| `ChecklistRow` | A check with its level and fix: Readiness items, probe findings. |
+| `ReadinessSheet`, `ReadinessSheetContent`, `ReadinessProblems` | The pre-start sheet: named problems with fixes, blocking first, "Start anyway" only when nothing blocks. |
+| `SessionButton`, `RecordingDot` | Start, Starting, Recording (elapsed time, Stop), Stopping. Confirm Stop in a dialog. |
+| `SignalHistoryChart`, `TimeSeriesChart`, `ChartMath` | Five minutes of RSRP and SINR with reference lines, gaps left open, and a TalkBack summary. |
+| `SessionListRow` | A session: COMPLETED, RECORDING, INTERRUPTED or UNREADABLE. |
+| `EmptyState`, `LoadingState` | Nothing to show, waiting, or could not load (tone ERROR). Show loading only for waits over about 300 ms. |
+| `PermissionRationale` | A permission, why it is needed, its status and the fix button. |
+| `LimitsStatementCard` | `R.string.limits_statement`, word for word, never truncated. |
+| `FieldTapBrandMark` | The 5gto6G mark on the disclosure and About screens. |
+| `PreviewSurface`, `@FieldTapPreviews` | Every preview, of components and screens alike. |
+
+The theme already styles the Material components it does not wrap, so use them as they come: `Scaffold`,
+`AlertDialog` (Stop and Delete confirmations, the Mark note, the Start details), `OutlinedTextField` (no
+shape argument), `Button`, `TextButton`, `Snackbar`.
+
+### From app state to components
+
+| State | Component input |
+| --- | --- |
+| `LiveState.serving`, `servingAgeMs`, `badge` | Hero `MetricTile(value = rsrp?.toString(), quality = SignalScale.quality(SignalMetric.RSRP, rsrp), ageText = stringResource(R.string.age_old, Formats.ageSeconds(ageMs)), badge = badge) { SignalBar(SignalMetric.RSRP, rsrp) }` |
+| `LiveState.nsaLeg`, `neighbours` | One `CellSignalRow` per cell, in the given order (strongest first) |
+| `LiveState.shortInterval` | `CadenceIndicator(shortInterval = ...)` and `ChartMath.gapThresholdMs(shortInterval)` |
+| `LiveState.rsrpSeries`, `sinrSeries`, `nowElapsedMs` | `SignalHistoryChart`, with the summary built from `ChartMath.stats` |
+| `LiveState.service`, `data`, `display`, `lastFix` | `StatusChip`s |
+| `SessionStatus` Idle, Starting, Recording, Stopping | `SessionButtonState`; `Formats.elapsed(snapshot.elapsedMs)` |
+| `RecorderSnapshot.paused` | `StatusBanner(tone = StatusTone.INFO)`; Mark disabled |
+| `ReadinessItem.level` OK, ADVICE, BLOCKER | `ChecklistRow(tone = SUCCESS, WARNING, ERROR)`, with a fix button unless `target` is NONE |
+| Problems found by Start | `ReadinessProblem(blocking = level == BLOCKER)`; the refusals NO_CONSENT, NO_PRECISE_LOCATION, LOCATION_OFF and STORAGE_FULL are blocking too |
+| `SessionSummary.recording`, `readable`, `stoppedBy` | `SessionRowStatus` RECORDING, UNREADABLE, INTERRUPTED (when `stoppedBy` is an Android exit reason), else COMPLETED |
+
+## Screen recipe
+
+```kotlin
+Scaffold(topBar = { FieldTapTopBar(title, onNavigateUp = onBack, navigateUpContentDescription = back) }) { padding ->
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(padding),
+        contentPadding = PaddingValues(Spacing.ScreenGutter),
+        verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
+    ) { /* banners first, then SectionCards; LoadingState or EmptyState when there is nothing */ }
+}
+```
+
+Constrain the content with `Modifier.widthIn(max = Sizes.MaxContentWidth)` and centre it when wider.
+
+## Brand assets
+
+- Launcher: the adaptive icon `mipmap-anydpi/ic_launcher.xml`, with the gradient background, the mark as
+  foreground, and a monochrome layer (sixth bar outlined) for themed icons.
+- Notification: `R.drawable.ic_stat_fieldtap`, a flat silhouette for `setSmallIcon`. The launcher
+  foreground is a 108 dp layer and looks tiny in the status bar.
+
+## Accessibility checklist
+
+- TalkBack: tiles, rows and chips read as one phrase; section titles are headings; the chart reads its
+  summary; WARNING and ERROR banners announce themselves. Never put a live region on a value that ticks.
+- 48 dp targets, no information by colour alone, and AA contrast from the tokens.
+- Check every screen in its `@FieldTapPreviews`, in landscape, and with TalkBack. Numbers shrink to fit
+  rather than clip; rows wrap.
+
+## Tests
+
+`app/src/test/kotlin/com/fieldtap/ui/theme` and `.../ui/components`: contrast, the signal scale, number
+formats, brand resources against the XML, chart and grid arithmetic, and the component decisions (age and
+cadence tones, readiness ordering, level words).

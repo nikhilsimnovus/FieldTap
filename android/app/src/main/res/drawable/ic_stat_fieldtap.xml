@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Status-bar icon for the session notification: the 5gto6G mark as a flat silhouette, six rising bars
+    with the last one leaping higher, inside the 20 dp live area of a 24 dp icon. Android draws small
+    icons from their alpha only, so the colour here does not matter.
+    Use it with NotificationCompat.Builder.setSmallIcon(R.drawable.ic_stat_fieldtap).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M2.9,17H4.1A0.6,0.6 0,0 1,4.7 17.6V19.4A0.6,0.6 0,0 1,4.1 20H2.9A0.6,0.6 0,0 1,2.3 19.4V17.6A0.6,0.6 0,0 1,2.9 17Z M6.3,14.7H7.5A0.6,0.6 0,0 1,8.1 15.3V19.4A0.6,0.6 0,0 1,7.5 20H6.3A0.6,0.6 0,0 1,5.7 19.4V15.3A0.6,0.6 0,0 1,6.3 14.7Z M9.7,12.4H10.9A0.6,0.6 0,0 1,11.5 13V19.4A0.6,0.6 0,0 1,10.9 20H9.7A0.6,0.6 0,0 1,9.1 19.4V13A0.6,0.6 0,0 1,9.7 12.4Z M13.1,10.1H14.3A0.6,0.6 0,0 1,14.9 10.7V19.4A0.6,0.6 0,0 1,14.3 20H13.1A0.6,0.6 0,0 1,12.5 19.4V10.7A0.6,0.6 0,0 1,13.1 10.1Z M16.5,7.8H17.7A0.6,0.6 0,0 1,18.3 8.4V19.4A0.6,0.6 0,0 1,17.7 20H16.5A0.6,0.6 0,0 1,15.9 19.4V8.4A0.6,0.6 0,0 1,16.5 7.8Z M19.9,4H21.1A0.6,0.6 0,0 1,21.7 4.6V19.4A0.6,0.6 0,0 1,21.1 20H19.9A0.6,0.6 0,0 1,19.3 19.4V4.6A0.6,0.6 0,0 1,19.9 4Z" />
+</vector>
