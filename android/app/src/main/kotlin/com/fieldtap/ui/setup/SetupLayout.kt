@@ -23,11 +23,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import com.fieldtap.R
 import com.fieldtap.ui.components.FieldTapTopBar
+import com.fieldtap.ui.components.rememberTopBarScroll
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
 
@@ -51,11 +53,13 @@ internal fun SetupScreenScaffold(
     content: LazyListScope.() -> Unit,
 ) {
     val backDescription = stringResource(R.string.setup_back)
+    val topBarScroll = rememberTopBarScroll()
     Scaffold(
-        modifier = modifier,
+        modifier = modifier.nestedScroll(topBarScroll.connection),
         topBar = {
             if (title != null) {
                 FieldTapTopBar(
+                    scroll = topBarScroll,
                     title = title,
                     onNavigateUp = onBack,
                     navigateUpContentDescription = if (onBack != null) backDescription else null,

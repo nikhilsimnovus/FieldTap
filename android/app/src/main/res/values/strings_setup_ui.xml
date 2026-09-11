@@ -135,7 +135,7 @@
     <!-- Capability probe. -->
     <string name="probe_title">Capability probe</string>
     <string name="probe_intro_title">What this phone’s APIs return</string>
-    <string name="probe_intro">Listens to every telephony API for 30 seconds and reports what this phone returns: neighbours, band lists, whether timestamps advance, the SINR range and which listeners Android refuses. Export the report to qualify the phone.</string>
+    <string name="probe_intro">For 30 seconds, records what this phone reports: neighbour cells, band lists, whether measurements refresh, the SINR range and which updates Android allows. Share the report to have this phone qualified.</string>
     <string name="probe_keep_open">Keep FieldTap open with the screen on until it finishes.</string>
     <string name="probe_run">Run probe</string>
     <string name="probe_run_again">Run again</string>

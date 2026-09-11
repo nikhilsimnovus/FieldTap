@@ -20,7 +20,6 @@ import com.fieldtap.ui.components.KeyValueRow
 import com.fieldtap.ui.components.LimitsStatementCard
 import com.fieldtap.ui.components.PreviewSurface
 import com.fieldtap.ui.components.SectionCard
-import com.fieldtap.ui.components.StatusBanner
 import com.fieldtap.ui.components.StatusChip
 import com.fieldtap.ui.setup.SetupParagraph
 import com.fieldtap.ui.setup.SetupScreenScaffold
@@ -95,12 +94,10 @@ fun AboutScreen(
             }
         }
         item(key = "account") {
-            StatusBanner(
-                title = accountTitle,
-                message = noAccountText,
-                tone = StatusTone.INFO,
-                modifier = Modifier.setupContentWidth(),
-            )
+            // A standing fact, not a state of measuring: a card, not a banner.
+            SectionCard(title = accountTitle, icon = FieldTapIcons.Info, modifier = Modifier.setupContentWidth()) {
+                SetupParagraph(text = noAccountText)
+            }
         }
         item(key = "limits") {
             LimitsStatementCard(title = limitsTitle, statement = limitsStatement, modifier = Modifier.setupContentWidth())

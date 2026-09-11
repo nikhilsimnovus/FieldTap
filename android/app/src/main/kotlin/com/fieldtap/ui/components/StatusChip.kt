@@ -24,6 +24,7 @@ import com.fieldtap.ui.theme.ShapeRoles
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
 import com.fieldtap.ui.theme.StatusTone
+import com.fieldtap.ui.theme.tabular
 
 /**
  * A short state in a pill with its tone's icon: "In service" (SUCCESS), "Mobile data off" (WARNING),
@@ -74,7 +75,8 @@ fun StatusChip(
             }
             Text(
                 text = text,
-                style = MaterialTheme.typography.labelLarge,
+                // Tabular: a chip whose number changes every second ("GPS fix, ±4 m") keeps its width.
+                style = MaterialTheme.typography.labelLarge.tabular(),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )

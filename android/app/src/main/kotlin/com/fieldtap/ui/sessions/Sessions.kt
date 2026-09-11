@@ -42,6 +42,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -74,6 +75,7 @@ import com.fieldtap.ui.common.stopReasonText
 import com.fieldtap.ui.components.EmptyState
 import com.fieldtap.ui.components.FieldTapPreviews
 import com.fieldtap.ui.components.FieldTapTopBar
+import com.fieldtap.ui.components.rememberTopBarScroll
 import com.fieldtap.ui.components.KeyValueRow
 import com.fieldtap.ui.components.LoadingState
 import com.fieldtap.ui.components.MetricEmphasis
@@ -365,10 +367,12 @@ private fun SessionsContent(
     modifier: Modifier = Modifier,
 ) {
     val showLoading = rememberDelayedVisibility(state.loading && state.sessions.isEmpty())
+    val topBarScroll = rememberTopBarScroll()
     Scaffold(
-        modifier = modifier,
+        modifier = modifier.nestedScroll(topBarScroll.connection),
         topBar = {
             FieldTapTopBar(
+                scroll = topBarScroll,
                 title = stringResource(R.string.sessions_title),
                 onNavigateUp = onBack,
                 navigateUpContentDescription = stringResource(R.string.action_back),
@@ -533,10 +537,12 @@ private fun SessionDetailContent(state: SessionDetailUiState, actions: DetailAct
         }
     }
 
+    val topBarScroll = rememberTopBarScroll()
     Scaffold(
-        modifier = modifier,
+        modifier = modifier.nestedScroll(topBarScroll.connection),
         topBar = {
             FieldTapTopBar(
+                scroll = topBarScroll,
                 title = title,
                 onNavigateUp = actions.onBack,
                 navigateUpContentDescription = stringResource(R.string.action_back),

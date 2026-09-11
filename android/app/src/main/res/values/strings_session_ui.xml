@@ -121,7 +121,7 @@
     <string name="live_row_pci">PCI</string>
     <string name="live_row_channel">Channel</string>
     <string name="live_row_band">Band</string>
-    <string name="live_row_signal_report">Newer signal-strength report</string>
+    <string name="live_row_signal_report">Latest signal report</string>
     <!-- %1$d is RSRP in dBm, %2$s an age from Formats.ageSeconds. -->
     <string name="live_signal_report_value">%1$d dBm · %2$s s old</string>
     <string name="live_network_lte">LTE</string>
@@ -140,7 +140,7 @@
     <string name="live_cadence_wifi_on_battery">Wi-Fi on while not charging</string>
     <string name="live_cadence_charging">Charging keeps 2 s with Wi-Fi on</string>
     <string name="live_cadence_screen_on">Screen on, Wi-Fi off</string>
-    <string name="live_row_measured_interval">Measured interval (median of the last 10)</string>
+    <string name="live_row_measured_interval">Time between fresh samples</string>
     <string name="live_walk_mode">Walk mode</string>
     <string name="live_walk_mode_supporting">Keeps the screen on with a dark surface, so Android can refresh every 2 s. Brightness follows your phone. Uses no wake lock. In a pocket with the screen off, Android refreshes every 10 s and, on battery, sends no signal-strength updates.</string>
     <string name="live_walk_wifi_prompt">Wi-Fi is connected and the phone is not charging, so Android refreshes cell info only every 10 s. Turn Wi-Fi off for 2 s updates. A charger helps only once Android counts the phone as charging, which can take 15 minutes.</string>
@@ -150,14 +150,14 @@
     <string name="live_note_request_missing">Precise location is not allowed, so Android returns no cell information.</string>
     <string name="live_action_allow_location">Allow precise location</string>
     <!-- %1$s is one of the live_listener_* names. -->
-    <string name="live_note_listener_refused">Android refused %1$s updates on this phone.</string>
-    <string name="live_note_listener_failed">No %1$s updates are available on this phone.</string>
-    <string name="live_listener_request">cell-info</string>
-    <string name="live_listener_push">push cell-info</string>
-    <string name="live_listener_signal">signal-strength</string>
-    <string name="live_listener_service">service-state</string>
-    <string name="live_listener_display">display-info</string>
-    <string name="live_listener_data">data-connection</string>
+    <string name="live_note_listener_refused">Android does not allow %1$s updates on this phone.</string>
+    <string name="live_note_listener_failed">This phone gives no %1$s updates.</string>
+    <string name="live_listener_request">cell</string>
+    <string name="live_listener_push">instant cell</string>
+    <string name="live_listener_signal">signal strength</string>
+    <string name="live_listener_service">service state</string>
+    <string name="live_listener_display">5G icon</string>
+    <string name="live_listener_data">mobile data</string>
     <string name="live_listener_other">radio</string>
 
     <string name="live_section_chart">Last 5 minutes</string>

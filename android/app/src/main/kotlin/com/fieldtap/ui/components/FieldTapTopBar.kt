@@ -8,15 +8,40 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.text.style.TextOverflow
 import com.fieldtap.ui.theme.FieldTapIcons
 
 /**
+ * How a [FieldTapTopBar] follows the content scrolled under it: pinned, its container turns `surfaceContainer` once the
+ * content has scrolled, so the bar and the cards moving beneath it stay apart. Create it with [rememberTopBarScroll],
+ * pass it to the bar, and put `Modifier.nestedScroll(scroll.connection)` on the Scaffold.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Stable
+class TopBarScroll internal constructor(internal val behavior: TopAppBarScrollBehavior) {
+    /** For `Modifier.nestedScroll` on the screen's Scaffold. */
+    val connection: NestedScrollConnection get() = behavior.nestedScrollConnection
+}
+
+/** A pinned [TopBarScroll], remembered across recompositions. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun rememberTopBarScroll(): TopBarScroll {
+    val behavior = TopAppBarDefaults.pinnedScrollBehavior()
+    return remember(behavior) { TopBarScroll(behavior) }
+}
+
+/**
  * The top app bar of every screen: title, an optional back arrow, and actions. It keeps Material's
- * experimental opt-in in one place, so screens need none. Pass it to `Scaffold(topBar = ...)`.
+ * experimental opt-in in one place, so screens need none. Pass it to `Scaffold(topBar = ...)`, with a
+ * [TopBarScroll] when the content under it scrolls.
  *
  * The back arrow shows only when both [onNavigateUp] and [navigateUpContentDescription] are given
  * ("Back" from a string resource). Use [TopBarAction] for actions, at most two plus an overflow menu.
@@ -28,11 +53,13 @@ fun FieldTapTopBar(
     modifier: Modifier = Modifier,
     onNavigateUp: (() -> Unit)? = null,
     navigateUpContentDescription: String? = null,
+    scroll: TopBarScroll? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     TopAppBar(
         title = { Text(text = title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         modifier = modifier,
+        scrollBehavior = scroll?.behavior,
         navigationIcon = {
             if (onNavigateUp != null && navigateUpContentDescription != null) {
                 IconButton(onClick = onNavigateUp) {
