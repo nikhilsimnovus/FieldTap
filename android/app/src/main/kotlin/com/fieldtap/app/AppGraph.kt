@@ -42,7 +42,7 @@ interface AppGraph {
     val recovery: RecoveryNotices
 }
 
-/** From PackageManager, read by com.fieldtap.platform.appinfo.AppInfoReader. */
+/** From PackageManager, read by com.fieldtap.platform.AppInfoReader. */
 data class AppInfo(
     val versionName: String,
     val versionCode: Long,

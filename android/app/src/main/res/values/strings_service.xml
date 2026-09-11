@@ -2,6 +2,27 @@
 <!-- Strings of the foreground service and its notification. Owner: workstream service-and-tests. -->
 <resources>
     <string name="notification_channel_session">Session recording</string>
+    <string name="notification_channel_session_description">Shows the running session or soak test, with Stop and Mark.</string>
     <string name="notification_action_stop">Stop</string>
     <string name="notification_action_mark">Mark</string>
+    <string name="notification_action_stop_test">Stop test</string>
+
+    <string name="notification_starting_title">Starting session</string>
+    <string name="notification_starting_text">Preparing the session folder</string>
+
+    <string name="notification_recording_title">Recording session</string>
+    <string name="notification_paused_title">Paused in a privacy zone</string>
+    <string name="notification_paused_text">Nothing is written until you leave the zone</string>
+    <string name="notification_saving_title">Saving session</string>
+    <string name="notification_saving_text">Writing the last rows and closing the files</string>
+
+    <!-- %1$s is LTE or NR, %2$d the serving RSRP in dBm (negative), %3$s the age of the newest sample, e.g. 1.4 s. -->
+    <string name="notification_serving_text">%1$s %2$d dBm · newest sample %3$s old</string>
+    <!-- %1$s is LTE or NR, %2$s the age of the newest sample. -->
+    <string name="notification_serving_no_rsrp_text">%1$s, RSRP unavailable · newest sample %2$s old</string>
+    <string name="notification_no_serving_text">No serving cell reported yet</string>
+
+    <string name="notification_soak_title">Readiness soak test</string>
+    <!-- %1$s is the time elapsed and %2$s the planned duration, both as m:ss. -->
+    <string name="notification_soak_text">%1$s of %2$s · keep the screen off</string>
 </resources>
