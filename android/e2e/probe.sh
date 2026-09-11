@@ -21,6 +21,7 @@ repo=$(cd "$here/../.." && pwd)
 OUT=${PROBE_OUT:-$PWD/emulator-probe}
 SERIAL=${ANDROID_SERIAL:-emulator-${EMULATOR_PORT:-5554}}
 CMD_TIMEOUT=${CMD_TIMEOUT:-90}
+PERMISSIONS=(ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION POST_NOTIFICATIONS)
 
 mkdir -p "$OUT"/{device,app,telephony,signal,location,connectivity,reachability,logcat}
 : > "$OUT/commands.log"
@@ -106,11 +107,22 @@ probe_app() {
     fail "adb install failed (rc=$RC), see app/install.txt"
     return 0
   fi
-  local perm component
-  for perm in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION POST_NOTIFICATIONS; do
+  local perm component state
+  for perm in "${PERMISSIONS[@]}"; do
     { echo "## pm grant $PKG android.permission.$perm"; dsh pm grant "$PKG" "android.permission.$perm"; echo "rc=$RC"; } >> "$OUT/app/grants.txt"
   done
   dsh dumpsys package "$PKG" | keep 'versionCode=|versionName=|targetSdk=|minSdk=|permission|granted=' > "$OUT/app/package.txt"
+  # pm grant exits 0 even for a permission the APK does not request, so read the result back.
+  for perm in "${PERMISSIONS[@]}"; do
+    if grep -q "android.permission.$perm: granted=true" "$OUT/app/package.txt"; then
+      state="granted"
+    elif grep -q "android.permission.$perm" "$OUT/app/package.txt"; then
+      state="requested, not granted"
+    else
+      state="not requested by the APK"
+    fi
+    echo "android.permission.$perm: $state" >> "$OUT/app/permissions.txt"
+  done
 
   dsh cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$PKG" > "$OUT/app/launcher.txt"
   component=$(tail -n 1 "$OUT/app/launcher.txt")
@@ -140,9 +152,6 @@ probe_telephony() {
     [ "$i" -eq 6 ] || sleep 5
   done
   keep 'callingPackage=' < "$OUT/telephony/registry-t6.txt" > "$OUT/telephony/listeners.txt"
-  # Only these lines of dumpsys phone are kept; the full dump lists SIM details.
-  dsh dumpsys phone | keep 'mLastCellInfoList|mLastCellInfoReqTime|mCellIdentity=|mSS=|mNewSS=|mLastPhysicalChannelConfigList|NetworkTypeController|mOverrideNetworkType|mIsNrAdvanced|mNrState|mIsPhysicalChannelConfigOn|mPrimaryCellChangedWhileIdle' \
-    > "$OUT/telephony/phone-filtered.txt"
 }
 
 SIG_KEYS='^[[:space:]]*(mSignalStrength|mCellInfo|mServiceState)[[:space:]]*='
@@ -155,7 +164,7 @@ probe_signal() {
   local p
   signal_sample "baseline"
   for p in 0 1 2 3 4; do
-    { echo "## gsm signal-profile $p utc=$(utc)"; emu gsm signal-profile "$p"; echo "## gsm status"; emu gsm status; } >> "$OUT/signal/console.txt"
+    { echo "## gsm signal-profile $p utc=$(utc) uptime_s=$(uptime_s)"; emu gsm signal-profile "$p"; echo "## gsm status"; emu gsm status; } >> "$OUT/signal/console.txt"
     sleep 6
     signal_sample "profile=$p +6s"
     sleep 10
@@ -163,7 +172,9 @@ probe_signal() {
   done
 }
 
-# Does "geo fix" reach the gps provider? Three fixes about 100 m apart.
+# Does "geo fix" reach the gps provider? Three fixes about 100 m apart. The provider only
+# reports while some client requests it, so "service:" and "mStarted" matter as much as
+# "last location".
 probe_location() {
   local n=0 pt
   { echo "## cmd location is-location-enabled"; dsh cmd location is-location-enabled; } > "$OUT/location/settings.txt"
@@ -184,7 +195,7 @@ probe_location() {
 # Which networks exist (cellular with INTERNET? Wi-Fi?), and what "cmd phone data enable" does.
 probe_connectivity() {
   dsh dumpsys connectivity > "$OUT/connectivity/dumpsys-connectivity-before.txt"
-  keep 'NetworkAgentInfo\{' < "$OUT/connectivity/dumpsys-connectivity-before.txt" > "$OUT/connectivity/networks-before.txt"
+  keep 'NetworkAgentInfo\{|Active default network' < "$OUT/connectivity/dumpsys-connectivity-before.txt" > "$OUT/connectivity/networks-before.txt"
   {
     echo "## settings get global mobile_data"; dsh settings get global mobile_data
     echo "## settings get global mobile_data1"; dsh settings get global mobile_data1
@@ -193,13 +204,14 @@ probe_connectivity() {
     echo "## settings get global mobile_data (10 s later)"; dsh settings get global mobile_data
   } > "$OUT/connectivity/mobile-data.txt"
   dsh dumpsys connectivity > "$OUT/connectivity/dumpsys-connectivity-after.txt"
-  keep 'NetworkAgentInfo\{' < "$OUT/connectivity/dumpsys-connectivity-after.txt" > "$OUT/connectivity/networks-after.txt"
+  keep 'NetworkAgentInfo\{|Active default network' < "$OUT/connectivity/dumpsys-connectivity-after.txt" > "$OUT/connectivity/networks-after.txt"
   dsh ip -4 -o addr show > "$OUT/connectivity/ip-addr.txt"
   dsh dumpsys network_stack > "$OUT/connectivity/dumpsys-network_stack.txt"
-  keep 'PROBE_|[Vv]alidat' < "$OUT/connectivity/dumpsys-network_stack.txt" > "$OUT/connectivity/validation.txt"
+  # "<netId> - <name>" headers say which network each validation probe ran on.
+  keep '^[0-9]+ - |PROBE_|[Vv]alidat' < "$OUT/connectivity/dumpsys-network_stack.txt" > "$OUT/connectivity/validation.txt"
 }
 
-# ICMP and HTTPS from the device shell. The shell cannot bind to one network; the app will.
+# ICMP and HTTPS from the device shell. The shell uses the default network; the app will bind to cellular.
 probe_reachability() {
   local target
   for target in 10.0.2.2 8.8.8.8 www.google.com; do
@@ -219,6 +231,8 @@ probe_end() {
   T=120 cap "${ADB[@]}" logcat -d -v threadtime -b main,system,crash,radio,events > "$OUT/logcat/logcat.txt"
   cap "${ADB[@]}" logcat -d -v threadtime -b crash > "$OUT/logcat/crash.txt"
   [ -z "$APP_PID" ] || keep " $APP_PID " < "$OUT/logcat/logcat.txt" > "$OUT/logcat/app.txt"
+  # Every cell-info and signal report the modem sent, with its time: the real update cadence.
+  keep 'UNSOL_CELL_INFO_LIST|UNSOL_SIGNAL_STRENGTH|UNSOL_PHYSICAL_CHANNEL_CONFIG|CELL_INFO_LIST_RATE' < "$OUT/logcat/logcat.txt" > "$OUT/telephony/ril-unsol.txt"
   if [ -n "$PKG" ] && grep -qF "Process: $PKG," "$OUT/logcat/crash.txt"; then
     fail "$PKG crashed, see logcat/crash.txt"
   fi
@@ -231,6 +245,7 @@ summarise() {
   echo
   echo "== Result"
   if [ ${#FAILURES[@]} -eq 0 ]; then echo "PASS: installed, running 10 s after launch, no crash"; else printf 'FAIL: %s\n' "${FAILURES[@]}"; fi
+  cat "$OUT/app/permissions.txt" 2>/dev/null
 
   echo; echo "== getprop"
   cat "$OUT/device/getprop.txt"
@@ -239,19 +254,25 @@ summarise() {
   while IFS= read -r line; do
     case $line in
       '## '*) printf '%s\n' "$line" ;;
-      *mCellInfo=*) grep -oE 'CellInfo[A-Za-z]+:\{mRegistered=[A-Z]+ mTimeStamp=[0-9]+ns( mCellConnectionStatus=[0-9A-Za-z_]+)?' <<<"$line" | sed 's/^/   /' ;;
+      *mCellInfo=*) grep -oE 'CellInfo[A-Za-z]+:\{ ?mRegistered=[A-Z]+ mTimeStamp=[0-9]+ns( mCellConnectionStatus=[0-9A-Za-z_]+)?' <<<"$line" | sed 's/^/   /' ;;
     esac
   done < "$OUT/telephony/samples.txt"
+
+  echo; echo "== Cell-info reports from the modem (logcat radio)"
+  while IFS= read -r line; do
+    printf '   %s %s\n' "$(cut -c7-18 <<<"$line")" \
+      "$(grep -oE 'CellInfo(Lte|Nr|Gsm|Wcdma)|mTimeStamp=[0-9]+ns|ssRsrp = -?[0-9]+| rsrp=-?[0-9]+|level ?= ?[0-9]+' <<<"$line" | tr '\n' ' ')"
+  done < <(keep 'UNSOL_CELL_INFO_LIST' < "$OUT/telephony/ril-unsol.txt")
 
   echo; echo "== Last registry sample"
   keep '^[[:space:]]*(mServiceState|mSignalStrength|mCellInfo|mTelephonyDisplayInfo|mDataConnectionState|mUserMobileDataState)[[:space:]]*=' < "$OUT/telephony/registry-t6.txt" | cut -c1-2500
 
   echo; echo "== Signal per gsm signal-profile"
+  keep '^## gsm signal-profile' < "$OUT/signal/console.txt"
   while IFS= read -r line; do
     case $line in
       '## '*) printf '%s\n' "$line" ;;
-      *mSignalStrength=*) printf '   %s\n' "$(sed -E 's/^[[:space:]]*//' <<<"$line" | cut -c1-400)" ;;
-      *mCellInfo=*) printf '   cellinfo: %s\n' "$(grep -oE '(rssi|rsrp|rsrq|rssnr|ssRsrp|ssRsrq|ssSinr|level)=-?[0-9]+' <<<"$line" | tr '\n' ' ')" ;;
+      *mCellInfo=*) printf '   cellinfo: %s\n' "$(grep -oE 'mTimeStamp=[0-9]+ns|(rssi|rsrp|rsrq|rssnr|ssRsrp|ssRsrq|ssSinr|level) ?= ?-?[0-9]+' <<<"$line" | tr '\n' ' ')" ;;
     esac
   done < "$OUT/signal/samples.txt"
 
@@ -260,7 +281,7 @@ summarise() {
   for f in "$OUT"/location/dumpsys-*.txt; do
     echo "-- ${f##*/}"
     awk '/^[[:space:]]*[a-z]+ provider/ { show = ($1 == "gps" || $1 == "fused" || $1 == "network") }
-         show && /provider|last location|last coarse location|request=|enabled=/' "$f" | cut -c1-300
+         show && /provider|last location|service:|mStarted=|Number of location reports|enabled=/' "$f" | cut -c1-300
   done
   cat "$OUT/location/geo-fix.txt"
 
@@ -268,12 +289,12 @@ summarise() {
   for f in "$OUT/connectivity/networks-before.txt" "$OUT/connectivity/networks-after.txt"; do
     echo "-- ${f##*/}"
     while IFS= read -r line; do
-      printf '   %s\n' "$(grep -oE 'network\{[0-9]+\}|ni\{[^}]*\}|Transports: [A-Z|]+|Capabilities: [A-Za-z_&]+|everValidated|lastValidated' <<<"$line" | tr '\n' ' ')"
+      printf '   %s\n' "$(grep -oE 'Active default network: [0-9]+|network\{[0-9]+\}|ni\{[^}]*\}|Transports: [A-Z|]+|Capabilities: [A-Za-z_&]+|everValidated|lastValidated' <<<"$line" | tr '\n' ' ')"
     done < "$f"
   done
   cat "$OUT/connectivity/mobile-data.txt"
-  echo "-- validation probes (last 15 lines)"
-  tail -n 15 "$OUT/connectivity/validation.txt"
+  echo "-- validation probes by network"
+  keep '^[0-9]+ - |PROBE_HTTPS' < "$OUT/connectivity/validation.txt" | cut -c1-120
 
   echo; echo "== Reachability from the device shell"
   keep '^## |packets transmitted|rtt |^rc=|unknown host|unreachable' < "$OUT/reachability/ping.txt"
