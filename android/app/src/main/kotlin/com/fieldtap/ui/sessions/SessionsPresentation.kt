@@ -1,0 +1,81 @@
+package com.fieldtap.ui.sessions
+
+import com.fieldtap.app.SessionDetail
+import com.fieldtap.app.SessionStatus
+import com.fieldtap.core.export.ExportException
+import com.fieldtap.core.session.StorageStatus
+import com.fieldtap.format.GapMeta
+
+/** The reasons [ExportState.Failed] carries: `ExportException.Reason` names, or [UNKNOWN]. */
+object ExportFailure {
+    const val SESSION_OPEN: String = "SESSION_OPEN"
+    const val MISSING_SESSION_JSON: String = "MISSING_SESSION_JSON"
+    const val TOO_LARGE: String = "TOO_LARGE"
+    const val IO: String = "IO"
+    const val UNKNOWN: String = "UNKNOWN"
+
+    /** The reason of an [ExportException], else [UNKNOWN]. */
+    fun of(error: Throwable): String = (error as? ExportException)?.reason?.name ?: UNKNOWN
+}
+
+/** Why a delete did not happen. */
+enum class DeleteError {
+    /** The session is recording; stop it first. */
+    RECORDING,
+
+    /** The repository refused or failed. */
+    FAILED,
+}
+
+/** A `collection.gaps` reason token. */
+enum class GapReason { APP_PAUSED, NO_SERVICE, SCREEN_OFF, UNKNOWN, OTHER }
+
+/**
+ * The decisions behind the Sessions and Session detail screens, pure so they are unit-tested.
+ *
+ * Owner: workstream `ui-session`.
+ */
+object SessionsPresentation {
+    /** How many sampling gaps the detail screen lists before pointing to session.json. */
+    const val MAX_LISTED_GAPS: Int = 50
+
+    /** Used bytes as a share of the cap, 0..1; a cap of zero or less counts as full. */
+    fun storageFraction(storage: StorageStatus): Float {
+        val cap = storage.policy.capBytes
+        if (cap <= 0) return 1f
+        return (storage.usedBytes.toDouble() / cap).toFloat().coerceIn(0f, 1f)
+    }
+
+    /** True when [dirName] is the running (or stopping) session, by its summary or by the session status. */
+    fun isRunning(dirName: String, detail: SessionDetail?, status: SessionStatus): Boolean {
+        if (detail?.summary?.recording == true) return true
+        return when (status) {
+            is SessionStatus.Recording -> status.snapshot.dirName == dirName
+            is SessionStatus.Stopping -> status.snapshot.dirName == dirName
+            is SessionStatus.Idle, is SessionStatus.Starting -> false
+        }
+    }
+
+    fun gapReason(token: String): GapReason = when (token) {
+        "app_paused" -> GapReason.APP_PAUSED
+        "no_service" -> GapReason.NO_SERVICE
+        "screen_off" -> GapReason.SCREEN_OFF
+        "unknown" -> GapReason.UNKNOWN
+        else -> GapReason.OTHER
+    }
+
+    /** The gaps to list, in time order, at most [limit]. */
+    fun listedGaps(gaps: List<GapMeta>, limit: Int = MAX_LISTED_GAPS): List<GapMeta> =
+        gaps.sortedBy { it.startUtcMs }.take(limit.coerceAtLeast(0))
+
+    /**
+     * A coarse key for the session phase, so a screen reloads when a session starts or ends but not on every
+     * recorder snapshot.
+     */
+    fun phaseKey(status: SessionStatus): Int = when (status) {
+        is SessionStatus.Idle -> 0
+        is SessionStatus.Starting -> 1
+        is SessionStatus.Recording -> 2
+        is SessionStatus.Stopping -> 3
+    }
+}

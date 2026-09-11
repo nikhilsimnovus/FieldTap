@@ -1,0 +1,210 @@
+package com.fieldtap.ui.live
+
+import com.fieldtap.app.SessionStatus
+import com.fieldtap.core.input.DataConnState
+import com.fieldtap.core.input.DataStateSnapshot
+import com.fieldtap.core.input.DeviceConditions
+import com.fieldtap.core.input.DisplayInfoSnapshot
+import com.fieldtap.core.input.FixSample
+import com.fieldtap.core.input.ListenerOutcome
+import com.fieldtap.core.input.RadioListener
+import com.fieldtap.core.input.ServiceRegState
+import com.fieldtap.core.input.ServiceStateSnapshot
+import com.fieldtap.core.input.SignalSnapshot
+import com.fieldtap.core.live.LiveCell
+import com.fieldtap.core.radio.NetworkTypeNames
+import com.fieldtap.core.radio.ServingCellSelector
+import com.fieldtap.format.Rat
+import com.fieldtap.ui.components.SessionButtonState
+import com.fieldtap.ui.theme.StatusTone
+
+/** Why Android refreshes cell info at the interval shown (docs/APP-PLAN.md, the Android facts). */
+enum class CadenceReason {
+    /** 2 s: the screen is on and Wi-Fi is off. */
+    SCREEN_ON_WIFI_OFF,
+
+    /** 2 s: Wi-Fi is on, but the phone is charging. */
+    CHARGING_WITH_WIFI,
+
+    /** 10 s: the screen is off (pocket mode). */
+    SCREEN_OFF,
+
+    /** 10 s: Wi-Fi is on and the phone is not charging. */
+    WIFI_ON_BATTERY,
+}
+
+/** The service-state chip. */
+enum class ServiceChip(val tone: StatusTone) {
+    WAITING(StatusTone.NEUTRAL),
+    IN_SERVICE(StatusTone.SUCCESS),
+    ROAMING(StatusTone.SUCCESS),
+    EMERGENCY_ONLY(StatusTone.WARNING),
+    NO_SERVICE(StatusTone.ERROR),
+    RADIO_OFF(StatusTone.ERROR),
+    UNKNOWN(StatusTone.NEUTRAL),
+}
+
+/** The mobile-data chip. */
+enum class DataChip(val tone: StatusTone) {
+    WAITING(StatusTone.NEUTRAL),
+    CONNECTED(StatusTone.SUCCESS),
+    CONNECTING(StatusTone.NEUTRAL),
+    DISCONNECTED(StatusTone.WARNING),
+    SUSPENDED(StatusTone.WARNING),
+    UNKNOWN(StatusTone.NEUTRAL),
+}
+
+/** The GPS chip. */
+sealed interface GpsChip {
+    val tone: StatusTone
+
+    /** No fix since the sources started. */
+    data object Waiting : GpsChip {
+        override val tone: StatusTone get() = StatusTone.NEUTRAL
+    }
+
+    /** A fix at most [LivePresentation.GPS_LOST_AFTER_MS] old. */
+    data class Fix(val accuracyM: Double?) : GpsChip {
+        override val tone: StatusTone get() = StatusTone.SUCCESS
+    }
+
+    /** The newest fix is older than that, as `gps_lost` counts it in a session. */
+    data class Lost(val ageMs: Long) : GpsChip {
+        override val tone: StatusTone get() = StatusTone.ERROR
+    }
+}
+
+/** What the serving cell says about the network. */
+enum class ServingNetwork { LTE, LTE_WITH_NR_LEG, NR_STANDALONE, OTHER }
+
+/** A listener that did not register, for a line under the cadence. */
+data class ListenerNote(val listener: RadioListener, val outcome: ListenerOutcome, val tone: StatusTone)
+
+/** A signal-strength report newer than the serving cell's measurement (display only, never recorded). */
+data class SignalReport(val rsrpDbm: Int, val ageMs: Long)
+
+/**
+ * The decisions behind the Live screen's words and tones, pure so they are unit-tested; the composables
+ * only look up strings.
+ *
+ * Owner: workstream `ui-session`.
+ */
+object LivePresentation {
+    /** A fix older than this is "GPS lost", as `GpsEventDeriver` reports it in a session. */
+    const val GPS_LOST_AFTER_MS: Long = 5_000
+
+    /** Listeners only the capability probe registers; the Live screen never mentions them. */
+    val PROBE_ONLY_LISTENERS: Set<RadioListener> = setOf(
+        RadioListener.PHYSICAL_CHANNEL_CONFIG,
+        RadioListener.BARRING_INFO,
+        RadioListener.REGISTRATION_FAILED,
+    )
+
+    /** The reason for the interval in force under [conditions]; null before the first answer. */
+    fun cadenceReason(conditions: DeviceConditions?): CadenceReason? = when {
+        conditions == null -> null
+        !conditions.screenOn -> CadenceReason.SCREEN_OFF
+        !conditions.wifiConnected -> CadenceReason.SCREEN_ON_WIFI_OFF
+        conditions.charging -> CadenceReason.CHARGING_WITH_WIFI
+        else -> CadenceReason.WIFI_ON_BATTERY
+    }
+
+    /** Walk mode prompts to turn Wi-Fi off or plug in exactly when Wi-Fi forces the 10 s interval. */
+    fun showWalkModeWifiPrompt(walkMode: Boolean, conditions: DeviceConditions?): Boolean =
+        walkMode && conditions != null && conditions.wifiConnected && !conditions.charging
+
+    /** Emergency-only comes from service state only, as in a session; roaming counts as in service. */
+    fun serviceChip(service: ServiceStateSnapshot?): ServiceChip = when {
+        service == null -> ServiceChip.WAITING
+        ServingCellSelector.isEmergencyOnly(service) -> ServiceChip.EMERGENCY_ONLY
+        else -> when (service.state) {
+            ServiceRegState.IN_SERVICE -> if (service.roaming == true) ServiceChip.ROAMING else ServiceChip.IN_SERVICE
+            ServiceRegState.OUT_OF_SERVICE -> ServiceChip.NO_SERVICE
+            ServiceRegState.POWER_OFF -> ServiceChip.RADIO_OFF
+            ServiceRegState.EMERGENCY_ONLY -> ServiceChip.EMERGENCY_ONLY
+            ServiceRegState.UNKNOWN -> ServiceChip.UNKNOWN
+        }
+    }
+
+    fun dataChip(data: DataStateSnapshot?): DataChip = when (data?.state) {
+        null -> DataChip.WAITING
+        DataConnState.CONNECTED -> DataChip.CONNECTED
+        DataConnState.CONNECTING, DataConnState.HANDOVER_IN_PROGRESS -> DataChip.CONNECTING
+        DataConnState.DISCONNECTED, DataConnState.DISCONNECTING -> DataChip.DISCONNECTED
+        DataConnState.SUSPENDED -> DataChip.SUSPENDED
+        DataConnState.UNKNOWN -> DataChip.UNKNOWN
+    }
+
+    /** Android's name of the data network type ("LTE", "NR", "HSPAP"), or null when unknown. */
+    fun dataNetworkName(data: DataStateSnapshot?): String? {
+        if (data == null) return null
+        val name = NetworkTypeNames.networkType(data.networkType)
+        return if (name == NetworkTypeNames.UNKNOWN) null else name.replace('_', ' ')
+    }
+
+    /** Whether the status bar shows a 5G icon; null before Android reported it. An indicator, not a measurement. */
+    fun fiveGIcon(display: DisplayInfoSnapshot?): Boolean? = display?.let { NetworkTypeNames.shows5g(it) }
+
+    fun gpsChip(fix: FixSample?, nowElapsedMs: Long): GpsChip {
+        if (fix == null) return GpsChip.Waiting
+        val ageMs = (nowElapsedMs - fix.elapsedMs).coerceAtLeast(0)
+        return if (ageMs <= GPS_LOST_AFTER_MS) GpsChip.Fix(fix.accuracyM) else GpsChip.Lost(ageMs)
+    }
+
+    /**
+     * Listeners that did not register, in listener order. Missing precise location for the cell-info
+     * requests is an error (no measurements at all); the optional push listener without the Phone
+     * permission is information; any other refusal or failure is a warning.
+     */
+    fun listenerNotes(listeners: Map<RadioListener, ListenerOutcome>): List<ListenerNote> =
+        listeners.entries
+            .filter { (listener, outcome) ->
+                listener !in PROBE_ONLY_LISTENERS && outcome != ListenerOutcome.REGISTERED && outcome != ListenerOutcome.UNREGISTERED
+            }
+            .sortedBy { it.key.ordinal }
+            .map { (listener, outcome) -> ListenerNote(listener, outcome, noteTone(listener, outcome)) }
+
+    /** LTE, LTE with its NR leg, NR standalone, or another RAT; null without a serving cell. */
+    fun servingNetwork(serving: LiveCell?, nsaLeg: LiveCell?): ServingNetwork? = when (serving?.rat) {
+        null -> null
+        Rat.LTE -> if (nsaLeg != null) ServingNetwork.LTE_WITH_NR_LEG else ServingNetwork.LTE
+        Rat.NR -> ServingNetwork.NR_STANDALONE
+        else -> ServingNetwork.OTHER
+    }
+
+    /**
+     * The RSRP of a signal-strength report for the serving cell's RAT that is newer than the serving
+     * measurement (Android's signal reports come between cell-info answers), with its age; else null.
+     */
+    fun newerSignalReport(serving: LiveCell?, signal: SignalSnapshot?, nowElapsedMs: Long): SignalReport? {
+        if (serving == null || signal == null) return null
+        val rsrp = when (serving.rat) {
+            Rat.LTE -> signal.lteRsrp
+            Rat.NR -> signal.nrSsRsrp
+            else -> null
+        } ?: return null
+        val measuredAtMs = signal.modemTimestampMs ?: signal.observedElapsedMs
+        if (measuredAtMs <= serving.timestampMs) return null
+        return SignalReport(rsrp, (nowElapsedMs - measuredAtMs).coerceAtLeast(0))
+    }
+
+    /** Mark writes an event only while recording outside a privacy zone. */
+    fun markAllowed(status: SessionStatus): Boolean = status is SessionStatus.Recording && !status.snapshot.paused
+
+    fun pausedInZone(status: SessionStatus): Boolean = status is SessionStatus.Recording && status.snapshot.paused
+
+    /** The session button: busy while the checks or the start call run, then the session's own state. */
+    fun buttonState(status: SessionStatus, prestart: PrestartState): SessionButtonState = when (status) {
+        is SessionStatus.Idle ->
+            if (prestart is PrestartState.Checking || prestart is PrestartState.Starting) SessionButtonState.STARTING else SessionButtonState.IDLE
+        is SessionStatus.Starting -> SessionButtonState.STARTING
+        is SessionStatus.Recording -> SessionButtonState.RECORDING
+        is SessionStatus.Stopping -> SessionButtonState.STOPPING
+    }
+
+    private fun noteTone(listener: RadioListener, outcome: ListenerOutcome): StatusTone = when {
+        listener == RadioListener.CELL_INFO_REQUEST -> StatusTone.ERROR
+        listener == RadioListener.CELL_INFO_PUSH && outcome == ListenerOutcome.MISSING_PERMISSION -> StatusTone.INFO
+        else -> StatusTone.WARNING
+    }
+}

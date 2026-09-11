@@ -1,6 +1,316 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Strings of the disclosure, permissions, readiness, probe, settings and about screens. Owner: workstream ui-setup. -->
+<!--
+    Strings of the disclosure, permissions, readiness, probe, settings and about screens. Owner: workstream ui-setup.
+    Every name starts with setup_, disclosure_, permissions_, readiness_, soak_, probe_, settings_ or about_, so none can
+    collide with another string file of this module (a duplicate name fails the resource merge); SetupStringsTest checks it.
+-->
 <resources>
-    <string name="about_no_account">No account yet: sessions stay on this phone until you share or delete them.</string>
+    <!-- Shared by the setup screens. -->
+    <string name="setup_back">Back</string>
+    <string name="setup_try_again">Try again</string>
+    <string name="setup_cancel">Cancel</string>
+    <string name="setup_open_app_settings">Open app settings</string>
+    <string name="setup_open_settings_failed">Android could not open that settings screen.</string>
+    <string name="setup_share_failed">Android could not open the share sheet.</string>
+    <string name="setup_no_value" translatable="false">—</string>
+    <string name="setup_yes">Yes</string>
+    <string name="setup_no">No</string>
+
+    <!-- Disclosure and consent. -->
+    <string name="disclosure_heading">Before you start</string>
+    <string name="disclosure_intro">Please read how 5gto6G FieldTap records and what it keeps before it asks for location access.</string>
+    <string name="disclosure_consent_title">What you agree to</string>
+    <string name="disclosure_limits_title">What FieldTap reads</string>
+    <string name="disclosure_accept">Accept and continue</string>
+    <string name="disclosure_decline">Not now</string>
+    <string name="disclosure_continue">Continue</string>
+    <string name="disclosure_save_failed">Your choice could not be saved. Try again.</string>
+    <!-- %1$s is a date, e.g. 10 Sept 2026. -->
+    <string name="disclosure_already_accepted">You accepted this on %1$s.</string>
+
+    <!-- Permissions. -->
+    <string name="permissions_title">Permissions</string>
+    <string name="permissions_intro">FieldTap asks only for what measuring needs. You can change these at any time in Android’s settings.</string>
+    <string name="permissions_location_title">Precise location</string>
+    <string name="permissions_location_reason">Android gives apps cell information only with precise location; approximate location returns none. FieldTap also uses it for the GPS track of sessions you start.</string>
+    <string name="permissions_notifications_title">Notifications</string>
+    <string name="permissions_notifications_reason">Shows the running session with Stop and Mark, so you can control it without opening the app.</string>
+    <string name="permissions_tag_required">Required</string>
+    <string name="permissions_tag_recommended">Recommended</string>
+    <string name="permissions_status_allowed">Allowed</string>
+    <string name="permissions_status_not_requested">Not allowed yet</string>
+    <string name="permissions_status_denied">Not allowed</string>
+    <string name="permissions_status_blocked">Refused. Android will not ask again.</string>
+    <string name="permissions_status_approximate">Only approximate location is allowed</string>
+    <string name="permissions_status_notifications_off">Notifications are off for FieldTap</string>
+    <string name="permissions_action_allow">Allow</string>
+    <string name="permissions_action_ask_again">Ask again</string>
+    <string name="permissions_action_notification_settings">Notification settings</string>
+    <string name="permissions_location_off">Location is off, so Android returns no cell information and no GPS fixes.</string>
+    <string name="permissions_location_settings">Location settings</string>
+    <string name="permissions_instant_updates_note">Instant cell updates are optional. They use the Phone permission, and you can turn them on later in Settings.</string>
+    <string name="permissions_continue">Continue</string>
+    <string name="permissions_continue_hint">Allow precise location to continue.</string>
+    <string name="permissions_consent_needed">Accept the disclosure first. FieldTap asks for location only after you have read how it is used.</string>
+
+    <!-- Readiness check. -->
     <string name="readiness_title">Readiness check</string>
+    <string name="readiness_check_again">Check again</string>
+    <string name="readiness_checking">Checking this phone…</string>
+    <string name="readiness_failed_title">The check could not run</string>
+    <string name="readiness_failed_message">Android did not answer. Try again.</string>
+    <string name="readiness_failed_stale">The last check could not run, so these results are from the check before it.</string>
+    <string name="readiness_summary_ready">Ready to record. Every check passed.</string>
+    <!-- %1$d is a number of settings, at least 1. -->
+    <plurals name="readiness_summary_advice">
+        <item quantity="one">Ready to record, but one setting can cost you samples.</item>
+        <item quantity="other">Ready to record, but %1$d settings can cost you samples.</item>
+    </plurals>
+    <!-- %1$s is the phone maker, e.g. OnePlus. -->
+    <string name="readiness_summary_oem">Ready to record, but %1$s phones are known to stop background apps.</string>
+    <!-- %1$d is a number of problems, at least 1. -->
+    <plurals name="readiness_summary_blocked">
+        <item quantity="one">One problem stops a session from starting.</item>
+        <item quantity="other">%1$d problems stop a session from starting.</item>
+    </plurals>
+    <!-- %1$s is a time of day, e.g. 14:32. -->
+    <string name="readiness_checked_at">Checked at %1$s</string>
+    <string name="readiness_checks_title">Checks</string>
+    <string name="readiness_level_ok">OK</string>
+    <string name="readiness_level_advice">Recommended</string>
+    <string name="readiness_level_blocker">Required</string>
+    <string name="readiness_check_precise_location">Precise location</string>
+    <string name="readiness_check_location_enabled">Location</string>
+    <string name="readiness_check_notifications">Notifications</string>
+    <string name="readiness_check_phone_permission">Instant cell updates</string>
+    <string name="readiness_check_battery_optimisation">Battery optimisation</string>
+    <string name="readiness_check_background_restriction">Background use</string>
+    <string name="readiness_check_standby_bucket">App standby</string>
+    <string name="readiness_check_sim_present">SIM</string>
+    <string name="readiness_check_wifi_off">Wi-Fi</string>
+    <string name="readiness_fix_app_settings">App settings</string>
+    <string name="readiness_fix_location">Location settings</string>
+    <string name="readiness_fix_notifications">Notification settings</string>
+    <string name="readiness_fix_battery">Battery settings</string>
+    <string name="readiness_fix_wifi">Wi-Fi settings</string>
+    <!-- %1$s is the phone maker, e.g. OnePlus. -->
+    <string name="readiness_oem_title">Extra steps for %1$s</string>
+    <!-- %1$s is the phone maker, e.g. OnePlus. -->
+    <string name="readiness_oem_intro">%1$s phones are known to stop apps in the background, even with a notification showing, and their battery settings can switch back on their own.</string>
+    <string name="readiness_oem_step_battery">In FieldTap’s app settings, allow background activity and turn battery optimisation off.</string>
+    <string name="readiness_oem_step_lock">In recent apps, lock FieldTap, so clearing recent apps does not close it.</string>
+    <string name="readiness_oem_step_recheck">Run this check before every session. FieldTap asks for it on this phone.</string>
+    <string name="readiness_oem_names">Setting names differ between versions; dontkillmyapp.com lists them for each phone.</string>
+    <!-- %1$d is the step number. -->
+    <string name="readiness_oem_step_number">%1$d.</string>
+
+    <!-- Soak test, on the Readiness screen. -->
+    <string name="soak_title">Soak test</string>
+    <string name="soak_subtitle">Optional · 10 minutes</string>
+    <string name="soak_intro">Checks whether Android keeps FieldTap running with the screen off. It records nothing: it counts the seconds the app ran against the seconds that passed.</string>
+    <string name="soak_start">Start soak test</string>
+    <string name="soak_blocked_session">A session is recording. Run the soak test after it stops.</string>
+    <string name="soak_blocked_required">Fix the required checks first.</string>
+    <string name="soak_start_refused">Android did not start the soak test. Keep FieldTap open on screen and try again.</string>
+    <string name="soak_running_instruction">Turn the screen off now and leave the phone for 10 minutes. The notification shows the progress.</string>
+    <!-- %1$s is the time elapsed and %2$s the planned duration, both as m:ss. -->
+    <string name="soak_progress">%1$s of %2$s</string>
+    <string name="soak_stop">Stop test</string>
+    <string name="soak_result_logged">Seconds logged</string>
+    <!-- %1$d seconds logged of %2$d seconds elapsed. -->
+    <string name="soak_result_logged_value">%1$d of %2$d</string>
+    <string name="soak_result_running_share">Time running</string>
+    <!-- %1$s is a percentage with one decimal, e.g. 99.7. -->
+    <string name="soak_result_percent">%1$s %%</string>
+    <string name="soak_result_answers">Cell-info answers</string>
+    <string name="soak_result_fresh">Fresh answers</string>
+    <string name="soak_result_screen_off">Answers with the screen off</string>
+    <string name="soak_verdict_good">Android kept FieldTap running for the whole test.</string>
+    <string name="soak_verdict_partial">Android paused FieldTap for part of the test. Check the battery settings and run it again.</string>
+    <string name="soak_verdict_poor">Android stopped FieldTap for much of the test. Sessions on this phone will have gaps until its battery settings change.</string>
+    <string name="soak_verdict_too_short">The test ended before it could measure anything.</string>
+    <string name="soak_screen_stayed_on">No answer arrived with the screen off, so this run does not show screen-off behaviour. Run it again and turn the screen off.</string>
+    <string name="soak_run_again">Run again</string>
+
+    <!-- Capability probe. -->
+    <string name="probe_title">Capability probe</string>
+    <string name="probe_intro_title">What this phone’s APIs return</string>
+    <string name="probe_intro">Listens to every telephony API for 30 seconds and reports what this phone returns: neighbours, band lists, whether timestamps advance, the SINR range and which listeners Android refuses. Export the report to qualify the phone.</string>
+    <string name="probe_keep_open">Keep FieldTap open with the screen on until it finishes.</string>
+    <string name="probe_run">Run probe</string>
+    <string name="probe_run_again">Run again</string>
+    <string name="probe_running_title">Probing</string>
+    <string name="probe_starting">Starting…</string>
+    <string name="probe_stop">Stop</string>
+    <string name="probe_failed">The probe could not finish. Try again.</string>
+    <string name="probe_interrupted">The probe stopped because FieldTap left the screen. Run it again and keep the screen on.</string>
+    <string name="probe_export">Export JSON</string>
+    <string name="probe_export_failed">The report could not be saved for sharing. Try again.</string>
+    <!-- %1$s is a file name, e.g. probe-Google-Pixel-9-20260910-143000.json. -->
+    <string name="probe_exported">Saved as %1$s</string>
+    <string name="probe_share_subject">FieldTap capability probe</string>
+    <string name="probe_section_findings">Findings</string>
+    <string name="probe_no_findings">Nothing unusual was found.</string>
+    <string name="probe_section_phone">Phone</string>
+    <string name="probe_section_cell_info">Cell information</string>
+    <string name="probe_section_service">Service state</string>
+    <string name="probe_section_listeners">Listeners</string>
+    <string name="probe_section_permissions">Permissions</string>
+    <string name="probe_key_android">Android</string>
+    <!-- %1$s is the Android version, e.g. 16, and %2$d the API level, e.g. 36. -->
+    <string name="probe_value_android">%1$s (API %2$d)</string>
+    <string name="probe_key_network_type">Network type</string>
+    <string name="probe_key_operator">Network operator</string>
+    <!-- %1$s is the operator name and %2$s its MCC and MNC, e.g. T-Mobile (310260). -->
+    <string name="probe_value_operator">%1$s (%2$s)</string>
+    <string name="probe_key_app">App version</string>
+    <!-- %1$s is the version name and %2$d the version code. -->
+    <string name="probe_value_app">%1$s (%2$d)</string>
+    <string name="probe_key_listened">Listened</string>
+    <!-- %1$s is a number of seconds, e.g. 30.0. -->
+    <string name="probe_value_seconds">%1$s s</string>
+    <string name="probe_key_requests">Requests</string>
+    <string name="probe_key_answers">Answers</string>
+    <string name="probe_key_errors">Failed requests</string>
+    <string name="probe_key_max_cells">Most cells in one answer</string>
+    <string name="probe_key_neighbours">Neighbour cells</string>
+    <string name="probe_key_serving_rats">Serving RATs</string>
+    <string name="probe_key_band_lists">Band lists</string>
+    <string name="probe_key_connection_status">Connection status</string>
+    <string name="probe_key_nsa">NSA NR leg</string>
+    <string name="probe_key_timestamps">Timestamps advance</string>
+    <string name="probe_key_min_interval">Shortest fresh interval</string>
+    <string name="probe_key_rsrp_range">RSRP range</string>
+    <string name="probe_key_sinr_range">SINR range</string>
+    <string name="probe_value_seen">Seen</string>
+    <string name="probe_value_not_seen">Not seen</string>
+    <string name="probe_value_reported">Reported</string>
+    <string name="probe_value_not_reported">Not reported</string>
+    <string name="probe_value_not_enough">Not enough answers</string>
+    <!-- %1$d is the lowest and %2$d the highest value. -->
+    <string name="probe_value_range_dbm">%1$d to %2$d dBm</string>
+    <!-- %1$d is the lowest and %2$d the highest value. -->
+    <string name="probe_value_range_db">%1$d to %2$d dB</string>
+    <string name="probe_value_none">None</string>
+    <string name="probe_key_updates">Updates</string>
+    <string name="probe_key_operator_code">Operator code</string>
+    <string name="probe_key_emergency_only">Emergency calls only</string>
+    <string name="probe_key_states">States seen</string>
+    <string name="probe_key_display_overrides">5G icon overrides</string>
+    <string name="probe_listener_registered">Registered</string>
+    <string name="probe_listener_missing_permission">Missing permission</string>
+    <string name="probe_listener_refused">Refused by Android</string>
+    <string name="probe_listener_refused_expected">Refused, as expected</string>
+    <string name="probe_listener_not_registered">Not registered</string>
+    <string name="probe_listener_failed">Failed</string>
+    <string name="probe_permission_allowed">Allowed</string>
+    <string name="probe_permission_not_allowed">Not allowed</string>
+    <string name="probe_permission_precise_location">Precise location</string>
+    <string name="probe_permission_approximate_location">Approximate location</string>
+    <string name="probe_permission_notifications">Notifications</string>
+    <string name="probe_permission_phone">Phone</string>
+
+    <!-- Settings. -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_loading">Loading settings…</string>
+    <string name="settings_load_failed">Settings could not be read.</string>
+    <string name="settings_save_failed">Settings could not be saved. Try again.</string>
+    <string name="settings_section_tests">Ping and download tests</string>
+    <string name="settings_tests_network_note">Tests run on the mobile network only, never on Wi-Fi.</string>
+    <string name="settings_tests_default">Tick tests in the Start dialog</string>
+    <string name="settings_tests_default_supporting">Tests stay off unless ticked for a session. This only sets the starting tick.</string>
+    <string name="settings_ping_heading">Ping</string>
+    <string name="settings_ping_target">Target</string>
+    <string name="settings_ping_target_supporting">Host name or IPv4 address. Leave empty to turn ping off.</string>
+    <string name="settings_ping_interval">Ping every</string>
+    <string name="settings_ping_count">Echoes per ping</string>
+    <string name="settings_download_heading">Download</string>
+    <string name="settings_download_url">HTTPS address</string>
+    <string name="settings_download_url_supporting">Leave empty to turn the download off.</string>
+    <!-- %1$s is a host name, e.g. speed.cloudflare.com. -->
+    <string name="settings_download_host">Downloads from %1$s</string>
+    <string name="settings_download_off">The download test is off.</string>
+    <string name="settings_download_interval">Download every</string>
+    <string name="settings_download_cap">Stop each download at</string>
+    <string name="settings_download_budget">Budget per session</string>
+    <string name="settings_unit_seconds">s</string>
+    <string name="settings_unit_minutes">min</string>
+    <string name="settings_unit_megabytes">MB</string>
+    <string name="settings_unit_metres">m</string>
+    <string name="settings_tests_save">Save</string>
+    <string name="settings_tests_restore">Restore defaults</string>
+    <string name="settings_tests_saved">Test settings saved</string>
+    <string name="settings_tests_rejected">These test settings were not saved. Check the fields marked in red.</string>
+    <!-- %1$d and %2$d are the lowest and highest allowed values. -->
+    <string name="settings_problem_whole_number">Enter a whole number from %1$d to %2$d.</string>
+    <string name="settings_problem_host">Use a host name or an IPv4 address, without spaces or http://.</string>
+    <string name="settings_problem_https">Use an https:// address.</string>
+    <string name="settings_problem_url">This is not a valid web address.</string>
+    <!-- %1$d is the download cap in MB. -->
+    <string name="settings_problem_budget">The budget must be at least one download (%1$d MB), or no download can run.</string>
+    <string name="settings_section_measurement">Measurement</string>
+    <string name="settings_instant_updates">Instant cell updates</string>
+    <string name="settings_instant_updates_supporting">Lets Android push cell changes as they happen, on top of FieldTap’s regular requests. Needs the Phone permission; FieldTap never reads your number or SIM identifiers.</string>
+    <string name="settings_instant_updates_blocked">The Phone permission was refused. Allow it in app settings.</string>
+    <string name="settings_instant_updates_needs_location">It also needs precise location.</string>
+    <string name="settings_instant_updates_off_title">Turn off instant cell updates?</string>
+    <string name="settings_instant_updates_off_body">Android lets you remove the Phone permission only in FieldTap’s app settings. FieldTap keeps working without it.</string>
+    <string name="settings_walk_mode">Walk mode on by default</string>
+    <string name="settings_walk_mode_supporting">Starts the Live screen with walk mode on.</string>
+    <string name="settings_section_zones">Privacy zones</string>
+    <string name="settings_zones_intro">In new sessions, logging pauses inside a zone: nothing is written there except that logging paused and resumed. Zone names stay on this phone.</string>
+    <string name="settings_zones_empty">No privacy zones yet.</string>
+    <string name="settings_zone_add_here">Add zone here</string>
+    <string name="settings_zone_add_coordinates">Add by coordinates</string>
+    <!-- %1$s is the radius in metres, %2$s the latitude and %3$s the longitude. -->
+    <string name="settings_zone_summary">Radius %1$s m · %2$s, %3$s</string>
+    <!-- %1$s is the zone name. -->
+    <string name="settings_zone_delete">Delete zone %1$s</string>
+    <string name="settings_zone_deleted">Zone deleted</string>
+    <string name="settings_zone_undo">Undo</string>
+    <string name="settings_zone_saved">Zone saved</string>
+    <string name="settings_zone_editor_new">New privacy zone</string>
+    <string name="settings_zone_editor_edit">Edit privacy zone</string>
+    <string name="settings_zone_name">Name</string>
+    <string name="settings_zone_name_supporting">Only you see it; it is never written to a session.</string>
+    <string name="settings_zone_radius">Radius</string>
+    <!-- %1$s and %2$s are the smallest and largest radius in metres. -->
+    <string name="settings_zone_radius_supporting">From %1$s m to %2$s m.</string>
+    <string name="settings_zone_latitude">Latitude</string>
+    <string name="settings_zone_longitude">Longitude</string>
+    <string name="settings_zone_use_position">Use my position</string>
+    <string name="settings_zone_waiting_fix">Waiting for a GPS fix. Location must be on and allowed.</string>
+    <!-- %1$s is the accuracy in metres. -->
+    <string name="settings_zone_fix_accuracy">GPS position, accurate to %1$s m</string>
+    <string name="settings_zone_fix">GPS position</string>
+    <string name="settings_zone_save">Save</string>
+    <string name="settings_section_consent">Consent</string>
+    <!-- %1$s is a date. -->
+    <string name="settings_consent_given">You accepted the disclosure on %1$s.</string>
+    <string name="settings_consent_outdated">You accepted an earlier version of the disclosure. Accept the current one before your next session.</string>
+    <string name="settings_consent_missing">Not given. New sessions cannot start until you accept the disclosure.</string>
+    <string name="settings_consent_withdraw">Withdraw consent</string>
+    <string name="settings_consent_withdraw_title">Withdraw consent?</string>
+    <string name="settings_consent_withdraw_body">New sessions cannot start until you accept again. A session recording now keeps running until you stop it, and sessions on this phone stay until you delete them.</string>
+    <string name="settings_consent_withdraw_confirm">Withdraw</string>
+    <string name="settings_consent_withdrawn">Consent withdrawn</string>
+
+    <!-- About. -->
+    <string name="about_title">About</string>
+    <!-- %1$s is the version name and %2$d the version code. -->
+    <string name="about_version">Version %1$s (%2$d)</string>
+    <string name="about_debug_build">Debug build</string>
+    <string name="about_account_title">Account</string>
+    <string name="about_no_account">No account yet. An account is coming; until then, sessions stay on this phone until you share them as a zip or delete them.</string>
+    <string name="about_limits_title">What FieldTap reads</string>
+    <string name="about_details_title">Details</string>
+    <string name="about_publisher_key">Publisher</string>
+    <string name="about_publisher" translatable="false">5gto6g</string>
+    <string name="about_price_key">Price</string>
+    <string name="about_price">Free</string>
+    <string name="about_application_id_key">Application ID</string>
+    <string name="about_privacy_title">Privacy</string>
+    <string name="about_privacy_body">No ads, analytics or tracking, and no phone or SIM identifiers are ever read. Recordings leave this phone only when you share them as a zip; ping and download tests, when you turn them on, contact the servers named in Settings.</string>
+    <string name="about_oss_title">Open-source software</string>
+    <string name="about_oss_body">Built with Kotlin, kotlinx.coroutines, kotlinx.serialization, Jetpack Compose, Material 3 and other AndroidX libraries, used under the Apache License 2.0.</string>
 </resources>
