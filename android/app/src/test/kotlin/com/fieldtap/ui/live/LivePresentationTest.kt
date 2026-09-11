@@ -12,6 +12,7 @@ import com.fieldtap.core.input.ServiceRegState
 import com.fieldtap.core.input.ServiceStateSnapshot
 import com.fieldtap.core.input.SignalSnapshot
 import com.fieldtap.core.live.LiveCell
+import com.fieldtap.core.live.LiveState
 import com.fieldtap.core.session.StartRequest
 import com.fieldtap.format.FixProvider
 import com.fieldtap.format.Rat
@@ -20,6 +21,7 @@ import com.fieldtap.ui.components.SessionButtonState
 import com.fieldtap.ui.theme.StatusTone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -156,6 +158,30 @@ class LivePresentationTest {
         assertFalse(LivePresentation.markAllowed(SessionStatus.Recording(TestData.snapshot(paused = true))))
         assertTrue(LivePresentation.pausedInZone(SessionStatus.Recording(TestData.snapshot(paused = true))))
         assertFalse(LivePresentation.markAllowed(SessionStatus.Stopping(TestData.snapshot())))
+    }
+
+    @Test
+    fun withoutAServingCellTheTilesSayWhy() {
+        val lte = LiveCell(Rat.LTE, 212, 66_786, 66, -92, -11, 14, "311480", "Verizon", 1, 1_000)
+        assertNull(LivePresentation.servingAbsence(LiveState(serving = lte, shortInterval = true)))
+        assertEquals(ServingAbsence.WaitingForAnswer, LivePresentation.servingAbsence(LiveState()))
+
+        // Answers arrive, but only for another network: the API 31 emulator reports a GSM cell while data is on HSPA.
+        val gsm = LiveCell(Rat.GSM, null, 0, null, null, null, null, "310260", null, 0, 1_000)
+        val hspa = DataStateSnapshot(DataConnState.CONNECTED, networkType = 10, observedWallMs = 0, observedElapsedMs = 0)
+        val hspaName = LivePresentation.dataNetworkName(hspa)
+        assertNotNull(hspaName)
+        assertEquals(
+            ServingAbsence.NoLteOrNrServing(hspaName),
+            LivePresentation.servingAbsence(LiveState(neighbours = listOf(gsm), shortInterval = true, data = hspa)),
+        )
+        assertEquals(ServingAbsence.NoLteOrNrServing(null), LivePresentation.servingAbsence(LiveState(shortInterval = false)))
+
+        // Data on LTE or NR while no cell is marked serving: the tile does not claim the phone is on another network.
+        val onLte = hspa.copy(networkType = 13)
+        assertEquals(ServingAbsence.NoLteOrNrServing(null), LivePresentation.servingAbsence(LiveState(shortInterval = true, data = onLte)))
+        val onNr = hspa.copy(networkType = 20)
+        assertEquals(ServingAbsence.NoLteOrNrServing(null), LivePresentation.servingAbsence(LiveState(shortInterval = true, data = onNr)))
     }
 
     @Test

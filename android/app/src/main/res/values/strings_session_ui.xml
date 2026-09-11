@@ -90,6 +90,10 @@
     <string name="live_rsrq">RSRQ</string>
     <string name="live_sinr">SINR</string>
     <string name="live_waiting_first_measurement">Waiting for the first cell measurement</string>
+    <string name="live_no_lte_nr_badge">No LTE or NR cell</string>
+    <string name="live_no_lte_nr_detail">Android reports no LTE or NR serving cell. FieldTap measures LTE and NR.</string>
+    <!-- %1$s is Android's data network type, e.g. HSPA. -->
+    <string name="live_no_lte_nr_detail_on">Android reports no LTE or NR serving cell; mobile data is on %1$s. FieldTap measures LTE and NR.</string>
     <!-- %1$d is a physical cell id. -->
     <string name="live_pci">PCI %1$d</string>
     <!-- %1$d is a channel number. -->

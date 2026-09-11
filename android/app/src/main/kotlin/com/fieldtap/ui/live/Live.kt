@@ -838,10 +838,14 @@ private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, modifier:
     val rsrqQuality = SignalScale.quality(SignalMetric.RSRQ, serving?.rsrq)
     val sinrQuality = SignalScale.quality(SignalMetric.SINR, serving?.sinr)
     val ageMs = live.servingAgeMs
+    val absence = LivePresentation.servingAbsence(live)
     val ageText = if (ageMs != null) {
         stringResource(R.string.age_old, Formats.ageSeconds(ageMs))
     } else {
-        stringResource(R.string.live_waiting_first_measurement)
+        when (absence) {
+            is ServingAbsence.NoLteOrNrServing -> stringResource(R.string.live_no_lte_nr_badge)
+            ServingAbsence.WaitingForAnswer, null -> stringResource(R.string.live_waiting_first_measurement)
+        }
     }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(Spacing.Md)) {
         MetricTile(
@@ -853,7 +857,7 @@ private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, modifier:
             qualityLabel = if (serving != null) labels.of(rsrpQuality) else null,
             ageText = ageText,
             badge = live.badge,
-            supportingText = serving?.let { cellIdentity(it) },
+            supportingText = serving?.let { cellIdentity(it) } ?: absenceDetail(absence),
             placeholder = UNKNOWN_VALUE,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -1484,6 +1488,14 @@ private fun gpsText(chip: GpsChip): String = when (chip) {
         if (accuracy != null) stringResource(R.string.live_gps_fix_accuracy, accuracy.roundToInt()) else stringResource(R.string.live_gps_fix)
     }
     is GpsChip.Lost -> stringResource(R.string.live_gps_lost, Formats.ageSeconds(chip.ageMs))
+}
+
+/** The hero tile's line under the value when Android names no LTE or NR serving cell; null otherwise. */
+@Composable
+private fun absenceDetail(absence: ServingAbsence?): String? = when (absence) {
+    is ServingAbsence.NoLteOrNrServing ->
+        absence.network?.let { stringResource(R.string.live_no_lte_nr_detail_on, it) } ?: stringResource(R.string.live_no_lte_nr_detail)
+    ServingAbsence.WaitingForAnswer, null -> null
 }
 
 /** "LTE · PCI 212 · EARFCN 66786 · band 66". */
