@@ -72,9 +72,11 @@ data class SessionOutcome(
     val startedUtcMs: Long,
     val stoppedUtcMs: Long,
     val stoppedBy: String,
-    /** True when closed by launch recovery rather than by a stop. */
+    /** True when closed by recovery because Android stopped the process, rather than by a stop. */
     val interrupted: Boolean,
     val freshSamples: Long,
+    /** The session's name as session.json holds it; null when it is not known. */
+    val name: String? = null,
 )
 
 data class SessionState(

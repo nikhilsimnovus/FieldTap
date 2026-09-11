@@ -67,25 +67,41 @@ object ExitReasons {
 /**
  * The heartbeat: proof of life every 5 s while recording, in `<stateDir>/<dirName>.heartbeat`
  * (outside the session directory, which holds only the seven files). One line:
- * `v1 <wallMs> <elapsedMs> <pid>\n`. [FileSessionFiles] replaces it atomically; a torn or unreadable
- * file (no final LF, a missing or extra field, a sign, an overflow) decodes to null.
+ * `v1 <wallMs> <elapsedMs> <pid>\n`.
+ *
+ * When the recorder stopped the session itself but could not write its final session.json (a full disk, say), it
+ * leaves `v2 <wallMs> <elapsedMs> <pid> <stoppedBy>\n` instead: the stop time and the stop token ([stoppedBy]), so
+ * the session is closed as that stop, and not as a death of whatever process last had that pid.
+ *
+ * [FileSessionFiles] replaces it atomically; a torn or unreadable file (no final LF, a missing or extra field, a
+ * sign, an overflow, a token that is not `^[a-z0-9_]+$` or longer than 64 characters) decodes to null.
  *
  * Owner: workstream `session-core`.
  */
-data class HeartbeatRecord(val wallMs: Long, val elapsedMs: Long, val pid: Int) {
-    fun encode(): String = "$VERSION $wallMs $elapsedMs $pid\n"
+data class HeartbeatRecord(val wallMs: Long, val elapsedMs: Long, val pid: Int, val stoppedBy: String? = null) {
+    init {
+        require(stoppedBy == null || (stoppedBy.length <= MAX_TOKEN_CHARS && ExitReasons.isToken(stoppedBy))) {
+            "stoppedBy must be a lower-case token, was '$stoppedBy'"
+        }
+    }
+
+    fun encode(): String = if (stoppedBy == null) "v1 $wallMs $elapsedMs $pid\n" else "v2 $wallMs $elapsedMs $pid $stoppedBy\n"
 
     companion object {
-        private const val VERSION: String = "v1"
+        private const val MAX_TOKEN_CHARS: Int = 64
 
-        private val LINE: Regex = Regex("v1 (0|[1-9][0-9]{0,18}) (0|[1-9][0-9]{0,18}) (0|[1-9][0-9]{0,9})\n")
+        private val LINE_V1: Regex = Regex("v1 (0|[1-9][0-9]{0,18}) (0|[1-9][0-9]{0,18}) (0|[1-9][0-9]{0,9})\n")
+
+        private val LINE_V2: Regex =
+            Regex("v2 (0|[1-9][0-9]{0,18}) (0|[1-9][0-9]{0,18}) (0|[1-9][0-9]{0,9}) ([a-z0-9_]{1,$MAX_TOKEN_CHARS})\n")
 
         fun decode(text: String): HeartbeatRecord? {
-            val match = LINE.matchEntire(text) ?: return null
+            val stopped = LINE_V2.matchEntire(text)
+            val match = stopped ?: LINE_V1.matchEntire(text) ?: return null
             val wallMs = match.groupValues[1].toLongOrNull() ?: return null
             val elapsedMs = match.groupValues[2].toLongOrNull() ?: return null
             val pid = match.groupValues[3].toIntOrNull() ?: return null
-            return HeartbeatRecord(wallMs, elapsedMs, pid)
+            return HeartbeatRecord(wallMs, elapsedMs, pid, stopped?.groupValues?.get(4))
         }
     }
 }

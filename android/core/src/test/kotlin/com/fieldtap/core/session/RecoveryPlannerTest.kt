@@ -154,6 +154,26 @@ class RecoveryPlannerTest {
     }
 
     @Test
+    fun aHeartbeatWithAStopTokenClosesAsThatStopAndLeavesTheExitRecordsToOthers() {
+        val stoppedDir = "20260910-150000_Stopped"
+        val stopped = session(stoppedDir, HeartbeatRecord(stop, START_ELAPSED_MS + 600_000, 4242, stoppedBy = "storage_full"))
+        val killed = session(DIR_NAME, beat(stop + 60_000, 77))
+        // Hours later a process that reused pid 4242 died. It says nothing about the session the app stopped.
+        val exits = listOf(ExitRecord(pid = 4242, timestampWallMs = stop + 3 * 3_600_000, reason = 3, description = "lmk"))
+
+        val actions = RecoveryPlanner.plan(listOf(stopped, killed), exits, activeDirName = null)
+
+        assertEquals(
+            listOf(
+                RecoveryAction.CloseStopped(stoppedDir, stop, "storage_full"),
+                RecoveryAction.CloseInterrupted(DIR_NAME, stop + 60_000, "low_memory", "lmk"),
+            ),
+            actions,
+        )
+        assertEquals(listOf(RecoveryAction.LeaveRunning(stoppedDir)), RecoveryPlanner.plan(listOf(stopped), exits, stoppedDir))
+    }
+
+    @Test
     fun nothingOpenMeansNothingToDo() {
         val exits = listOf(ExitRecord(pid = 1, timestampWallMs = stop, reason = 4, description = null))
 

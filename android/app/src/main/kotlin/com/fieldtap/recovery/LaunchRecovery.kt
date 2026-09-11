@@ -27,7 +27,7 @@ import kotlinx.coroutines.withContext
  * Closes sessions a killed process left open, once per process start, before any new session.
  *
  * [run]: `SessionRecovery.findOpen()`, `ExitReasonReader.recent()`, `RecoveryPlanner.plan(open, exits,
- * activeDirName())`, then `SessionRecovery.close` for each CloseInterrupted, in plan order, on a background
+ * activeDirName())`, then `SessionRecovery.close` for each close action (interrupted or stopped), in plan order, on a background
  * dispatcher. Failures are logged (no session content in the log) and leave the session open for the
  * next launch. Closed sessions appear in [closed] until acknowledged.
  *
@@ -40,7 +40,7 @@ import kotlinx.coroutines.withContext
 class LaunchRecovery internal constructor(
     private val findOpen: () -> List<OpenSession>,
     private val exitRecords: () -> List<ExitRecord>,
-    private val close: (RecoveryAction.CloseInterrupted) -> SessionOutcome,
+    private val close: (RecoveryAction.Close) -> SessionOutcome,
     private val activeDirName: () -> String?,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val log: (String) -> Unit = ::logWarning,
@@ -105,7 +105,7 @@ class LaunchRecovery internal constructor(
         val outcomes = ArrayList<SessionOutcome>()
         for (action in actions) {
             currentCoroutineContext().ensureActive()
-            if (action !is RecoveryAction.CloseInterrupted) continue
+            if (action !is RecoveryAction.Close) continue
             try {
                 outcomes += close(action)
             } catch (e: Exception) {

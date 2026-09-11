@@ -2,7 +2,9 @@ package com.fieldtap.data
 
 import com.fieldtap.core.export.ExportException
 import com.fieldtap.core.export.SessionExporter
+import com.fieldtap.core.session.HeartbeatRecord
 import com.fieldtap.core.session.SessionPaths
+import com.fieldtap.core.session.SessionRecovery
 import com.fieldtap.core.session.SessionStore
 import com.fieldtap.core.session.StoragePolicy
 import com.fieldtap.core.time.ManualClock
@@ -196,6 +198,30 @@ class FileSessionRepositoryTest {
         assertReason(ExportException.Reason.MISSING_SESSION_JSON) { repository.export("../session-state", LocationPrecision.FULL) }
         assertReason(ExportException.Reason.MISSING_SESSION_JSON) { repository.export("20260101-000000_missing", LocationPrecision.FULL) }
         assertFalse(File(exportDir, "$OPEN_ACTIVE.zip").exists())
+    }
+
+    @Test
+    fun listingClosesASessionTheAppStoppedButCouldNotFinishWriting() {
+        copyGolden(GOLDEN_NAME) { openJson(it) }
+        val stoppedAt = 1_789_050_700_000L
+        paths.heartbeat(GOLDEN_NAME).writeText(HeartbeatRecord(stoppedAt, 25_423_456L, 4242, stoppedBy = "storage_full").encode())
+        val recovery = SessionRecovery(store, paths)
+        val repository = FileSessionRepository(
+            paths,
+            store,
+            SessionExporter(),
+            StoragePolicy(),
+            exportDir,
+            closeStoppedSessions = { recovery.closeStoppedSessions(activeDirName = null) },
+        ) { null }
+
+        val summary = runBlocking { repository.list() }.single()
+
+        assertEquals("storage_full", summary.stoppedBy)
+        assertEquals(stoppedAt, summary.stoppedUtcMs)
+        assertFalse(summary.recording)
+        assertFalse(paths.heartbeat(GOLDEN_NAME).exists())
+        assertNotNull("the session can be shared at once", runBlocking { repository.export(GOLDEN_NAME, LocationPrecision.FULL) })
     }
 
     @Test

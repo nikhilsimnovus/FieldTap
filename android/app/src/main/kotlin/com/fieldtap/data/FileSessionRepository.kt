@@ -35,6 +35,9 @@ import kotlinx.coroutines.withContext
  *   pile up, then builds `<exportDir>/<dirName>.zip`. It refuses the running session and a name that is not a
  *   session directory name, and turns IO failures into [ExportException] with reason IO. One export at a time.
  * - [storage]: bytes used under the sessions root and free space, against [storagePolicy].
+ * - [list], [detail] and [export] first call [closeStoppedSessions], which closes sessions the app stopped but could
+ *   not finish writing (a full disk, say), so they do not wait for the next launch to become shareable. A failure
+ *   there is ignored: the session stays open and the next call tries again.
  *
  * Names always pass `SessionDirName.PATTERN` before they touch the file system, so a route argument can never
  * reach outside the sessions root.
@@ -47,11 +50,13 @@ class FileSessionRepository(
     private val exporter: SessionExporter,
     private val storagePolicy: StoragePolicy,
     private val exportDir: File,
+    private val closeStoppedSessions: () -> Unit = {},
     private val activeDirName: () -> String?,
 ) : SessionRepository {
     private val exportLock = Mutex()
 
     override suspend fun list(): List<SessionSummary> = withContext(Dispatchers.IO) {
+        closeStoppedQuietly()
         val active = activeDirName()
         store.list()
             .sortedByDescending { it.dirName }
@@ -60,6 +65,7 @@ class FileSessionRepository(
 
     override suspend fun detail(dirName: String): SessionDetail? = withContext(Dispatchers.IO) {
         if (!isSessionName(dirName)) return@withContext null
+        closeStoppedQuietly()
         val listing = store.read(dirName) ?: return@withContext null
         val sizes = LinkedHashMap<SessionFile, Long>()
         val rows = LinkedHashMap<SessionFile, Int>()
@@ -93,6 +99,7 @@ class FileSessionRepository(
                 if (dirName == activeDirName()) {
                     throw ExportException(ExportException.Reason.SESSION_OPEN, "The session is still recording")
                 }
+                closeStoppedQuietly()
                 val directory = paths.directory(dirName)
                 if (!File(directory, SessionFile.SESSION_JSON.fileName).isFile) {
                     throw ExportException(ExportException.Reason.MISSING_SESSION_JSON, "The session has no session.json")
@@ -117,6 +124,16 @@ class FileSessionRepository(
             freeBytes = StorageUsage.freeBytes(paths.root),
             policy = storagePolicy,
         )
+    }
+
+    private fun closeStoppedQuietly() {
+        try {
+            closeStoppedSessions()
+        } catch (e: IOException) {
+            // It stays open; the next listing tries again.
+        } catch (e: RuntimeException) {
+            // As above: listing sessions must never fail because one could not be closed.
+        }
     }
 
     private fun summaryOf(listing: SessionListing, active: String?): SessionSummary {

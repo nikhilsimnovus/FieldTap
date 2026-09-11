@@ -152,7 +152,7 @@ class LaunchRecoveryTest {
         logs: MutableList<String> = synchronizedList(),
         findOpen: () -> List<OpenSession>,
         exitRecords: () -> List<ExitRecord> = { listOf(ExitRecord(pid = 42, timestampWallMs = 1_500, reason = 3, description = null)) },
-        close: (RecoveryAction.CloseInterrupted) -> SessionOutcome = { action -> outcome(action.dirName) },
+        close: (RecoveryAction.Close) -> SessionOutcome = { action -> outcome(action.dirName) },
         activeDirName: () -> String? = { null },
         plan: ((List<OpenSession>, List<ExitRecord>, String?) -> List<RecoveryAction>)? = null,
     ): LaunchRecovery = LaunchRecovery(

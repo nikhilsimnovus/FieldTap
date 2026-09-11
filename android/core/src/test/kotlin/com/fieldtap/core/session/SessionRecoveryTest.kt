@@ -1,14 +1,18 @@
 package com.fieldtap.core.session
 
+import com.fieldtap.core.location.Golden
 import com.fieldtap.core.session.SessionFixtures.DIR_NAME
 import com.fieldtap.core.session.SessionFixtures.PID
 import com.fieldtap.core.session.SessionFixtures.START_ELAPSED_MS
 import com.fieldtap.core.session.SessionFixtures.START_WALL_MS
+import com.fieldtap.core.session.SessionFixtures.cellInfoRow
 import com.fieldtap.core.session.SessionFixtures.cellRow
 import com.fieldtap.core.session.SessionFixtures.collection
 import com.fieldtap.core.session.SessionFixtures.identity
 import com.fieldtap.core.session.SessionFixtures.kpiRow
 import com.fieldtap.core.time.ManualClock
+import com.fieldtap.format.CellsCsv
+import com.fieldtap.format.CollectionMeta
 import com.fieldtap.format.EventsCsv
 import com.fieldtap.format.SessionFile
 import com.fieldtap.format.SessionJson
@@ -60,6 +64,7 @@ class SessionRecoveryTest {
         val directory = paths.directory(DIR_NAME)
         val files = FileSessionFiles(directory, paths.heartbeat(DIR_NAME))
         files.create(SessionMetaFactory.open(identity()))
+        files.appendCellInfo(cellInfoRow(seenUtcMs = START_WALL_MS + 800, timeEpochMs = START_WALL_MS + 400, timestampMs = START_ELAPSED_MS + 400))
         files.appendKpi(kpiRow(START_WALL_MS + 400))
         files.appendEvent(marker)
         files.writeSnapshot(lastSnapshot, listOf(cellRow(samples = 1)))
@@ -94,7 +99,6 @@ class SessionRecoveryTest {
         val kpiFile = File(directory, "kpi.csv")
         val intactKpi = kpiFile.readBytes()
         kpiFile.appendBytes("1789050601.400,lte,,212,-8".toByteArray())
-        val cellsBefore = File(directory, "cells.csv").readBytes()
 
         val outcome = recovery.close(interrupted())
 
@@ -105,17 +109,84 @@ class SessionRecoveryTest {
             File(directory, "events.csv").readText(),
         )
         val closed = SessionJson.decode(File(directory, "session.json").readText())
+        // The counts come from the rows the session holds (one fresh answer and its kpi row), not from the last
+        // snapshot, which claimed two repeats that the files do not hold.
         assertEquals(
-            lastSnapshot.copy(stoppedUtcMs = heartbeatWall, summary = lastSnapshot.summary.copy(stoppedBy = "freezer")),
+            lastSnapshot.copy(
+                stoppedUtcMs = heartbeatWall,
+                summary = lastSnapshot.summary.copy(stoppedBy = "freezer", plmns = mapOf("311480" to 1)),
+                collection = CollectionMeta(
+                    medianFreshIntervalMs = null,
+                    shortIntervalPct = 100.0,
+                    screenOnPct = 100.0,
+                    wifiConnectedPct = 0.0,
+                    chargingPct = 0.0,
+                    freshSamples = 1,
+                    repeatsDropped = 0,
+                    gaps = emptyList(),
+                ),
+            ),
             closed,
         )
-        assertArrayEquals(cellsBefore, File(directory, "cells.csv").readBytes())
+        assertEquals(CellsCsv.headerLine + CellsCsv.encode(cellRow(samples = 1).copy(rsrpMin = -84)), File(directory, "cells.csv").readText())
         assertFalse(paths.heartbeat(DIR_NAME).exists())
         assertEquals(
-            SessionOutcome(DIR_NAME, START_WALL_MS, heartbeatWall, "freezer", interrupted = true, freshSamples = 1),
+            SessionOutcome(DIR_NAME, START_WALL_MS, heartbeatWall, "freezer", interrupted = true, freshSamples = 1, name = identity().name),
             outcome,
         )
         assertTrue(recovery.findOpen().isEmpty())
+    }
+
+    @Test
+    fun aSessionKilledInItsFirstMinuteGetsItsCountsAndCellsFromItsRows() {
+        val directory = paths.directory(DIR_NAME).apply { mkdirs() }
+        for (name in listOf("kpi.csv", "track.csv", "events.csv", "traffic.csv", "cellinfo.csv")) {
+            Golden.file(name).copyTo(File(directory, name))
+        }
+        File(directory, "cells.csv").writeText(CellsCsv.headerLine)
+        val golden = SessionJson.decode(Golden.text("session.json"))
+        // What session.json says when no 60 s snapshot has been written yet.
+        val opening = golden.copy(
+            stoppedUtcMs = null,
+            summary = golden.summary.copy(stoppedBy = ExitReasons.RECORDING, plmns = emptyMap()),
+            collection = CollectionMeta.EMPTY,
+        )
+        File(directory, "session.json").writeText(SessionJson.encode(opening))
+
+        recovery.close(RecoveryAction.CloseInterrupted(DIR_NAME, golden.stoppedUtcMs!!, "low_memory", null))
+
+        val closed = SessionJson.decode(File(directory, "session.json").readText())
+        assertEquals(golden.summary.plmns, closed.summary.plmns)
+        assertEquals(golden.collection, closed.collection)
+        assertArrayEquals(Golden.bytes("cells.csv"), File(directory, "cells.csv").readBytes())
+    }
+
+    @Test
+    fun aSessionTheAppStoppedButCouldNotFinishIsClosedAsThatStopWithoutAnInterruptedEvent() {
+        val directory = killedSession()
+        paths.heartbeat(DIR_NAME).writeText(HeartbeatRecord(heartbeatWall, START_ELAPSED_MS + 95_000, PID, stoppedBy = "storage_full").encode())
+        val eventsBefore = File(directory, "events.csv").readText()
+
+        assertTrue("the running session is left alone", recovery.closeStoppedSessions(activeDirName = DIR_NAME).isEmpty())
+        assertEquals(1, store.openSessions().size)
+
+        val outcomes = recovery.closeStoppedSessions(activeDirName = null)
+
+        assertEquals(listOf(SessionOutcome(DIR_NAME, START_WALL_MS, heartbeatWall, "storage_full", interrupted = false, freshSamples = 1, name = identity().name)), outcomes)
+        assertEquals(eventsBefore, File(directory, "events.csv").readText())
+        val closed = SessionJson.decode(File(directory, "session.json").readText())
+        assertEquals(heartbeatWall, closed.stoppedUtcMs)
+        assertEquals("storage_full", closed.summary.stoppedBy)
+        assertFalse(paths.heartbeat(DIR_NAME).exists())
+        assertTrue(recovery.closeStoppedSessions(activeDirName = null).isEmpty())
+    }
+
+    @Test
+    fun aSessionAndroidStoppedWaitsForLaunchRecoveryAndItsExitReason() {
+        killedSession()
+
+        assertTrue(recovery.closeStoppedSessions(activeDirName = null).isEmpty())
+        assertEquals(1, store.openSessions().size)
     }
 
     @Test

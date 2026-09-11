@@ -49,6 +49,28 @@ class LifecycleTest {
     }
 
     @Test
+    fun theHeartbeatOfASessionTheAppStoppedCarriesItsStopToken() {
+        val record = HeartbeatRecord(wallMs = 1_789_050_695_000L, elapsedMs = 25_418_456L, pid = 12_345, stoppedBy = "storage_full")
+
+        assertEquals("v2 1789050695000 25418456 12345 storage_full\n", record.encode())
+        assertEquals(record, HeartbeatRecord.decode(record.encode()))
+        val unreadable = listOf(
+            "v2 1789050695000 25418456 12345 \n",
+            "v2 1789050695000 25418456 12345 Storage_Full\n",
+            "v2 1789050695000 25418456 12345 storage full\n",
+            "v1 1789050695000 25418456 12345 storage_full\n",
+            "v2 1789050695000 25418456 12345 " + "a".repeat(65) + "\n",
+        )
+        for (text in unreadable) {
+            assertNull("decoded '$text'", HeartbeatRecord.decode(text))
+        }
+        assertEquals(
+            IllegalArgumentException::class,
+            runCatching { HeartbeatRecord(1, 2, 3, stoppedBy = "Not a token") }.exceptionOrNull()?.let { it::class },
+        )
+    }
+
+    @Test
     fun aTornOrForeignHeartbeatDecodesToNull() {
         val unreadable = listOf(
             "",

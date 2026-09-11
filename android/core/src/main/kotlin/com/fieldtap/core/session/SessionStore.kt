@@ -1,6 +1,7 @@
 package com.fieldtap.core.session
 
 import com.fieldtap.core.time.Clock
+import com.fieldtap.format.CellsCsv
 import com.fieldtap.format.Csv
 import com.fieldtap.format.EventKind
 import com.fieldtap.format.EventsCsv
@@ -163,12 +164,29 @@ sealed interface RecoveryAction {
     val dirName: String
 
     /** Close it: stopped at [stoppedUtcMs] by [stoppedBy]. */
+    sealed interface Close : RecoveryAction {
+        val stoppedUtcMs: Long
+        val stoppedBy: String
+    }
+
+    /** Android stopped the process that recorded it: closed with a `session_interrupted` event. */
     data class CloseInterrupted(
         override val dirName: String,
-        val stoppedUtcMs: Long,
-        val stoppedBy: String,
+        override val stoppedUtcMs: Long,
+        override val stoppedBy: String,
         val exitDescription: String?,
-    ) : RecoveryAction
+    ) : Close
+
+    /**
+     * The app stopped it (its heartbeat carries the stop token) but could not write its final session.json, for
+     * example because storage was full: closed as that stop, with no `session_interrupted` event, because Android
+     * stopped nothing.
+     */
+    data class CloseStopped(
+        override val dirName: String,
+        override val stoppedUtcMs: Long,
+        override val stoppedBy: String,
+    ) : Close
 
     /** It belongs to a recorder running in this process; leave it. */
     data class LeaveRunning(override val dirName: String) : RecoveryAction
@@ -180,7 +198,10 @@ sealed interface RecoveryAction {
  * For each open session other than [activeDirName] (which gets [RecoveryAction.LeaveRunning]):
  * - `stoppedUtcMs` ([stopTime]): the heartbeat's wall time; without a heartbeat, `lastWriteWallMs`;
  *   never before `started_utc`.
- * - `stoppedBy`: the exit record whose pid equals the heartbeat's pid; else the earliest record with a
+ * - A heartbeat that carries a stop token ([HeartbeatRecord.stoppedBy]) gives [RecoveryAction.CloseStopped] with
+ *   that token: the app stopped the session and knew why. It takes no exit record, so the death of a later process
+ *   with the same pid can never be written as the reason.
+ * - Otherwise `stoppedBy`: the exit record whose pid equals the heartbeat's pid; else the earliest record with a
  *   timestamp at or after `stoppedUtcMs - 10 000`; mapped by [ExitReasons.token]; none: `unknown`.
  *   Each exit record explains at most one session.
  * - A pid match must also be at or after `stoppedUtcMs - 10 000`, and the earliest such record wins:
@@ -195,7 +216,7 @@ object RecoveryPlanner {
     const val EXIT_MATCH_SLACK_MS: Long = 10_000
 
     fun plan(open: List<OpenSession>, exits: List<ExitRecord>, activeDirName: String?): List<RecoveryAction> {
-        val closing = open.filter { it.listing.dirName != activeDirName }
+        val closing = open.filter { it.listing.dirName != activeDirName && it.heartbeat?.stoppedBy == null }
         val stopTimes = HashMap<String, Long>()
         for (session in closing) stopTimes[session.listing.dirName] = stopTime(session)
         val used = BooleanArray(exits.size)
@@ -222,16 +243,19 @@ object RecoveryPlanner {
 
         return open.map<OpenSession, RecoveryAction> { session ->
             val dirName = session.listing.dirName
-            if (dirName == activeDirName) {
-                RecoveryAction.LeaveRunning(dirName)
-            } else {
-                val record = explained[dirName]
-                RecoveryAction.CloseInterrupted(
-                    dirName = dirName,
-                    stoppedUtcMs = stopTimes.getValue(dirName),
-                    stoppedBy = record?.let { ExitReasons.token(it.reason) } ?: ExitReasons.UNKNOWN,
-                    exitDescription = record?.description,
-                )
+            val stoppedBy = session.heartbeat?.stoppedBy
+            when {
+                dirName == activeDirName -> RecoveryAction.LeaveRunning(dirName)
+                stoppedBy != null -> RecoveryAction.CloseStopped(dirName, stopTime(session), stoppedBy)
+                else -> {
+                    val record = explained[dirName]
+                    RecoveryAction.CloseInterrupted(
+                        dirName = dirName,
+                        stoppedUtcMs = stopTimes.getValue(dirName),
+                        stoppedBy = record?.let { ExitReasons.token(it.reason) } ?: ExitReasons.UNKNOWN,
+                        exitDescription = record?.description,
+                    )
+                }
             }
         }
     }
@@ -270,17 +294,21 @@ object RecoveryPlanner {
  * [close], in this order:
  * 1. [CsvRepair.truncateToLastLineEnd] on every CSV (a torn last row crashes the report); a CSV left
  *    empty, or missing, gets its header line back;
- * 2. append a `session_interrupted` event at `stoppedUtcMs` with cause `stoppedBy`
- *    ([SessionEvents.sessionInterrupted]);
- * 3. rewrite session.json atomically from the last snapshot with `stopped_utc` and `summary.stopped_by`
- *    set (summary and collection stay as the last 60 s snapshot wrote them; cells.csv is kept as is),
- *    after removing stale `.tmp` files from the session directory;
+ * 2. for [RecoveryAction.CloseInterrupted] only, append a `session_interrupted` event at `stoppedUtcMs` with
+ *    cause `stoppedBy` ([SessionEvents.sessionInterrupted]);
+ * 3. remove stale `.tmp` files, rebuild `summary.plmns`, cells.csv and `collection` from the repaired CSV files
+ *    ([SessionRebuild]), so they agree with the rows the session holds and not with a snapshot up to 60 s older
+ *    (empty when the process died in its first minute); when the CSV files cannot be read the last snapshot's
+ *    values stay. Write cells.csv, then session.json, atomically, with `stopped_utc` and `summary.stopped_by` set;
  * 4. delete the heartbeat.
  * Closing twice is harmless: a session already closed is skipped. When an earlier attempt died after
  * step 2, the `session_interrupted` event already at the end of events.csv is reused, time and cause, so
  * the event is never written twice and `stopped_utc` always equals its time. Throws IOException when the
  * session does not exist, its session.json cannot be read, or a file cannot be written; the session then
  * stays open for the next attempt.
+ *
+ * [closeStoppedSessions] closes the sessions [RecoveryAction.CloseStopped] applies to without waiting for the next
+ * launch: their heartbeat says the app stopped them, so nothing depends on how the process ends.
  *
  * Owner: workstream `session-core`.
  */
@@ -293,7 +321,38 @@ class SessionRecovery(private val store: SessionStore, private val paths: Sessio
         }
     }
 
-    fun close(action: RecoveryAction.CloseInterrupted): SessionOutcome {
+    /**
+     * Closes every open session other than [activeDirName] whose heartbeat carries a stop token: the app stopped it
+     * but could not write its final session.json. Only heartbeat files are read unless one qualifies, so this is
+     * cheap enough to run whenever sessions are listed. A session that still cannot be written stays open for the
+     * next call. Returns the sessions closed.
+     */
+    fun closeStoppedSessions(activeDirName: String?): List<SessionOutcome> {
+        val beats = paths.stateDir.listFiles() ?: return emptyList()
+        val outcomes = ArrayList<SessionOutcome>()
+        for (file in beats) {
+            if (!file.name.endsWith(SessionPaths.HEARTBEAT_SUFFIX)) continue
+            val dirName = file.name.removeSuffix(SessionPaths.HEARTBEAT_SUFFIX)
+            if (dirName == activeDirName || !isSessionDirName(dirName)) continue
+            val heartbeat = readHeartbeat(dirName) ?: continue
+            val stoppedBy = heartbeat.stoppedBy ?: continue
+            val listing = store.read(dirName) ?: continue
+            val meta = listing.meta ?: continue
+            if (meta.stoppedUtcMs != null) {
+                deleteHeartbeat(paths, dirName)
+                continue
+            }
+            val session = OpenSession(listing, heartbeat, lastWriteWallMs(listing.directory))
+            try {
+                outcomes += close(RecoveryAction.CloseStopped(dirName, RecoveryPlanner.stopTime(session), stoppedBy))
+            } catch (e: IOException) {
+                // Still not writable, for example storage is still full: it stays open for the next call.
+            }
+        }
+        return outcomes
+    }
+
+    fun close(action: RecoveryAction.Close): SessionOutcome {
         val listing = store.read(action.dirName) ?: throw IOException("Session ${action.dirName} does not exist")
         val meta = listing.meta
             ?: throw IOException("Session ${action.dirName} cannot be closed: ${listing.error}")
@@ -307,6 +366,7 @@ class SessionRecovery(private val store: SessionStore, private val paths: Sessio
                 stoppedBy = meta.summary.stoppedBy,
                 interrupted = meta.summary.stoppedBy !in APP_STOP_TOKENS,
                 freshSamples = meta.collection.freshSamples,
+                name = meta.name,
             )
         }
         val directory = listing.directory
@@ -315,24 +375,50 @@ class SessionRecovery(private val store: SessionStore, private val paths: Sessio
             CsvRepair.repairWithHeader(File(directory, file.fileName), csvHeaderLine(file))
         }
 
-        val events = File(directory, SessionFile.EVENTS.fileName)
-        val earlier = lastInterruptedEvent(events)
         val stoppedUtcMs: Long
         val stoppedBy: String
-        if (earlier != null) {
-            stoppedUtcMs = earlier.timeUtcMs
-            stoppedBy = earlier.cause
-        } else {
-            stoppedUtcMs = maxOf(action.stoppedUtcMs, meta.startedUtcMs)
-            stoppedBy = ExitReasons.tokenOrUnknown(action.stoppedBy)
-            val row = SessionEvents.sessionInterrupted(stoppedUtcMs, stoppedBy, action.exitDescription)
-            appendAndSync(events, EventsCsv.encode(row))
+        when (action) {
+            is RecoveryAction.CloseInterrupted -> {
+                val events = File(directory, SessionFile.EVENTS.fileName)
+                val earlier = lastInterruptedEvent(events)
+                if (earlier != null) {
+                    stoppedUtcMs = earlier.timeUtcMs
+                    stoppedBy = earlier.cause
+                } else {
+                    stoppedUtcMs = maxOf(action.stoppedUtcMs, meta.startedUtcMs)
+                    stoppedBy = ExitReasons.tokenOrUnknown(action.stoppedBy)
+                    val row = SessionEvents.sessionInterrupted(stoppedUtcMs, stoppedBy, action.exitDescription)
+                    appendAndSync(events, EventsCsv.encode(row))
+                }
+            }
+
+            is RecoveryAction.CloseStopped -> {
+                stoppedUtcMs = maxOf(action.stoppedUtcMs, meta.startedUtcMs)
+                stoppedBy = ExitReasons.tokenOrUnknown(action.stoppedBy)
+            }
         }
 
         for (file in listOf(SessionFile.SESSION_JSON, SessionFile.CELLS)) {
             File(directory, file.fileName + AtomicFiles.TMP_SUFFIX).delete()
         }
-        val closed = meta.copy(stoppedUtcMs = stoppedUtcMs, summary = meta.summary.copy(stoppedBy = stoppedBy))
+        val derived = try {
+            SessionRebuild.derive(directory, meta.startedUtcMs)
+        } catch (e: IOException) {
+            null
+        } catch (e: RuntimeException) {
+            // Rows this class cannot make sense of: the last snapshot's values are better than none.
+            null
+        }
+        if (derived != null) {
+            val cells = StringBuilder(CellsCsv.headerLine)
+            for (row in derived.cells) cells.append(CellsCsv.encode(row))
+            AtomicFiles.write(File(directory, SessionFile.CELLS.fileName), cells.toString().toByteArray(Charsets.UTF_8))
+        }
+        val closed = meta.copy(
+            stoppedUtcMs = stoppedUtcMs,
+            summary = meta.summary.copy(stoppedBy = stoppedBy, plmns = derived?.plmns ?: meta.summary.plmns),
+            collection = derived?.collection ?: meta.collection,
+        )
         AtomicFiles.write(
             File(directory, SessionFile.SESSION_JSON.fileName),
             SessionJson.encode(closed).toByteArray(Charsets.UTF_8),
@@ -344,8 +430,9 @@ class SessionRecovery(private val store: SessionStore, private val paths: Sessio
             startedUtcMs = meta.startedUtcMs,
             stoppedUtcMs = stoppedUtcMs,
             stoppedBy = stoppedBy,
-            interrupted = true,
-            freshSamples = meta.collection.freshSamples,
+            interrupted = action is RecoveryAction.CloseInterrupted,
+            freshSamples = closed.collection.freshSamples,
+            name = meta.name,
         )
     }
 
