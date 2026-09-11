@@ -405,6 +405,26 @@ mid-action) and `exception`.
 Instrumentation tests can launch the same intent with `ActivityScenario`, or call `DebugAutomation`
 directly while an activity of the app is resumed.
 
+### The end-to-end proof
+
+`android/e2e/run_e2e.sh` proves the app on an emulator, through its UI, in the emulator job of
+`.github/workflows/android.yml` (API 36, the target, and API 31, the minSdk). The instrumented tests are in
+`app/src/androidTest/kotlin/com/fieldtap/e2e/`: Compose UI testing drives the app, UiAutomator answers Android's permission
+dialogs and the share sheet. Each test writes screenshots and a result JSON to `<externalFilesDir>/e2e/`, which the host
+pulls after every run. `android/e2e/check_e2e.py` asserts what the files hold.
+
+| Step | Driven by | Must hold |
+| --- | --- | --- |
+| First run, in light, dark and font scale 1.3 (`cmd uimode night`, `font_scale`, each after `pm clear`) | `FirstRunScreensTest` | The disclosure shows before any permission prompt; nothing is granted before Allow |
+| The walk: consent, permissions in Android's dialog, Live, Settings (ping `10.0.2.2`, 1 MB download), Start through the pre-start sheet, a marker, Stop after 180 s, Build zip, Share | `EndToEndWalkTest`, while the host sends `adb emu geo fix` once a second and `adb emu gsm signal-profile` every 20 s | Live shows a serving cell with its age badge; the zip's SHA-256 on screen is the file's; the share sheet opens |
+| Every screen in the three variants | `ScreenTourTest` | Live, Start dialog, Sessions, detail and Share card, Readiness, Probe, Settings, About |
+| Process death | The host: START through the automation hook, `am force-stop` (relaunch with `am start`) and `run-as <pkg> kill -9` (relaunch by `RecoveryUiTest`) | The session is closed with a `session_interrupted` event whose cause is the exit reason `dumpsys activity exit-info` gives for the killed pid, at the last heartbeat; Live names it |
+| The files | `python -m fieldtap validate DIR --upload`, `python -m fieldtap report DIR`, `fieldtap validate` on the zip, `check_e2e.py` | Every session validates; kpi rows are fresh serving-cell measurements in cellinfo.csv, never a modem timestamp twice for a cell, positioned from the nearest fix within 5 s; track fixes lie on the injected walk; serving_cell and the marker with its note; ping and download rows; `stopped_by` user, `layer3` false, collection statistics; cells.csv agrees with `summary.plmns`; the report has no Procedures or Call flow section |
+
+The artifacts of each leg are `e2e-sessions-api<N>` (sessions with report.html, the exported zip),
+`e2e-screenshots-api<N>`, `e2e-logcat-api<N>` (redacted as the probe redacts) and `e2e-reports-api<N>` (summary, JUnit XML
+of each instrumentation run, fieldtap output, check results).
+
 ## 10. Workstreams
 
 Nine workstreams: the screens split cleanly into session screens and setup screens, and the design system
@@ -564,6 +584,8 @@ Recorded at integration, where workstreams added files beyond their lists:
   and `core/nettest/BodyCounter.kt`; platform-adapters also owns `platform/AdapterExecutor.kt`,
   `platform/settings/StoredSettings.kt` and `platform/telephony/TelephonyValues.kt`.
 - `res/xml/data_extraction_rules.xml` and `res/xml/backup_rules.xml` (decision 3) are shared files, like the manifest.
+- The end-to-end proof, added at the emulator stage: `app/src/androidTest/kotlin/com/fieldtap/e2e/**`, `android/e2e/run_e2e.sh`
+  and `android/e2e/check_e2e.py` (section 9). `fieldtap/__main__.py` was added so `python -m fieldtap` runs the CLI.
 
 ## 11. Shared files and frozen contracts
 
@@ -590,6 +612,10 @@ Changes agreed at integration:
 - `CellRow.pci` and `CellRow.dlEarfcn` are nullable: a leg Android reports without them is still a cells.csv row,
   with the value blank and `plausible` False (docs/SESSION-FORMAT.md, cells.csv).
 - `StartRefusal.READINESS_REQUIRED` and `StartPreconditions.readinessRequired` are removed (decision 7).
+- Found by the end-to-end proof: `ServingCellSelector` takes the first registered LTE or NR cell as primary whenever no cell
+  reports primary serving, not only when no cell reports a status. The API 31 emulator reports its registered cell with
+  `CONNECTION_NONE`, as some HALs do while idle; the old rule chose no serving cell, so Live never showed one and a
+  session would have written no kpi row.
 
 Inside owned files, an implementer may add private or internal helpers, new files in owned packages, and
 tests. Public API added for one's own use is fine; public API another workstream needs goes through the
@@ -609,7 +635,8 @@ orchestrator.
   30 minutes may be removed.
 - The golden session and schema are read by tests at `../../tests/fixtures/android_session/` and
   `../../schema/columns.json` relative to the module directory. Tests fail, not skip, when they are missing.
-- Emulator runs happen only in GitHub Actions.
+- Emulator runs happen only in GitHub Actions: the end-to-end proof (section 9) and the capability probe. From `android/`,
+  `./gradlew :app:assembleDebugAndroidTest` builds the instrumented tests locally; running them needs an emulator.
 
 ## 13. Decisions taken here
 
