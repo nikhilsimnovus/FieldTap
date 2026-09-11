@@ -537,8 +537,10 @@ object CellInfoMapper {
 
 /**
  * Service state, data state, display info and signal strength -> :core snapshots.
- * Emergency-only: see `ServiceStateSnapshot.emergencyOnly` (no public `isEmergencyOnly()` exists) and
- * [TelephonyValues.emergencyOnly]; only cellular (WWAN) registrations are consulted.
+ * The service state is Android's combined one ([TelephonyValues.combinedState]): `getState()` is voice only, so a
+ * registered cellular data (PS) domain keeps the phone in service. Emergency-only: see
+ * `ServiceStateSnapshot.emergencyOnly` (no public `isEmergencyOnly()` exists) and [TelephonyValues.emergencyOnly],
+ * never while cellular data is registered; only cellular (WWAN) registrations are consulted.
  * Data state ints are `TelephonyManager.DATA_*`.
  *
  * Owner: workstream `platform-adapters`.
@@ -549,7 +551,9 @@ object TelephonyStateMapper {
         val cellular = state.networkRegistrationInfoList.orEmpty()
             .filter { it.transportType == TelephonyValues.TRANSPORT_TYPE_WWAN }
         val registered = cellular.any { registered(it) }
+        val dataRegistered = cellular.any { TelephonyValues.hasPacketDomain(it.domain) && registered(it) }
         val emergencyAvailable = cellular.any { TelephonyValues.SERVICE_TYPE_EMERGENCY in it.availableServices.orEmpty() }
+        val combinedState = TelephonyValues.combinedState(rawState, dataRegistered)
         // The operator fields are location-sensitive. Android normally redacts them rather than throwing, but a
         // refusal costs only these two values, never the service state itself.
         val operatorNumeric = try {
@@ -563,11 +567,11 @@ object TelephonyStateMapper {
             null
         }
         return ServiceStateSnapshot(
-            state = TelephonyValues.regState(rawState),
-            emergencyOnly = TelephonyValues.emergencyOnly(rawState, registered, emergencyAvailable),
+            state = TelephonyValues.regState(combinedState),
+            emergencyOnly = TelephonyValues.emergencyOnly(rawState, registered, emergencyAvailable, dataRegistered),
             operatorNumeric = operatorNumeric,
             operatorAlphaLong = operatorAlphaLong,
-            roaming = TelephonyValues.roaming(rawState, state.roaming),
+            roaming = TelephonyValues.roaming(combinedState, state.roaming),
             observedWallMs = wallMs,
             observedElapsedMs = elapsedMs,
         )

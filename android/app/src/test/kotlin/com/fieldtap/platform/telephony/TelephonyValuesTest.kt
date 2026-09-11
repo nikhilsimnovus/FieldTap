@@ -31,6 +31,7 @@ class TelephonyValuesTest {
         assertEquals(TelephonyManager.DATA_HANDOVER_IN_PROGRESS, TelephonyValues.DATA_HANDOVER_IN_PROGRESS)
         assertEquals(NetworkRegistrationInfo.SERVICE_TYPE_EMERGENCY, TelephonyValues.SERVICE_TYPE_EMERGENCY)
         assertEquals(AccessNetworkConstants.TRANSPORT_TYPE_WWAN, TelephonyValues.TRANSPORT_TYPE_WWAN)
+        assertEquals(NetworkRegistrationInfo.DOMAIN_PS, TelephonyValues.DOMAIN_PS)
         assertEquals(TelephonyManager.CellInfoCallback.ERROR_TIMEOUT, TelephonyValues.ERROR_TIMEOUT)
         assertEquals(TelephonyManager.CellInfoCallback.ERROR_MODEM_ERROR, TelephonyValues.ERROR_MODEM_ERROR)
         assertEquals(TelephonyManager.NETWORK_TYPE_UNKNOWN, TelephonyValues.NETWORK_TYPE_UNKNOWN)
@@ -58,6 +59,31 @@ class TelephonyValuesTest {
         // No service at all.
         assertFalse(TelephonyValues.emergencyOnly(1, wwanRegistered = false, wwanEmergencyAvailable = false))
         assertFalse(TelephonyValues.emergencyOnly(3, wwanRegistered = false, wwanEmergencyAvailable = false))
+    }
+
+    @Test
+    fun registeredCellularDataIsInServiceWhateverTheVoiceRegistrationSays() {
+        // A data-only SIM on LTE: voice out of service or emergency-only, data registered.
+        assertEquals(0, TelephonyValues.combinedState(1, wwanDataRegistered = true))
+        assertEquals(0, TelephonyValues.combinedState(2, wwanDataRegistered = true))
+        assertFalse(TelephonyValues.emergencyOnly(2, wwanRegistered = true, wwanEmergencyAvailable = true, wwanDataRegistered = true))
+        assertFalse(TelephonyValues.emergencyOnly(1, wwanRegistered = true, wwanEmergencyAvailable = true, wwanDataRegistered = true))
+        // Without data registered getState() stands.
+        assertEquals(0, TelephonyValues.combinedState(0, wwanDataRegistered = false))
+        assertEquals(1, TelephonyValues.combinedState(1, wwanDataRegistered = false))
+        assertEquals(2, TelephonyValues.combinedState(2, wwanDataRegistered = false))
+        assertEquals("the radio off stays off", 3, TelephonyValues.combinedState(3, wwanDataRegistered = true))
+        // The SIM-less phone registers neither domain: still emergency-only.
+        assertTrue(TelephonyValues.emergencyOnly(1, wwanRegistered = false, wwanEmergencyAvailable = true, wwanDataRegistered = false))
+        assertEquals(ServiceRegState.EMERGENCY_ONLY, TelephonyValues.regState(TelephonyValues.combinedState(2, wwanDataRegistered = false)))
+    }
+
+    @Test
+    fun onlyAPacketSwitchedDomainCountsAsData() {
+        assertTrue(TelephonyValues.hasPacketDomain(NetworkRegistrationInfo.DOMAIN_PS))
+        assertTrue(TelephonyValues.hasPacketDomain(NetworkRegistrationInfo.DOMAIN_CS_PS))
+        assertFalse(TelephonyValues.hasPacketDomain(NetworkRegistrationInfo.DOMAIN_CS))
+        assertFalse(TelephonyValues.hasPacketDomain(NetworkRegistrationInfo.DOMAIN_UNKNOWN))
     }
 
     @Test

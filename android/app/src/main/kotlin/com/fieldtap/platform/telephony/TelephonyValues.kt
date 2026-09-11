@@ -110,6 +110,9 @@ internal object TelephonyValues {
     /** `AccessNetworkConstants.TRANSPORT_TYPE_WWAN`: the cellular registrations, not IWLAN. */
     const val TRANSPORT_TYPE_WWAN: Int = 1
 
+    /** `NetworkRegistrationInfo.DOMAIN_PS`: packet-switched data. `DOMAIN_CS_PS` (3) includes it. */
+    const val DOMAIN_PS: Int = 2
+
     /** `TelephonyManager.CellInfoCallback.ERROR_*`. */
     const val ERROR_TIMEOUT: Int = 1
     const val ERROR_MODEM_ERROR: Int = 2
@@ -144,8 +147,19 @@ internal object TelephonyValues {
      * `SERVICE_TYPE_EMERGENCY`. Only WWAN counts, so Wi-Fi calling over IWLAN does not hide an
      * emergency-camped radio.
      */
-    fun emergencyOnly(state: Int, wwanRegistered: Boolean, wwanEmergencyAvailable: Boolean): Boolean =
-        state == STATE_EMERGENCY_ONLY || (!wwanRegistered && wwanEmergencyAvailable)
+    fun emergencyOnly(state: Int, wwanRegistered: Boolean, wwanEmergencyAvailable: Boolean, wwanDataRegistered: Boolean = false): Boolean =
+        !wwanDataRegistered && (state == STATE_EMERGENCY_ONLY || (!wwanRegistered && wwanEmergencyAvailable))
+
+    /**
+     * The service state Android's own status bar and Settings show. `getState()` is the voice registration only, so while
+     * cellular data is registered ([wwanDataRegistered]), voice out of service or emergency-only counts as in service: a
+     * data-only SIM, or a network that offers the SIM no voice, still measures and carries data.
+     */
+    fun combinedState(state: Int, wwanDataRegistered: Boolean): Int =
+        if (wwanDataRegistered && (state == STATE_OUT_OF_SERVICE || state == STATE_EMERGENCY_ONLY)) STATE_IN_SERVICE else state
+
+    /** Whether a registration's `getDomain()` includes packet-switched data. */
+    fun hasPacketDomain(domain: Int): Boolean = (domain and DOMAIN_PS) != 0
 
     /** `getRoaming()` only means something in service; otherwise unknown. */
     fun roaming(state: Int, roaming: Boolean): Boolean? = if (state == STATE_IN_SERVICE) roaming else null
