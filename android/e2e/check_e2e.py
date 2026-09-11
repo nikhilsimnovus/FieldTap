@@ -61,6 +61,10 @@ MODEM_REPORT_S = 10
 # A fix matches the injected walk when it is this close to a point sent this close in time (after the clock offset).
 TRACK_MATCH_M = 10.0
 TRACK_MATCH_MS = 5_000
+# A track row is a fix accepted while recording: it may be up to the join buffer (60 s) older than the start, never later
+# than the stop by more than a callback's delay.
+TRACK_BEFORE_START_MS = 60_000
+TRACK_AFTER_STOP_MS = 5_000
 # A kill lands within one 5 s heartbeat of the last one; slack for a busy emulator.
 HEARTBEAT_SLACK_MS = 7_000
 
@@ -462,6 +466,11 @@ def check_walk(out: Path, repo: Path, walk_seconds: int, expect_lte_nr: bool, r:
     walked = sum(distance_m(float(a["lat"]), float(a["lon"]), float(b["lat"]), float(b["lon"])) for a, b in zip(track, track[1:]))
     r.check("track.csv: the route covers the walk", walked >= 0.5 * WALK_SPEED_MPS * duration_s,
             "%.0f m walked, %.0f m injected in that time" % (walked, WALK_SPEED_MPS * duration_s))
+    outside = [row["time_utc"] for row in track
+               if stopped is None or not started - TRACK_BEFORE_START_MS <= utc_ms(row["time_utc"]) <= stopped + TRACK_AFTER_STOP_MS]
+    r.check("track.csv: every fix time lies within the session", track and not outside,
+            "%d of %d outside %s .. %s, first %s" % (len(outside), len(track), meta.get("started_utc"), meta.get("stopped_utc"),
+                                                     outside[:2]))
     r.check("track.csv: providers", set(row["provider"] for row in track) <= {"gps", "fused", "network"},
             dict(Counter(row["provider"] for row in track)))
 

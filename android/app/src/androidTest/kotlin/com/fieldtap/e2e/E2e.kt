@@ -25,6 +25,7 @@ import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.printToLog
@@ -337,14 +338,17 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
     }
 
     /**
-     * Waits until Live shows a serving cell and its hero tile says how old the sample is. On a timeout the Live feed's
-     * state (cells, listeners, conditions) is written to logcat and to `e2e/failures/[group]/live-state.txt`, so the
-     * artifact says why no cell was chosen.
+     * Waits until Live shows a serving cell: the hero tile, at the top whatever the font scale, names the cell's PCI and
+     * says how old the sample is; then the Serving cell card must exist further down, and the list returns to the top.
+     * On a timeout the Live feed's state (cells, listeners, conditions) is written to logcat and to
+     * `e2e/failures/[group]/live-state.txt`, so the artifact says why no cell was chosen.
      */
     fun awaitServingCell(timeoutMs: Long = SERVING_CELL_WAIT_MS) {
         try {
-            awaitText(R.string.live_section_serving, timeoutMs)
-            await(hasDescriptionMatching(ageBadge()), timeoutMs)
+            await(hasDescriptionMatching(ageBadge()) and hasDescriptionMatching(pciLabel()), timeoutMs)
+            scrollTo(hasText(E2e.string(R.string.live_section_serving)))
+            compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(0)
+            compose.waitForIdle()
         } catch (e: AssertionError) {
             val state = E2e.graph.live.state.value.toString()
             Log.w(E2e.TAG, "No serving cell on Live; the feed's state: $state")
@@ -393,6 +397,13 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
         private const val NO_HIERARCHY = "No compose hierarchies found"
 
         private const val PLACEHOLDER = "\u0000"
+
+        /** "PCI 555" as `R.string.live_pci` words it, with any cell id. */
+        fun pciLabel(): Regex {
+            val sample = 987_654_321
+            val parts = E2e.string(R.string.live_pci, sample).split(sample.toString(), limit = 2)
+            return Regex(Regex.escape(parts[0]) + "\\d+" + Regex.escape(parts.getOrElse(1) { "" }))
+        }
 
         /** "2.1 s old" as `R.string.age_old` words it, with any number of seconds. */
         fun ageBadge(): Regex {
