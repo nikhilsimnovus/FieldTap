@@ -8,7 +8,16 @@ import android.os.Build
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -19,6 +28,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -38,10 +48,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -50,6 +64,7 @@ import com.fieldtap.R
 import com.fieldtap.app.AppGraph
 import com.fieldtap.app.FieldTapApplication
 import com.fieldtap.core.privacy.Consent
+import com.fieldtap.core.privacy.ConsentPoint
 import com.fieldtap.core.privacy.ConsentText
 import com.fieldtap.core.readiness.SettingsTarget
 import com.fieldtap.platform.Permissions
@@ -68,8 +83,10 @@ import com.fieldtap.ui.setup.SettingsIntents
 import com.fieldtap.ui.setup.SetupFormats
 import com.fieldtap.ui.setup.SetupScreenScaffold
 import com.fieldtap.ui.setup.setupContentWidth
+import com.fieldtap.ui.theme.Durations
 import com.fieldtap.ui.theme.FieldTapBrandMark
 import com.fieldtap.ui.theme.FieldTapIcons
+import com.fieldtap.ui.theme.ShapeRoles
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
 import com.fieldtap.ui.theme.StatusTone
@@ -118,8 +135,14 @@ class OnboardingViewModel(private val graph: AppGraph) : ViewModel() {
     private val acceptedEvents = Channel<Unit>(Channel.BUFFERED)
     private var saveJob: Job? = null
 
-    /** `Consent.CURRENT`, shown verbatim. */
+    /** `Consent.CURRENT`, whose text is [summary] and [notice] word for word. */
     val consentText: ConsentText get() = Consent.CURRENT
+
+    /** The four points the disclosure shows first. */
+    val summary: List<ConsentPoint> get() = Consent.SUMMARY
+
+    /** The full notice, paragraph by paragraph, in the disclosure's expandable section. */
+    val notice: List<String> get() = Consent.NOTICE
 
     /** True once the stored consent matches the current text. */
     val consentCurrent: StateFlow<Boolean> = mutableConsentCurrent.asStateFlow()
@@ -179,8 +202,10 @@ class OnboardingViewModel(private val graph: AppGraph) : ViewModel() {
 }
 
 /**
- * Full-screen disclosure, shown before any location prompt: the consent text verbatim, the limits
- * statement, Accept and Not now. Declining leaves the app usable for About only; no prompt is shown.
+ * Full-screen disclosure, shown before any location prompt: why precise location is asked for, the four points of the
+ * consent notice with an icon each, the full notice in an expandable section, the limits statement, then Accept and Not
+ * now. Every word shown of the notice, the points included, is the hashed consent text. Declining leaves the app usable
+ * for About only; no prompt is shown.
  *
  * Owner: workstream `ui-setup`.
  */
@@ -199,7 +224,8 @@ fun DisclosureScreen(
         viewModel.accepted.collect { currentOnAccepted() }
     }
     DisclosureContent(
-        consentText = viewModel.consentText.text,
+        summary = viewModel.summary,
+        notice = viewModel.notice,
         consentCurrent = consentCurrent,
         acceptedAtUtcMs = acceptedAtUtcMs,
         acceptState = acceptState,
@@ -213,7 +239,8 @@ fun DisclosureScreen(
 /** The disclosure without its view model, for previews. */
 @Composable
 internal fun DisclosureContent(
-    consentText: String,
+    summary: List<ConsentPoint>,
+    notice: List<String>,
     consentCurrent: Boolean,
     acceptedAtUtcMs: Long?,
     acceptState: AcceptState,
@@ -222,7 +249,7 @@ internal fun DisclosureContent(
     onDecline: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val paragraphs = remember(consentText) { consentParagraphs(consentText) }
+    var noticeExpanded by rememberSaveable { mutableStateOf(false) }
     val headingText = stringResource(R.string.disclosure_heading)
     val introText = stringResource(R.string.disclosure_intro)
     val consentTitle = stringResource(R.string.disclosure_consent_title)
@@ -278,12 +305,18 @@ internal fun DisclosureContent(
                 StatusBanner(message = saveFailedText, tone = StatusTone.ERROR, modifier = Modifier.setupContentWidth())
             }
         }
-        item(key = "consent") {
+        item(key = "summary") {
             SectionCard(title = consentTitle, icon = FieldTapIcons.Shield, modifier = Modifier.setupContentWidth()) {
-                paragraphs.forEachIndexed { index, paragraph ->
-                    ConsentPoint(topic = ConsentTopic.of(index), text = paragraph)
-                }
+                summary.forEachIndexed { index, point -> SummaryPoint(topic = SummaryTopic.of(index), point = point) }
             }
+        }
+        item(key = "notice") {
+            FullNotice(
+                paragraphs = notice,
+                expanded = noticeExpanded,
+                onToggle = { noticeExpanded = !noticeExpanded },
+                modifier = Modifier.setupContentWidth(),
+            )
         }
         item(key = "limits") {
             LimitsStatementCard(title = limitsTitle, statement = limitsStatement, modifier = Modifier.setupContentWidth())
@@ -291,13 +324,139 @@ internal fun DisclosureContent(
     }
 }
 
-/** The consent text split into its paragraphs, word for word: joined with a blank line they are the text again. */
-internal fun consentParagraphs(text: String): List<String> = text.split(PARAGRAPH_BREAK).filter { it.isNotBlank() }
+/**
+ * What each point of [Consent.SUMMARY] is about, in order, for its icon: what is recorded, that it stays on the phone,
+ * identifiers, withdrawing. A point past the list, from a later text, takes [GENERAL].
+ */
+internal enum class SummaryTopic {
+    RECORDED,
+    STAYS_ON_PHONE,
+    IDENTIFIERS,
+    WITHDRAW,
+    GENERAL,
+    ;
+
+    val icon: ImageVector
+        get() = when (this) {
+            RECORDED -> FieldTapIcons.SignalBars
+            STAYS_ON_PHONE -> FieldTapIcons.Phone
+            IDENTIFIERS -> FieldTapIcons.Sim
+            WITHDRAW -> FieldTapIcons.Tune
+            GENERAL -> FieldTapIcons.Info
+        }
+
+    companion object {
+        /** The topics of the current summary's points, one each. */
+        val CURRENT: List<SummaryTopic> = listOf(RECORDED, STAYS_ON_PHONE, IDENTIFIERS, WITHDRAW)
+
+        fun of(index: Int): SummaryTopic = CURRENT.getOrElse(index) { GENERAL }
+    }
+}
 
 /**
- * What each paragraph of [Consent.CURRENT] is about, in order, so the notice scans point by point without a word added
- * to the text it hashes: the session, what it records, location and privacy zones, where recordings go, identifiers,
- * withdrawing. A paragraph past the list, from a later text, takes [GENERAL].
+ * One point of the summary: an icon in a tonal circle, the title and the body, read by TalkBack as one item. The icon is
+ * decoration.
+ */
+@Composable
+private fun SummaryPoint(topic: SummaryTopic, point: ConsentPoint) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {},
+        horizontalArrangement = Arrangement.spacedBy(Spacing.Lg),
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ) {
+            Box(modifier = Modifier.size(Sizes.IconContainer), contentAlignment = Alignment.Center) {
+                Icon(imageVector = topic.icon, contentDescription = null, modifier = Modifier.size(Sizes.Icon))
+            }
+        }
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.Xxs)) {
+            Text(text = point.title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+            Text(text = point.body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/**
+ * The full notice, word for word, behind a header that opens and closes it. The header is one 48 dp button that TalkBack
+ * reads with its state and what a double tap does; the notice starts closed, and stays as the user left it across a
+ * rotation.
+ */
+@Composable
+private fun FullNotice(paragraphs: List<String>, expanded: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    val stateText = stringResource(if (expanded) R.string.disclosure_notice_expanded else R.string.disclosure_notice_collapsed)
+    val actionText = stringResource(if (expanded) R.string.disclosure_notice_hide else R.string.disclosure_notice_show)
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) HALF_TURN_DEGREES else 0f,
+        animationSpec = tween(Durations.SHORT),
+        label = "notice chevron",
+    )
+    Surface(modifier = modifier.fillMaxWidth(), shape = ShapeRoles.Card, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Sizes.MinTouchTarget)
+                    .clickable(onClickLabel = actionText, role = Role.Button, onClick = onToggle)
+                    .semantics(mergeDescendants = true) { stateDescription = stateText }
+                    .padding(Spacing.CardPadding),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.Md),
+            ) {
+                Icon(
+                    imageVector = FieldTapIcons.File,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(Sizes.Icon),
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.disclosure_notice_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.semantics { heading() },
+                    )
+                    Text(
+                        text = stringResource(R.string.disclosure_notice_subtitle),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    imageVector = FieldTapIcons.ExpandMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(Sizes.Icon)
+                        .rotate(chevronRotation),
+                )
+            }
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(tween(Durations.MEDIUM)) + fadeIn(tween(Durations.MEDIUM)),
+                exit = shrinkVertically(tween(Durations.SHORT)) + fadeOut(tween(Durations.SHORT)),
+            ) {
+                Column(
+                    modifier = Modifier.padding(start = Spacing.CardPadding, end = Spacing.CardPadding, bottom = Spacing.CardPadding),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.ItemGap),
+                ) {
+                    paragraphs.forEachIndexed { index, paragraph -> NoticeParagraph(topic = ConsentTopic.of(index), text = paragraph) }
+                }
+            }
+        }
+    }
+}
+
+private const val HALF_TURN_DEGREES = 180f
+
+/**
+ * What each paragraph of [Consent.NOTICE] is about, in order, so the full notice still scans paragraph by paragraph: the
+ * session, what it records, location and privacy zones, where recordings go, identifiers, withdrawing. A paragraph past
+ * the list, from a later text, takes [GENERAL].
  */
 internal enum class ConsentTopic {
     SESSION,
@@ -317,9 +476,9 @@ internal enum class ConsentTopic {
     }
 }
 
-/** One paragraph of the consent notice, word for word, after an icon for its topic. The icon is decoration: TalkBack reads the text. */
+/** One paragraph of the full notice, word for word, after an icon for its topic. The icon is decoration: TalkBack reads the text. */
 @Composable
-private fun ConsentPoint(topic: ConsentTopic, text: String) {
+private fun NoticeParagraph(topic: ConsentTopic, text: String) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.Md)) {
         Icon(
             imageVector = when (topic) {
@@ -339,14 +498,12 @@ private fun ConsentPoint(topic: ConsentTopic, text: String) {
         )
         Text(
             text = text,
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
         )
     }
 }
-
-private const val PARAGRAPH_BREAK = "\n\n"
 
 @Composable
 private fun DisclosureActions(
@@ -687,7 +844,8 @@ private fun consentCurrentFlow(context: Context): Flow<Boolean> {
 private fun DisclosurePreview() {
     PreviewSurface {
         DisclosureContent(
-            consentText = Consent.CURRENT.text,
+            summary = Consent.SUMMARY,
+            notice = Consent.NOTICE,
             consentCurrent = false,
             acceptedAtUtcMs = null,
             acceptState = AcceptState.IDLE,

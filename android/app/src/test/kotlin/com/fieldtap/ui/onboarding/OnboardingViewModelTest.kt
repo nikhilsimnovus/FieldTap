@@ -42,7 +42,7 @@ class OnboardingViewModelTest {
 
         val record = graph.fakeSettings.stored.value.consent
         assertEquals(ConsentRecord(version = Consent.CURRENT.version, sha256 = Consent.CURRENT.sha256, grantedUtcMs = 1_789_050_612_345L), record)
-        assertEquals("2026-09-10-draft", record?.version)
+        assertEquals("2026-09-11-draft", record?.version)
         assertTrue(viewModel.consentCurrent.value)
         assertEquals(1_789_050_612_345L, viewModel.acceptedAtUtcMs.value)
         assertEquals(AcceptState.IDLE, viewModel.acceptState.value)
@@ -184,15 +184,20 @@ class OnboardingViewModelTest {
     fun theDisclosureShowsTheCurrentConsentTextWordForWord() {
         val viewModel = OnboardingViewModel(FakeAppGraph())
         assertSame(Consent.CURRENT, viewModel.consentText)
+        // The four points and the full notice are the hashed text, and nothing else is.
+        assertEquals(Consent.CURRENT.text, Consent.textOf(viewModel.summary, viewModel.notice))
+        assertEquals(4, viewModel.summary.size)
 
-        val paragraphs = consentParagraphs(Consent.CURRENT.text)
-        assertEquals(6, paragraphs.size)
-        assertEquals(Consent.CURRENT.text, paragraphs.joinToString("\n\n"))
-        // Every paragraph has its own topic icon; a new text with more paragraphs needs the list extended.
-        assertEquals(paragraphs.size, ConsentTopic.CURRENT.size)
+        // Every point and every paragraph has its own topic icon; a new text with more of either needs its list extended.
+        assertEquals(viewModel.summary.size, SummaryTopic.CURRENT.size)
+        assertEquals(SummaryTopic.CURRENT.size, SummaryTopic.CURRENT.toSet().size)
+        assertEquals(SummaryTopic.GENERAL, SummaryTopic.of(viewModel.summary.size))
+        assertTrue(viewModel.summary[2].body.contains("IMEI"))
+        assertEquals(SummaryTopic.IDENTIFIERS, SummaryTopic.of(2))
+        assertEquals(viewModel.notice.size, ConsentTopic.CURRENT.size)
         assertEquals(ConsentTopic.CURRENT.size, ConsentTopic.CURRENT.toSet().size)
-        assertEquals(ConsentTopic.GENERAL, ConsentTopic.of(paragraphs.size))
-        assertTrue(paragraphs[4].contains("IMEI"))
+        assertEquals(ConsentTopic.GENERAL, ConsentTopic.of(viewModel.notice.size))
+        assertTrue(viewModel.notice[4].contains("IMEI"))
         assertEquals(ConsentTopic.IDENTIFIERS, ConsentTopic.of(4))
     }
 

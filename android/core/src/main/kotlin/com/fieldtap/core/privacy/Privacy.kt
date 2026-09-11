@@ -447,40 +447,73 @@ data class ConsentRecord(
     val grantedUtcMs: Long,
 )
 
+/** One of the points the consent notice opens with: a short title and a sentence or two, both part of the hashed text. */
+data class ConsentPoint(val title: String, val body: String)
+
 /**
  * The logging consent shown full-screen before any location prompt. Upload consent does not exist
  * yet (no upload in this version).
  *
- * [CURRENT] follows android/ARCHITECTURE.md section 0, decision 2: what is recorded, that it stays on
- * the phone until shared as a zip, that no phone or SIM identifiers are read, and that consent can be
- * withdrawn in Settings, which stops new sessions.
+ * [CURRENT] follows android/ARCHITECTURE.md section 0, decisions 2 and 13: four points first ([SUMMARY]: what is recorded,
+ * that it stays on the phone and leaves only as a shared zip, that no phone or SIM identifiers are read, and that consent
+ * can be withdrawn in Settings, which stops new sessions), then the full notice ([NOTICE]). Its text is both, word for
+ * word ([textOf]), so the hash covers every word of the notice the disclosure shows.
  *
  * Owner: workstream `location-privacy-core`.
  */
 object Consent {
-    // Draft wording, version 2026-09-10-draft. It has NOT been legally reviewed. Any change to the
+    /** The points the disclosure shows first, each with an icon, in this order. */
+    val SUMMARY: List<ConsentPoint> = listOf(
+        ConsentPoint(
+            title = "What is recorded",
+            body = "Cell measurements, your GPS track, the results of tests you turn on and your phone's model, only while a " +
+                "session you started is running.",
+        ),
+        ConsentPoint(
+            title = "It stays on this phone",
+            body = "A session leaves the phone only when you share it as a zip file.",
+        ),
+        ConsentPoint(
+            title = "No phone or SIM identifiers",
+            body = "FieldTap never reads IMEI, IMSI, ICCID, phone number, Android ID or advertising ID.",
+        ),
+        ConsentPoint(
+            title = "Withdraw at any time",
+            body = "Withdraw consent in Settings. New sessions then cannot start, and sessions already on this phone stay " +
+                "until you delete them.",
+        ),
+    )
+
+    /** The full notice, paragraph by paragraph, in the disclosure's expandable section. */
+    val NOTICE: List<String> = listOf(
+        "5gto6G FieldTap records only while a session you started is running.",
+        "A session records the cells your phone reports (identity, signal strength and quality, band " +
+            "and channel), service and mobile data state, your GPS track, the results of any ping and " +
+            "download tests you turn on, and the markers and notes you add. It also records your " +
+            "phone's make, model and software version, the network and SIM operator names and codes, " +
+            "and a random ID created for this installation.",
+        "Android gives cell information only to apps allowed precise location, so the app asks for " +
+            "it. Inside a privacy zone you set, nothing is recorded except that logging paused and resumed.",
+        "Recordings stay on this phone. A session leaves it only when you share it as a zip file, and " +
+            "you choose how precise the locations in that copy are. Ping and download tests, which are " +
+            "off unless you turn them on, contact the servers named in Settings.",
+        "The app never reads phone or SIM identifiers: no IMEI, IMSI, ICCID, phone number, Android ID " +
+            "or advertising ID. It never records Wi-Fi names or MAC addresses.",
+        "You can withdraw consent at any time in Settings. New sessions then cannot start, and sessions " +
+            "already on this phone stay until you delete them.",
+    )
+
+    // Draft wording, version 2026-09-11-draft. It has NOT been legally reviewed. Any change to the
     // text, even one character, needs a new version: the hash in every stored ConsentRecord and every
     // session's privacy.consent_sha256 is over these exact bytes. Keep this note out of the UI.
-    val CURRENT: ConsentText = ConsentText(
-        version = "2026-09-10-draft",
-        text = listOf(
-            "5gto6G FieldTap records only while a session you started is running.",
-            "A session records the cells your phone reports (identity, signal strength and quality, band " +
-                "and channel), service and mobile data state, your GPS track, the results of any ping and " +
-                "download tests you turn on, and the markers and notes you add. It also records your " +
-                "phone's make, model and software version, the network and SIM operator names and codes, " +
-                "and a random ID created for this installation.",
-            "Android gives cell information only to apps allowed precise location, so the app asks for " +
-                "it. Inside a privacy zone you set, nothing is recorded except that logging paused and resumed.",
-            "Recordings stay on this phone. A session leaves it only when you share it as a zip file, and " +
-                "you choose how precise the locations in that copy are. Ping and download tests, which are " +
-                "off unless you turn them on, contact the servers named in Settings.",
-            "The app never reads phone or SIM identifiers: no IMEI, IMSI, ICCID, phone number, Android ID " +
-                "or advertising ID. It never records Wi-Fi names or MAC addresses.",
-            "You can withdraw consent at any time in Settings. New sessions then cannot start, and sessions " +
-                "already on this phone stay until you delete them.",
-        ).joinToString("\n\n"),
-    )
+    val CURRENT: ConsentText = ConsentText(version = "2026-09-11-draft", text = textOf(SUMMARY, NOTICE))
+
+    /**
+     * The text a consent is hashed over: each point's title and body on two lines, then the notice's paragraphs, with a
+     * blank line between blocks.
+     */
+    fun textOf(summary: List<ConsentPoint>, notice: List<String>): String =
+        (summary.map { point -> point.title + "\n" + point.body } + notice).joinToString("\n\n")
 
     /** True when [record] matches [CURRENT] by version and hash. */
     fun isCurrent(record: ConsentRecord?): Boolean =

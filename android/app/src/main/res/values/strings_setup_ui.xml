@@ -18,8 +18,14 @@
 
     <!-- Disclosure and consent. -->
     <string name="disclosure_heading">Before you start</string>
-    <string name="disclosure_intro">Please read how 5gto6G FieldTap records and what it keeps before it asks for location access.</string>
+    <string name="disclosure_intro">Android gives cell information only to apps allowed precise location, so FieldTap asks for it next. First, what it records and keeps.</string>
     <string name="disclosure_consent_title">What you agree to</string>
+    <string name="disclosure_notice_title">The full notice</string>
+    <string name="disclosure_notice_subtitle">Every word of what you agree to</string>
+    <string name="disclosure_notice_show">Show the full notice</string>
+    <string name="disclosure_notice_hide">Hide the full notice</string>
+    <string name="disclosure_notice_expanded">Expanded</string>
+    <string name="disclosure_notice_collapsed">Collapsed</string>
     <string name="disclosure_limits_title">What FieldTap reads</string>
     <string name="disclosure_accept">Accept and continue</string>
     <string name="disclosure_decline">Not now</string>

@@ -12,10 +12,10 @@ class ConsentTest {
 
     @Test
     fun theCurrentTextIsPinnedToItsVersion() {
-        assertEquals("2026-09-10-draft", Consent.CURRENT.version)
+        assertEquals("2026-09-11-draft", Consent.CURRENT.version)
         assertEquals(
             "the consent text changed: give it a new version, then update this hash",
-            "f63cb16aa9e2ae42f6feac10f42b470d85967b6b5ecc563cf655a1b61d4a442e",
+            "50a90d7f4e509469a136535f7197bb75883854fb61b134eadcb55ec884fef7a1",
             Consent.CURRENT.sha256,
         )
     }
@@ -25,6 +25,23 @@ class ConsentTest {
         val digest = MessageDigest.getInstance("SHA-256").digest(Consent.CURRENT.text.toByteArray(Charsets.UTF_8))
         assertEquals(BigInteger(1, digest).toString(16).padStart(64, '0'), Consent.CURRENT.sha256)
         assertTrue(Regex("[0-9a-f]{64}").matches(Consent.CURRENT.sha256))
+    }
+
+    @Test
+    fun theTextIsTheFourPointsThenTheFullNoticeWordForWord() {
+        val text = Consent.CURRENT.text
+        assertEquals(Consent.textOf(Consent.SUMMARY, Consent.NOTICE), text)
+        val blocks = text.split("\n\n")
+        assertEquals(4, Consent.SUMMARY.size)
+        assertEquals(6, Consent.NOTICE.size)
+        assertEquals(Consent.SUMMARY.size + Consent.NOTICE.size, blocks.size)
+        Consent.SUMMARY.forEachIndexed { index, point -> assertEquals(point.title + "\n" + point.body, blocks[index]) }
+        assertEquals(Consent.NOTICE, blocks.drop(Consent.SUMMARY.size))
+        for (point in Consent.SUMMARY) {
+            assertTrue(point.title.isNotBlank() && point.body.isNotBlank())
+            assertFalse("a title is one line", point.title.contains('\n'))
+            assertFalse("a body is one paragraph", point.body.contains('\n'))
+        }
     }
 
     @Test
@@ -40,9 +57,20 @@ class ConsentTest {
         val current = Consent.CURRENT
         assertTrue(Consent.isCurrent(ConsentRecord(current.version, current.sha256, grantedUtcMs = 0)))
         assertFalse(Consent.isCurrent(null))
-        assertFalse(Consent.isCurrent(ConsentRecord("2026-09-01", current.sha256, grantedUtcMs = 0)))
+        assertFalse(Consent.isCurrent(ConsentRecord("2026-09-10-draft", current.sha256, grantedUtcMs = 0)))
         assertFalse(Consent.isCurrent(ConsentRecord(current.version, "0".repeat(64), grantedUtcMs = 0)))
         assertFalse(Consent.isCurrent(ConsentRecord(current.version, current.sha256.uppercase(), grantedUtcMs = 0)))
+    }
+
+    @Test
+    fun aConsentToTheEarlierTextIsNoLongerCurrent() {
+        val earlier = ConsentRecord("2026-09-10-draft", "f63cb16aa9e2ae42f6feac10f42b470d85967b6b5ecc563cf655a1b61d4a442e", grantedUtcMs = 0)
+        assertFalse(Consent.isCurrent(earlier))
+        assertEquals(
+            "the full notice is the earlier text, unchanged",
+            earlier.sha256,
+            ConsentText("2026-09-10-draft", Consent.NOTICE.joinToString("\n\n")).sha256,
+        )
     }
 
     @Test
@@ -64,8 +92,22 @@ class ConsentTest {
         assertFalse("no signalling wording", Regex("(?i)handover|\\brrc\\b|signalling|decod").containsMatchIn(text))
         assertFalse("the draft note stays out of the UI", text.contains("draft", ignoreCase = true))
         assertFalse("the legal note stays out of the UI", text.contains("legal", ignoreCase = true))
-        assertEquals("plain paragraphs", 6, text.split("\n\n").size)
         assertFalse(text.contains("  "))
         assertFalse(text.contains("\r"))
+    }
+
+    @Test
+    fun theFourPointsAreTheOnesTheLeadNamedInOrder() {
+        val (recorded, stays, identifiers, withdraw) = Consent.SUMMARY
+        for (phrase in listOf("Cell measurements", "GPS track", "tests", "model", "session you started")) {
+            assertTrue("what is recorded: $phrase", recorded.body.contains(phrase))
+        }
+        assertTrue(stays.title.contains("stays on this phone") && stays.body.contains("only when you share it as a zip file"))
+        for (identifier in listOf("IMEI", "IMSI", "ICCID", "phone number", "Android ID", "advertising ID")) {
+            assertTrue("identifiers: $identifier", identifiers.body.contains(identifier))
+        }
+        assertTrue(identifiers.title.contains("phone or SIM identifiers"))
+        assertTrue(withdraw.title.contains("Withdraw at any time") && withdraw.body.contains("Settings"))
+        assertTrue(withdraw.body.contains("New sessions then cannot start"))
     }
 }
