@@ -93,16 +93,24 @@ data class CellRow(
     val tac: Int?,
     /** LTE ECI (28 bits) or NR NCI (36 bits). */
     val cellId: Long?,
-    val pci: Int,
+    /**
+     * Null when Android did not report it, as for some NSA legs; the row is still written, with `pci` blank and
+     * `plausible` False. Android's unavailable value ([Schema.ANDROID_UNAVAILABLE]) is also written blank.
+     */
+    val pci: Int?,
     /** The first entry of `getBands()`. */
     val band: Int?,
-    /** LTE EARFCN or NR-ARFCN. */
-    val dlEarfcn: Int,
+    /** LTE EARFCN or NR-ARFCN; null (written blank, `plausible` False) when Android did not report it. */
+    val dlEarfcn: Int?,
     /** LTE FDD only: dl plus the band's offset. Blank for TDD and NR. */
     val ulEarfcn: Int?,
     val dlBwMhz: Double?,
     val ulBwMhz: Double?,
-    /** `True` when pci and dl_earfcn are present and in range; written as Python spells a boolean. */
+    /**
+     * The producer's plausibility verdict, for its own use. cells.csv never writes this value: [CellsCsv]
+     * writes `True` exactly when the written `pci` and `dl_earfcn` are both filled, the rule
+     * `fieldtap validate` enforces, so the column cannot contradict the row.
+     */
     val plausible: Boolean,
     val operator: String?,
     /** Written ascending, `a, b`. */

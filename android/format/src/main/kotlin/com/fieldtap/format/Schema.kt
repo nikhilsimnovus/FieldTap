@@ -36,6 +36,9 @@ object Schema {
     /** `kpi.max_age_ms`: no kpi.csv row is older than this, whichever Android interval applies. */
     const val KPI_MAX_AGE_MS: Long = 11_000
 
+    /** `kpi.max_age_ms_short_interval`: the limit while Android's 2 s cell-info interval applies. */
+    const val KPI_MAX_AGE_MS_SHORT_INTERVAL: Long = 2_500
+
     /** `kpi.gps_match_seconds` in milliseconds: a row gets a position only from a fix this close. */
     const val GPS_MATCH_MS: Long = 5_000
 
