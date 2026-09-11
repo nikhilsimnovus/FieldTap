@@ -336,7 +336,6 @@
     <string name="detail_recording_banner">This session is recording. Stop it on the Live screen before you share or delete it.</string>
 
     <string name="detail_section_overview">Overview</string>
-    <string name="detail_row_name">Name</string>
     <string name="detail_row_note">Note</string>
     <string name="detail_row_place">Place</string>
     <string name="detail_row_started">Started</string>

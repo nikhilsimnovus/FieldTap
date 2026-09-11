@@ -64,6 +64,15 @@ object SessionsPresentation {
         else -> GapReason.OTHER
     }
 
+    /** Ends the version of consent wording that has not been legally reviewed (android/ARCHITECTURE.md decision 2). */
+    private const val DRAFT_SUFFIX: String = "-draft"
+
+    /**
+     * The consent version as the detail screen shows it: "2026-09-10" for "2026-09-10-draft". session.json keeps the
+     * whole version; the suffix is a note for the team, not something a tester can act on.
+     */
+    fun consentVersionText(version: String): String = version.removeSuffix(DRAFT_SUFFIX).ifEmpty { version }
+
     /** The gaps to list, in time order, at most [limit]. */
     fun listedGaps(gaps: List<GapMeta>, limit: Int = MAX_LISTED_GAPS): List<GapMeta> =
         gaps.sortedBy { it.startUtcMs }.take(limit.coerceAtLeast(0))

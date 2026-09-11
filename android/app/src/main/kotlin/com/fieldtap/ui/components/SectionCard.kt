@@ -1,6 +1,7 @@
 package com.fieldtap.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -21,11 +22,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Constraints
 import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.FieldTapIcons
 import com.fieldtap.ui.theme.ShapeRoles
@@ -99,7 +102,8 @@ fun SectionCard(
 /**
  * A labelled value inside a [SectionCard]: "PCI  555", "Fresh samples  54", "SHA-256  3f9a…".
  *
- * Side by side by default, value at the end in tabular figures; long values wrap. [stacked] puts the
+ * Side by side by default, value at the end in tabular figures. A long value takes all the width the key leaves and
+ * wraps there; when key and value are both long, the key keeps 40% of the row ([KeyValueMath]). [stacked] puts the
  * value under the key, for long values such as a SHA-256 or a URL. [selectable] lets the user copy the
  * value. TalkBack reads "key, value" as one item, or [contentDescription].
  *
@@ -158,15 +162,58 @@ fun KeyValueRow(
                 }
             }
         } else {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = key, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (supportingText != null) {
-                    Text(text = supportingText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Not two weighted children: those split the row in half, so "Google Pixel 8 · Android 16" wrapped beside "Phone".
+            Layout(
+                content = {
+                    Column {
+                        Text(text = key, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (supportingText != null) {
+                            Text(text = supportingText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Box { valueText(Modifier, TextAlign.End) }
+                },
+                modifier = Modifier.weight(1f),
+            ) { measurables, constraints ->
+                val gapPx = Spacing.Md.roundToPx()
+                val keyPx = measurables[0].maxIntrinsicWidth(Constraints.Infinity)
+                val valuePx = measurables[1].maxIntrinsicWidth(Constraints.Infinity)
+                val width = if (constraints.hasBoundedWidth) {
+                    constraints.maxWidth
+                } else {
+                    (keyPx + gapPx + valuePx).coerceAtLeast(constraints.minWidth)
+                }
+                val (keyWidth, valueWidth) = KeyValueMath.widths(width, gapPx, keyPx, valuePx)
+                val keyPlaceable = measurables[0].measure(Constraints(maxWidth = keyWidth))
+                val valuePlaceable = measurables[1].measure(Constraints(maxWidth = valueWidth))
+                val height = maxOf(keyPlaceable.height, valuePlaceable.height).coerceIn(constraints.minHeight, constraints.maxHeight)
+                layout(width, height) {
+                    keyPlaceable.placeRelative(0, (height - keyPlaceable.height) / 2)
+                    valuePlaceable.placeRelative(width - valuePlaceable.width, (height - valuePlaceable.height) / 2)
                 }
             }
-            valueText(Modifier.weight(1f, fill = false), TextAlign.End)
         }
         trailing?.invoke()
+    }
+}
+
+/** Width arithmetic for a side-by-side [KeyValueRow], in pixels. */
+object KeyValueMath {
+    /** The share of the row a key keeps when key and value are both too long to sit side by side on one line. */
+    const val KEY_SHARE: Float = 0.4f
+
+    /**
+     * The widths of the key and the value in a row [availablePx] wide with [gapPx] between them, from the widths
+     * [keyPx] and [valuePx] they take on one line. The value always gets all the room the key leaves. The key keeps its
+     * own width when both fit, or when that still leaves the value its one-line width; otherwise it gets the larger of
+     * [KEY_SHARE] of the row and what the value leaves, and wraps. Never negative.
+     */
+    fun widths(availablePx: Int, gapPx: Int, keyPx: Int, valuePx: Int): Pair<Int, Int> {
+        val room = (availablePx - gapPx).coerceAtLeast(0)
+        val key = keyPx.coerceAtLeast(0)
+        val value = valuePx.coerceAtLeast(0)
+        val keyWidth = if (key + value <= room) key else minOf(key, maxOf((room * KEY_SHARE).toInt(), room - value))
+        return keyWidth to room - keyWidth
     }
 }
 

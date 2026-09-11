@@ -76,6 +76,9 @@ import com.fieldtap.ui.components.FieldTapPreviews
 import com.fieldtap.ui.components.FieldTapTopBar
 import com.fieldtap.ui.components.KeyValueRow
 import com.fieldtap.ui.components.LoadingState
+import com.fieldtap.ui.components.MetricEmphasis
+import com.fieldtap.ui.components.MetricGrid
+import com.fieldtap.ui.components.MetricTile
 import com.fieldtap.ui.components.RadioRow
 import com.fieldtap.ui.components.SectionCard
 import com.fieldtap.ui.components.SessionListRow
@@ -309,8 +312,9 @@ class SessionDetailViewModel(private val graph: AppGraph, private val dirName: S
 }
 
 /**
- * Session detail: stats from session.json (duration, fresh samples, repeats dropped, median interval,
- * share at 2 s, screen/Wi-Fi/charging shares, gaps with reasons, zone pauses, stopped by), file sizes
+ * Session detail: headline tiles from session.json (duration, fresh samples, median fresh interval, gap count),
+ * then its other stats (repeats dropped, share at 2 s, screen/Wi-Fi/charging shares, gaps with reasons, zone
+ * pauses, stopped by), file sizes
  * and row counts; Share zip with a precision choice (full, about 110 m, none), showing the SHA-256;
  * Delete with confirmation. No upload, no report on the phone.
  *
@@ -670,6 +674,7 @@ private fun DetailList(
                 )
             }
         }
+        item(key = "headline") { HeadlineStats(meta = meta, modifier = Modifier.contentWidth()) }
         item(key = "overview") { OverviewCard(detail = detail, meta = meta, modifier = Modifier.contentWidth()) }
         item(key = "collection") { CollectionCard(meta = meta, modifier = Modifier.contentWidth()) }
         item(key = "gaps") { GapsCard(gaps = meta.collection.gaps, modifier = Modifier.contentWidth()) }
@@ -690,21 +695,47 @@ private fun DetailList(
     }
 }
 
+/** The numbers a session is judged by first. The top bar already names it, so no card repeats the name. */
+@Composable
+private fun HeadlineStats(meta: SessionMeta, modifier: Modifier = Modifier) {
+    val collection = meta.collection
+    MetricGrid(modifier = modifier.fillMaxWidth(), maxColumns = HEADLINE_COLUMNS) {
+        MetricTile(
+            label = stringResource(R.string.detail_row_duration),
+            value = StopReasons.durationMs(meta.startedUtcMs, meta.stoppedUtcMs)?.let { Formats.elapsed(it) },
+            emphasis = MetricEmphasis.COMPACT,
+        )
+        MetricTile(
+            label = stringResource(R.string.detail_row_fresh),
+            value = collection.freshSamples.toString(),
+            emphasis = MetricEmphasis.COMPACT,
+        )
+        MetricTile(
+            label = stringResource(R.string.detail_row_median),
+            value = collection.medianFreshIntervalMs?.let { stringResource(R.string.seconds_value, DisplayTime.seconds(it)) },
+            emphasis = MetricEmphasis.COMPACT,
+        )
+        MetricTile(
+            label = stringResource(R.string.detail_section_gaps),
+            value = collection.gaps.size.toString(),
+            emphasis = MetricEmphasis.COMPACT,
+        )
+    }
+}
+
+/** Four headline tiles: two columns on a phone, one row on a tablet or in landscape. */
+private const val HEADLINE_COLUMNS: Int = 4
+
 @Composable
 private fun OverviewCard(detail: SessionDetail, meta: SessionMeta, modifier: Modifier = Modifier) {
     val separator = stringResource(R.string.value_separator)
     SectionCard(title = stringResource(R.string.detail_section_overview), icon = FieldTapIcons.File, modifier = modifier) {
-        KeyValueRow(key = stringResource(R.string.detail_row_name), value = meta.name, tabular = false)
         meta.note?.let { KeyValueRow(key = stringResource(R.string.detail_row_note), value = it, tabular = false) }
         meta.location?.let { KeyValueRow(key = stringResource(R.string.detail_row_place), value = it, tabular = false) }
         KeyValueRow(key = stringResource(R.string.detail_row_started), value = DisplayTime.dateTime(meta.startedUtcMs))
         KeyValueRow(
             key = stringResource(R.string.detail_row_stopped),
             value = meta.stoppedUtcMs?.let { DisplayTime.dateTime(it) } ?: stringResource(R.string.stop_recording),
-        )
-        KeyValueRow(
-            key = stringResource(R.string.detail_row_duration),
-            value = StopReasons.durationMs(meta.startedUtcMs, meta.stoppedUtcMs)?.let { Formats.elapsed(it) } ?: UNKNOWN_VALUE,
         )
         KeyValueRow(
             key = stringResource(R.string.detail_row_stopped_by),
@@ -734,7 +765,10 @@ private fun OverviewCard(detail: SessionDetail, meta: SessionMeta, modifier: Mod
             value = stringResource(precisionNameRes(meta.privacy.locationPrecision)),
             tabular = false,
         )
-        KeyValueRow(key = stringResource(R.string.detail_row_consent), value = meta.privacy.consentVersion)
+        KeyValueRow(
+            key = stringResource(R.string.detail_row_consent),
+            value = SessionsPresentation.consentVersionText(meta.privacy.consentVersion),
+        )
     }
 }
 
@@ -742,12 +776,7 @@ private fun OverviewCard(detail: SessionDetail, meta: SessionMeta, modifier: Mod
 private fun CollectionCard(meta: SessionMeta, modifier: Modifier = Modifier) {
     val collection = meta.collection
     SectionCard(title = stringResource(R.string.detail_section_collection), icon = FieldTapIcons.Timer, modifier = modifier) {
-        KeyValueRow(key = stringResource(R.string.detail_row_fresh), value = collection.freshSamples.toString())
         KeyValueRow(key = stringResource(R.string.detail_row_repeats), value = collection.repeatsDropped.toString())
-        KeyValueRow(
-            key = stringResource(R.string.detail_row_median),
-            value = collection.medianFreshIntervalMs?.let { stringResource(R.string.seconds_value, DisplayTime.seconds(it)) } ?: UNKNOWN_VALUE,
-        )
         PercentRow(R.string.detail_row_short_interval, collection.shortIntervalPct)
         PercentRow(R.string.detail_row_screen_on, collection.screenOnPct)
         PercentRow(R.string.detail_row_wifi, collection.wifiConnectedPct)

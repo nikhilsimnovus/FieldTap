@@ -112,6 +112,13 @@ class SessionsViewModelTest {
     }
 
     @Test
+    fun theConsentVersionIsShownWithoutTheDraftSuffix() {
+        assertEquals("2026-09-10", SessionsPresentation.consentVersionText("2026-09-10-draft"))
+        assertEquals("2026-10-01", SessionsPresentation.consentVersionText("2026-10-01"))
+        assertEquals("-draft", SessionsPresentation.consentVersionText("-draft"))
+    }
+
+    @Test
     fun exportFailureNamesTheReason() {
         assertEquals(ExportFailure.TOO_LARGE, ExportFailure.of(ExportException(ExportException.Reason.TOO_LARGE, "big")))
         assertEquals(ExportFailure.SESSION_OPEN, ExportFailure.of(ExportException(ExportException.Reason.SESSION_OPEN, "open")))
