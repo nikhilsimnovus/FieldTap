@@ -617,6 +617,11 @@ Changes agreed at integration:
   Android reports no LTE or NR serving cell, with the data network type (`LivePresentation.servingAbsence`). The
   proof reads the registry first: the LTE and NR checks are required on API 36, and a modem without LTE or NR gets a
   session checked to hold no kpi row. `ServingCellSelector` is unchanged.
+- Found by the end-to-end proof: the API 31 emulator's GNSS reports `Location.getElapsedRealtimeNanos()` as wall-clock
+  nanoseconds, so every fix was translated 57 years into the future, track.csv held times in 2083, and no measurement
+  found a fix within 5 s. `LocationValues.fixElapsedMillis` now takes a fix time later than its callback, or more than an
+  hour older, as invalid and uses the callback's elapsed time instead; the proof checks that every track time lies
+  within the session.
 
 Inside owned files, an implementer may add private or internal helpers, new files in owned packages, and
 tests. Public API added for one's own use is fine; public API another workstream needs goes through the
