@@ -14,17 +14,22 @@
 #      The LTE and NR checks (a serving cell on Live, kpi rows, serving_cell events) apply when the modem reports an
 #      LTE or NR cell, which API 36 must. A modem reporting only other cells, like the API 31 emulator's single GSM
 #      cell, instead gets a session checked to hold no kpi row and Live checked to say so.
-#   3. Every screen in light, dark and font scale 1.3 (ScreenTourTest).
-#   4. Process death: a session started through the debug automation hook is killed with "am force-stop" and
+#   3. Every screen in each variant of VARIANTS (ScreenTourTest), each at every scroll position.
+#   4. Location services switched off mid-session (LocationOffTest), with a privacy zone far from the walk: the files
+#      say so with gps_lost, a marker that waits for a fix is dropped when the wait outlasts its limit and the Session
+#      detail screen says so, and gps_restored follows once location is back on.
+#   5. Process death: a session started through the debug automation hook is killed with "am force-stop" and
 #      relaunched with "am start"; another is killed with "kill -9" and relaunched by RecoveryUiTest. Each must be
 #      closed as interrupted, with the exit reason Android recorded for the killed process.
-#   5. fieldtap validate --upload and fieldtap report on every session, fieldtap validate on the exported zip, and
-#      check_e2e.py's assertions on what the files hold.
+#   6. fieldtap validate --upload and fieldtap report on every session, fieldtap validate on the exported zip, and
+#      check_e2e.py's assertions on what the files and screenshots hold.
 #
 # Environment:
 #   APK_DIR         where app-debug.apk and app-debug-androidTest.apk are, searched recursively
 #   E2E_OUT         output directory (default ./e2e-out)
 #   WALK_SECONDS    how long the walk session records (default 180)
+#   VARIANTS        the looks the first run and the screen tour are taken in, from light, dark, font130 and landscape
+#                   (default "light dark font130"); the walk, the location-off test and the recovery run once, in light
 #   PYTHON          the Python that runs fieldtap and check_e2e.py (default python3)
 #   ANDROID_SERIAL  device (default emulator-5554)
 #
@@ -51,7 +56,7 @@ TESTS=com.fieldtap.e2e
 FILES="/sdcard/Android/data/$PKG/files"
 # How long a session records before it is killed: several of its 5 s heartbeats.
 RECORD_BEFORE_KILL=${RECORD_BEFORE_KILL:-25}
-VARIANTS=(light dark font130)
+read -r -a VARIANT_LIST <<< "${VARIANTS:-light dark font130}"
 
 adb_bin=$(command -v adb || echo "${ANDROID_HOME:-}/platform-tools/adb")
 ADB=("$adb_bin" -s "$SERIAL")
@@ -123,13 +128,15 @@ wait_for_boot() {
   log "device $SERIAL, API $API, $(dsh getprop ro.build.fingerprint)"
 }
 
-# set_variant light|dark|font130  the night mode and font scale the next app process starts with.
+# set_variant light|dark|font130|landscape  the night mode, font scale and orientation the next app process starts with.
+# Rotation follows the setting, not the emulator's sensor, so every variant but landscape is upright.
 set_variant() {
-  local night=no scale=1.0
+  local night=no scale=1.0 rotation=0
   case $1 in
     light) ;;
     dark) night=yes ;;
     font130) scale=1.3 ;;
+    landscape) rotation=1 ;;
     *)
       log "unknown variant $1"
       return 1
@@ -137,6 +144,8 @@ set_variant() {
   esac
   dsh cmd uimode night "$night" > /dev/null || log "cmd uimode night $night failed"
   dsh settings put system font_scale "$scale" > /dev/null || log "font_scale $scale failed"
+  dsh settings put system accelerometer_rotation 0 > /dev/null || log "accelerometer_rotation 0 failed"
+  dsh settings put system user_rotation "$rotation" > /dev/null || log "user_rotation $rotation failed"
   sleep 2
 }
 
@@ -151,7 +160,12 @@ prepare_device() {
     echo "api=$API"
     echo "location_enabled=$(dsh cmd location is-location-enabled 2> /dev/null || echo unknown)"
     echo "gsm.operator.numeric=$(dsh getprop gsm.operator.numeric)"
+    # "Physical size: 1080x2400" and "Physical density: 420": the screen every screenshot is checked against.
+    echo "screen=$(dsh wm size 2> /dev/null | head -n 1 | sed 's/^[^0-9]*//')"
+    echo "density=$(dsh wm density 2> /dev/null | head -n 1 | sed 's/^[^0-9]*//')"
+    echo "variants=${VARIANT_LIST[*]}"
   } > "$OUT/checks/device.txt"
+  log "screen $(grep '^screen=' "$OUT/checks/device.txt" | cut -d= -f2) px at $(grep '^density=' "$OUT/checks/device.txt" | cut -d= -f2) dpi, variants ${VARIANT_LIST[*]}"
   set_variant light
 }
 
@@ -423,7 +437,7 @@ wait_dead() {
 
 first_runs() {
   local variant
-  for variant in "${VARIANTS[@]}"; do
+  for variant in "${VARIANT_LIST[@]}"; do
     dsh pm clear "$PKG" > /dev/null || fail "pm clear $PKG failed"
     set_variant "$variant"
     instrument "first-run-$variant" FirstRunScreensTest -e variant "$variant" || true
@@ -450,11 +464,31 @@ tour() {
     fail "no screen tour: the walk recorded no session"
     return 1
   fi
-  for variant in "${VARIANTS[@]}"; do
+  for variant in "${VARIANT_LIST[@]}"; do
     set_variant "$variant"
     instrument "tour-$variant" ScreenTourTest -e variant "$variant" -e dir_name "$WALK_DIR" -e expect_lte_nr "$EXPECT_LTE_NR" || true
   done
   set_variant light
+}
+
+# location_off  LocationOffTest: a session with a privacy zone 10 km from the walk, location services switched off and
+# on again while it records, then its Session detail; the session is pulled for check_e2e.py.
+location_off() {
+  local dir perm
+  log "== location services switched off mid-session"
+  set_variant light
+  for perm in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION POST_NOTIFICATIONS; do
+    dsh pm grant "$PKG" "android.permission.$perm" > /dev/null 2>&1 || true
+  done
+  instrument location-off LocationOffTest || true
+  # Whatever the test got to, everything after it needs location on.
+  dsh cmd location set-location-enabled true > /dev/null 2>&1 || log "could not switch location back on"
+  dir=$(json_get "$OUT/device/location-off-result.json" dir_name)
+  if [ -z "$dir" ]; then
+    fail "the location-off test recorded no session"
+    return 1
+  fi
+  pull_session "$dir"
 }
 
 # recovery force_stop|kill_9  a session through the automation hook, killed, relaunched, and pulled once launch
@@ -555,7 +589,7 @@ checks() {
     [ "$status" -eq 0 ] || fail "fieldtap validate $name exited $status"
   done
   if ! "$PYTHON" "$CHECKER" check --out "$OUT" --repo "$repo" --walk-seconds "$WALK_SECONDS" --expect-lte-nr "$EXPECT_LTE_NR" \
-    > "$OUT/checks/check.txt" 2>&1; then
+    --variants "${VARIANT_LIST[*]}" > "$OUT/checks/check.txt" 2>&1; then
     fail "check_e2e.py found problems, see checks/check.txt"
   fi
   cat "$OUT/checks/check.txt" >> "$OUT/e2e.log"
@@ -584,6 +618,7 @@ finish() {
   set +e
   stop_feeders
   set_variant light > /dev/null 2>&1
+  dsh cmd location set-location-enabled true > /dev/null 2>&1
   if [ -n "$LOGCAT_PID" ]; then
     kill "$LOGCAT_PID" 2> /dev/null
     wait "$LOGCAT_PID" 2> /dev/null
@@ -613,6 +648,7 @@ main() {
   first_runs
   walk || true
   tour || true
+  location_off || true
   recovery force_stop || true
   recovery kill_9 || true
   stop_feeders

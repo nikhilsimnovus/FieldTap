@@ -9,7 +9,7 @@
     check_e2e.py exit-reason DUMPSYS --pid PID
         Prints the summary.stopped_by token that "dumpsys activity exit-info" implies for process PID, using the
         app's own table (com.fieldtap.core.session.ExitReasons). Exit 1 when Android recorded no exit for PID.
-    check_e2e.py check --out DIR --repo REPO [--walk-seconds N]
+    check_e2e.py check --out DIR --repo REPO [--walk-seconds N] [--expect-lte-nr true|false] [--variants "light dark"]
         Asserts what the sessions, screenshots and results of a run hold. Prints one PASS or FAIL line per check,
         writes checks/results.json and exits 1 on any FAIL.
 
@@ -68,17 +68,28 @@ TRACK_AFTER_STOP_MS = 5_000
 # A kill lands within one 5 s heartbeat of the last one; slack for a busy emulator.
 HEARTBEAT_SLACK_MS = 7_000
 
-FIRST_RUN_SCREENS = ("01-disclosure", "01b-disclosure-limits", "02-permissions")
-TOUR_SCREENS = (
-    "03-live", "03c-live-trend", "03d-live-cells", "03e-live-landscape", "03b-start-dialog", "04-sessions",
-    "05-session-detail", "05b-session-share", "06-readiness", "07-probe", "08-settings", "09-about",
-)
+# Screens taken at every scroll position: NAME-p1.png, NAME-p2.png and so on (Screens.shotFull).
+FIRST_RUN_PAGED = ("01-disclosure", "02-permissions")
+TOUR_PAGED = ("03-live", "04-sessions", "05-session-detail", "06-readiness", "07-probe", "08-settings", "09-about")
+# Taken once: the Start dialog.
+TOUR_SINGLE = ("03b-start-dialog",)
+# Upright variants also turn the phone for Live; the landscape variant takes every screen turned.
+LIVE_TURNED = "03e-live-landscape"
 WALK_SCREENS = (
     "01-disclosure", "02-permissions", "03-permissions-allowed", "04-live-radio", "05-settings-tests",
-    "06-start-dialog", "08-mark-dialog", "09-marker-added", "10-recording", "11-stop-dialog", "12-sessions",
-    "13-session-detail", "14-zip-ready", "15-share-sheet",
+    "06-start-dialog", "08-mark-dialog", "09-marker-added", "09b-notification-marker", "10-recording", "11-stop-dialog",
+    "12-sessions", "13-session-detail", "14-zip-ready", "15-share-sheet",
 )
+LOCATION_OFF_SCREENS = ("20-live-location-off", "21-live-marker-dropped", "22-session-detail-marker-dropped-p1")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+# The words the app writes, as com.fieldtap.core.location.GpsEventDeriver and com.fieldtap.core.privacy.PrivacyZoneGate
+# write them.
+LOCATION_OFF_DETAIL = "Location services turned off"
+PAUSED_NO_FIX_TITLE = "Logging paused until the location is known"
+RESUMED_TITLE = "Logging resumed"
+# A fix Android measured just before location went off may still arrive, and the first after it may take a moment.
+LOCATION_SWITCH_SLACK_MS = 2_000
 
 
 # ---------------------------------------------------------------------------------------------------- plan-walk
@@ -546,10 +557,20 @@ def check_walk(out: Path, repo: Path, walk_seconds: int, expect_lte_nr: bool, r:
         r.check("events.csv: no serving_cell without an LTE or NR serving cell", not serving,
                 [(e["time_utc"], e["rat"]) for e in serving][:4])
     markers = [e for e in events if e["kind"] == "marker"]
-    r.check("events.csv: the marker with its note", len(markers) == 1 and markers[0]["detail"] == result.get("marker_note")
-            and markers[0]["rat"] == "-" and markers[0]["severity"] == "info"
-            and stopped is not None and started <= utc_ms(markers[0]["time_utc"]) <= stopped,
+    r.check("events.csv: the marker from Live with its note, then the one from the notification without a note",
+            len(markers) == 2 and markers[0]["detail"] == result.get("marker_note") and markers[1]["detail"] == ""
+            and all(m["rat"] == "-" and m["severity"] == "info" for m in markers)
+            and stopped is not None and started <= utc_ms(markers[0]["time_utc"]) <= utc_ms(markers[1]["time_utc"]) <= stopped,
             [(m["time_utc"], m["detail"]) for m in markers])
+    sent = result.get("notification_marker_sent_utc_ms")
+    r.check("events.csv: the notification's marker has the time of its tap",
+            len(markers) == 2 and isinstance(sent, int) and abs(utc_ms(markers[1]["time_utc"]) - sent) <= 3_000,
+            "marker %s, action sent at %s" % (markers[1]["time_utc"] if len(markers) == 2 else None, sent))
+    confirmation = result.get("notification_marker_text") or ""
+    r.check("notification: Mark confirmed which marker was added and when", confirmation.startswith("Marker 2 added at "),
+            confirmation)
+    r.check("notification: the confirmation was brief", result.get("notification_marker_text_cleared") is True,
+            result.get("notification_text_after"))
     r.check("events.csv: no session_interrupted in a stopped session", not any(e["kind"] == "session_interrupted" for e in events))
 
     # traffic.csv
@@ -662,21 +683,109 @@ def check_recovered(out: Path, repo: Path, r: Results) -> None:
                     'text="%s"' % title in text and name in text, window)
 
 
+def check_location_off(out: Path, r: Results) -> None:
+    """LocationOffTest's session: location services switched off and on again while it recorded, with a far privacy zone."""
+    result_path = out / "device" / "location-off-result.json"
+    if not r.check("location off: the test wrote its result", result_path.is_file(), result_path):
+        return
+    result = read_json(result_path)
+    dir_name = result.get("dir_name")
+    session = out / "sessions" / str(dir_name)
+    if not r.check("location off: the session was pulled", dir_name and (session / "session.json").is_file(), session):
+        return
+    r.check("location off: fieldtap validate --upload exit 0", exit_status(out, dir_name) == 0, exit_status(out, dir_name))
+    meta = read_json(session / "session.json")
+    events = read_csv(session / "events.csv")
+    track = read_csv(session / "track.csv")
+    off_ms, on_ms = result.get("location_off_utc_ms"), result.get("location_on_utc_ms")
+    if not r.check("location off: the test switched location off, then on", isinstance(off_ms, int) and isinstance(on_ms, int)
+                   and off_ms < on_ms, "off %s, on %s" % (off_ms, on_ms)):
+        return
+    story = [(i, e["time_utc"], e["kind"], e["title"], e["detail"]) for i, e in enumerate(events)
+             if e["kind"] in ("gps_lost", "gps_restored", "privacy_zone", "marker")]
+    lost = [i for i, e in enumerate(events) if e["kind"] == "gps_lost" and e["detail"] == LOCATION_OFF_DETAIL]
+    r.check("location off: one gps_lost says location services were turned off, when they were",
+            len(lost) == 1 and off_ms - LOCATION_SWITCH_SLACK_MS <= utc_ms(events[lost[0]]["time_utc"]) <= off_ms + 5_000,
+            story)
+    if not lost:
+        return
+    after = events[lost[0] + 1:]
+    restored = [e for e in after if e["kind"] == "gps_restored"]
+    r.check("location off: gps_restored follows once location is back on",
+            restored and utc_ms(restored[0]["time_utc"]) >= on_ms - LOCATION_SWITCH_SLACK_MS, story)
+    until_restored = after[:after.index(restored[0])] if restored else after
+    r.check("location off: no other gps_lost before GPS is restored", not any(e["kind"] == "gps_lost" for e in until_restored), story)
+    paused = [e for e in after if e["kind"] == "privacy_zone" and e["title"] == PAUSED_NO_FIX_TITLE]
+    resumed = [e for e in after if e["kind"] == "privacy_zone" and e["title"] == RESUMED_TITLE]
+    r.check("location off: with no fix for a minute logging paused, before location came back",
+            len(paused) == 1 and off_ms < utc_ms(paused[0]["time_utc"]) < on_ms, story)
+    r.check("location off: logging resumed at a fix once location was back on",
+            len(resumed) == 1 and utc_ms(resumed[0]["time_utc"]) >= on_ms - LOCATION_SWITCH_SLACK_MS, story)
+    r.check("location off: the marker that waited for a fix was dropped, not written",
+            not any(e["kind"] == "marker" for e in events) and result.get("outcome_markers_dropped") == 1,
+            "markers in events.csv %d, outcome %s" % (sum(1 for e in events if e["kind"] == "marker"),
+                                                      result.get("outcome_markers_dropped")))
+    privacy = meta.get("privacy") or {}
+    r.check("location off: no fix placed the phone in the zone, so no pause is counted", privacy.get("zone_pauses") == 0, privacy)
+    r.check("location off: stopped by the user", (meta.get("summary") or {}).get("stopped_by") == "user", meta.get("summary"))
+    during = [row["time_utc"] for row in track if off_ms + LOCATION_SWITCH_SLACK_MS < utc_ms(row["time_utc"]) < on_ms]
+    r.check("location off: no fix while location was off", not during, during[:3])
+    r.check("location off: Live and the notification said location was off",
+            result.get("live_location_off_banner") is True and result.get("notification_location_off") is True, result)
+    r.check("location off: Live said the marker waits, then that it was not saved, and so did the notification",
+            result.get("mark_held_message") is True and result.get("mark_dropped_message") is True
+            and result.get("notification_markers_dropped") is True, result)
+    r.check("location off: Session detail says a marker was not saved", result.get("detail_markers_dropped_banner") is True, result)
+
+
 def is_png(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 1_000 and path.read_bytes()[:8] == PNG_SIGNATURE
 
 
-def check_screenshots(out: Path, r: Results) -> None:
+def png_size(path: Path) -> Optional[tuple]:
+    """Width and height from a PNG's IHDR chunk, or None."""
+    header = path.read_bytes()[:24] if path.is_file() else b""
+    if len(header) < 24 or header[:8] != PNG_SIGNATURE or header[12:16] != b"IHDR":
+        return None
+    return int.from_bytes(header[16:20], "big"), int.from_bytes(header[20:24], "big")
+
+
+def device_facts(out: Path) -> dict:
+    path = out / "checks" / "device.txt"
+    facts = {}
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            key, _, value = line.partition("=")
+            facts[key.strip()] = value.strip()
+    return facts
+
+
+def check_screenshots(out: Path, variants: list, r: Results) -> None:
     base = out / "device" / "screenshots"
-    for variant in ("light", "dark", "font130"):
-        missing = [name for name in FIRST_RUN_SCREENS + TOUR_SCREENS if not is_png(base / variant / (name + ".png"))]
-        r.check("screenshots: every screen in %s" % variant, not missing, "missing %s" % missing if missing else "")
+    screen = re.fullmatch(r"(\d+)x(\d+)", device_facts(out).get("screen", ""))
+    upright = (int(screen.group(1)), int(screen.group(2))) if screen else None
+    for variant in variants:
+        turned = variant == "landscape"
+        expected = [name + "-p1" for name in FIRST_RUN_PAGED + TOUR_PAGED] + list(TOUR_SINGLE)
+        if not turned:
+            expected.append(LIVE_TURNED + "-p1")
+        missing = [name for name in expected if not is_png(base / variant / (name + ".png"))]
+        pages = len(list((base / variant).glob("*-p[0-9]*.png"))) if (base / variant).is_dir() else 0
+        r.check("screenshots: every screen in %s, at every scroll position" % variant, not missing,
+                "missing %s" % missing if missing else "%d pages" % pages)
+        if upright:
+            want = (upright[1], upright[0]) if turned else upright
+            sample = base / variant / "03-live-p1.png"
+            r.check("screenshots: %s is taken on the %dx%d px screen%s" % (variant, want[0], want[1], ", turned" if turned else ""),
+                    png_size(sample) == want, "%s is %s" % (sample.name, png_size(sample)))
     walk_result = out / "device" / "walk-result.json"
     expected = list(WALK_SCREENS)
     if walk_result.is_file() and read_json(walk_result).get("prestart_sheet") is True:
         expected.append("07-prestart-sheet")
     missing = [name for name in expected if not is_png(base / "walk" / (name + ".png"))]
     r.check("screenshots: every step of the walk", not missing, "missing %s" % missing if missing else "")
+    missing = [name for name in LOCATION_OFF_SCREENS if not is_png(base / "location-off" / (name + ".png"))]
+    r.check("screenshots: location off, the dropped marker and its Session detail", not missing, "missing %s" % missing if missing else "")
     r.check("screenshots: Live after the kill -9 relaunch", is_png(base / "recovery" / "16-live-recovered-kill_9.png"))
 
 
@@ -685,9 +794,12 @@ def cmd_check(args: argparse.Namespace) -> int:
     r = Results()
     expect_lte_nr = args.expect_lte_nr == "true"
     print("expect LTE and NR cells: %s" % expect_lte_nr)
+    variants = args.variants.split()
+    print("variants: %s" % " ".join(variants))
     check_walk(out, repo, args.walk_seconds, expect_lte_nr, r)
+    check_location_off(out, r)
     check_recovered(out, repo, r)
-    check_screenshots(out, r)
+    check_screenshots(out, variants, r)
     failures = r.failures
     print("%d checks, %d failed" % (len(r.items), len(failures)))
     (out / "checks").mkdir(parents=True, exist_ok=True)
@@ -717,6 +829,8 @@ def main(argv: Optional[list] = None) -> int:
     check.add_argument("--walk-seconds", type=int, default=180)
     check.add_argument("--expect-lte-nr", choices=("true", "false"), default="true",
                        help="false when the modem reports no LTE or NR cell (run_e2e.sh reads it from the registry)")
+    check.add_argument("--variants", default="light dark font130",
+                       help="the looks the first run and the screen tour were taken in, space separated")
     check.set_defaults(func=cmd_check)
     args = parser.parse_args(argv)
     return args.func(args)

@@ -18,9 +18,10 @@ import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 
 /**
- * A screenshot of every screen after the walk, in the variant `-e variant` names: Live with its serving cell, the Start
- * dialog, Sessions, the walk's detail and its Share card, Readiness, Probe, Settings and About. The disclosure and
- * Permissions screens are taken on a first run by [FirstRunScreensTest]. `-e dir_name` is the walk's session.
+ * Every screen after the walk, at every scroll position ([Screens.shotFull]), in the variant `-e variant` names: Live with
+ * its serving cell, the Start dialog, Sessions, the walk's detail, Readiness, Probe, Settings and About. An upright variant
+ * also turns the phone for Live, the screen a car mount holds; the landscape variant takes every screen turned. The
+ * disclosure and Permissions screens are taken on a first run by [FirstRunScreensTest]. `-e dir_name` is the walk's session.
  */
 @RunWith(AndroidJUnit4::class)
 class ScreenTourTest {
@@ -39,19 +40,14 @@ class ScreenTourTest {
             ?: throw AssertionError("Session $dirName is missing or unreadable")
 
         screens.awaitLiveRadio(E2e.expectLteNr())
-        screens.shot("03-live")
-        // Below the first screen: the trend, then the cells (the serving cell's card when Android reports one, and the
-        // neighbours, which every leg shows).
-        screens.scrollTo(hasText(E2e.string(R.string.live_section_chart)))
-        screens.shot("03c-live-trend")
-        screens.scrollTo(hasText(E2e.string(R.string.live_section_neighbours)))
-        screens.shot("03d-live-cells")
-        screens.scrollToTop()
-        // A phone in landscape: two panes, with the session buttons beside them instead of under them.
-        screens.inLandscape {
-            screens.awaitText(R.string.live_title)
-            screens.await(hasText(E2e.string(R.string.live_start)) and hasClickAction())
-            screens.shot("03e-live-landscape")
+        screens.shotFull("03-live")
+        if (!variant.landscape) {
+            // A phone in landscape: two panes, with the session buttons beside them instead of under them.
+            screens.inLandscape {
+                screens.awaitText(R.string.live_title)
+                screens.await(hasText(E2e.string(R.string.live_start)) and hasClickAction())
+                screens.shotFull("03e-live-landscape")
+            }
         }
         screens.awaitText(R.string.live_title)
         screens.click(hasText(E2e.string(R.string.live_start)) and hasClickAction())
@@ -63,12 +59,10 @@ class ScreenTourTest {
         screens.click(hasContentDescription(E2e.string(R.string.live_action_sessions)) and hasClickAction())
         val row = hasText(sessionName) and hasClickAction()
         screens.await(row)
-        screens.shot("04-sessions")
+        screens.shotFull("04-sessions")
         screens.click(row)
         screens.awaitText(R.string.detail_section_overview)
-        screens.shot("05-session-detail")
-        screens.scrollTo(hasText(E2e.string(R.string.detail_section_share)))
-        screens.shot("05b-session-share")
+        screens.shotFull("05-session-detail")
         screens.back()
         screens.await(row)
         screens.back()
@@ -80,11 +74,11 @@ class ScreenTourTest {
         visit(screens, R.string.live_menu_about, R.string.about_account_title, "09-about")
     }
 
-    /** Opens [menuItem] from Live, waits for [shows], takes [shot] and returns to Live. */
+    /** Opens [menuItem] from Live, waits for [shows], takes [shot] at every scroll position and returns to Live. */
     private fun visit(screens: Screens, @StringRes menuItem: Int, @StringRes shows: Int, shot: String) {
         screens.openMenuItem(menuItem)
         screens.awaitText(shows)
-        screens.shot(shot)
+        screens.shotFull(shot)
         screens.back()
         screens.awaitText(R.string.live_title)
     }

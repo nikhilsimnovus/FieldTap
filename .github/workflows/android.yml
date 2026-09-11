@@ -108,9 +108,12 @@ jobs:
           if-no-files-found: ignore
 
   # The end-to-end proof, android/e2e/run_e2e.sh: the real UI from first run to a shared zip while a GPS walk and signal
-  # changes are fed, process death and recovery, screenshots of every screen in light, dark and font scale 1.3, and
-  # fieldtap validate and report on every session. API 36 is the version the app targets and must pass; API 31 is its
-  # minSdk. The capability probe runs after the proof has passed, on the same emulator.
+  # changes are fed, location services switched off mid-session, process death and recovery, screenshots of every screen
+  # at every scroll position, and fieldtap validate and report on every session. API 36 is the version the app targets and
+  # must pass; it runs on a Pixel 7 screen (1080 x 2400 px at 420 dpi, 411 x 914 dp), the size the design is judged at,
+  # with screenshots in light, dark, font scale 1.3 and landscape. API 31 is its minSdk; it keeps the emulator's default
+  # 320 x 640 dp screen, smaller than any current phone, as the robustness check, in light, dark and font scale 1.3. The
+  # capability probe runs after the proof has passed, on the same emulator.
   emulator:
     name: emulator (API ${{ matrix.api }})
     needs: build
@@ -119,7 +122,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [36, 31]
+        include:
+          - api: 36
+            profile: pixel_7
+            variants: light dark font130 landscape
+          - api: 31
+            profile: ""
+            variants: light dark font130
     steps:
       - uses: actions/checkout@v7
 
@@ -148,10 +157,13 @@ jobs:
           PROBE_OUT: ${{ runner.temp }}/emulator-probe
           PYTHON: python
           WALK_SECONDS: "180"
+          VARIANTS: ${{ matrix.variants }}
         with:
           api-level: ${{ matrix.api }}
           target: google_apis
           arch: x86_64
+          # An empty profile keeps the emulator's default screen.
+          profile: ${{ matrix.profile }}
           cores: 3
           ram-size: 4096M
           disk-size: 8G
@@ -231,8 +243,8 @@ jobs:
   # on the release PC (android/README.md, "Release key"): no keystore or password is kept anywhere.
   # android/e2e/release_smoke.sh drives the APK with nothing but "uiautomator dump" and "input tap" on visible text:
   # first run, the version in About, a session with tests while a GPS walk is fed, Stop, then fieldtap validate --upload
-  # and fieldtap report on the pulled session. API 36 is the target; API 31, the minSdk, runs R8's code paths for older
-  # platforms.
+  # and fieldtap report on the pulled session. API 36 is the target, on the same Pixel 7 screen as its end-to-end leg; API
+  # 31, the minSdk, runs R8's code paths for older platforms on the small default screen.
   release:
     name: release build (API ${{ matrix.api }})
     runs-on: ubuntu-latest
@@ -240,7 +252,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [36, 31]
+        include:
+          - api: 36
+            profile: pixel_7
+          - api: 31
+            profile: ""
     steps:
       - uses: actions/checkout@v7
 
@@ -312,6 +328,7 @@ jobs:
           api-level: ${{ matrix.api }}
           target: google_apis
           arch: x86_64
+          profile: ${{ matrix.profile }}
           cores: 3
           ram-size: 4096M
           disk-size: 8G

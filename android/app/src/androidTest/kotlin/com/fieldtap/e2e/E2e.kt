@@ -1,6 +1,8 @@
 package com.fieldtap.e2e
 
 import android.app.Instrumentation
+import android.app.Notification
+import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -9,17 +11,21 @@ import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.StringRes
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onFirst
@@ -27,8 +33,10 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.printToLog
+import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
@@ -37,6 +45,7 @@ import com.fieldtap.R
 import com.fieldtap.app.AppGraph
 import com.fieldtap.app.appGraph
 import com.fieldtap.format.JsonText
+import com.fieldtap.service.SessionService
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -167,25 +176,50 @@ object E2e {
     fun dismissNotRespondingDialog() {
         device.findObject(By.res("android", "aerr_wait"))?.click()
     }
+
+    /** The running session's notification as Android holds it for this app, or null while none is posted. */
+    fun sessionNotification(): Notification? =
+        context.getSystemService(NotificationManager::class.java)?.activeNotifications
+            ?.firstOrNull { it.id == SessionService.NOTIFICATION_ID }
+            ?.notification
+
+    fun notificationTitle(notification: Notification?): String? =
+        notification?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+
+    fun notificationText(notification: Notification?): String? =
+        notification?.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()
 }
 
-/** The look a run is checked in. android/e2e/run_e2e.sh applies it with `cmd uimode night` and `font_scale`. */
-enum class Variant(val group: String, private val night: Boolean, private val fontScale: Float) {
+/**
+ * The look a run is checked in. android/e2e/run_e2e.sh applies it with `cmd uimode night`, `font_scale` and
+ * `user_rotation`.
+ */
+enum class Variant(val group: String, private val night: Boolean, private val fontScale: Float, val landscape: Boolean = false) {
     LIGHT("light", night = false, fontScale = 1.0f),
     DARK("dark", night = true, fontScale = 1.0f),
     FONT_130("font130", night = false, fontScale = 1.3f),
+
+    /** The phone turned on its side, as in a car mount. */
+    LANDSCAPE("landscape", night = false, fontScale = 1.0f, landscape = true),
     ;
 
-    /** Fails unless the app's process started in this variant's night mode and font scale. */
+    /** Fails unless the app's process started in this variant's night mode and font scale, with the screen turned as it asks. */
     fun assertApplied() {
         val configuration = E2e.context.resources.configuration
         val nightNow = (configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         assertEquals("night mode of variant $group", night, nightNow)
         assertEquals("font scale of variant $group", fontScale, configuration.fontScale, FONT_SCALE_TOLERANCE)
+        val deadline = SystemClock.elapsedRealtime() + ROTATION_WAIT_MS
+        while (turned() != landscape && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(ROTATION_POLL_MS)
+        assertEquals("landscape in variant $group", landscape, turned())
     }
+
+    private fun turned(): Boolean = E2e.device.displayWidth > E2e.device.displayHeight
 
     companion object {
         private const val FONT_SCALE_TOLERANCE = 0.01f
+        private const val ROTATION_WAIT_MS = 10_000L
+        private const val ROTATION_POLL_MS = 200L
 
         /** The variant named by `-e variant light|dark|font130`. */
         fun fromArguments(): Variant {
@@ -326,6 +360,52 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
         E2e.screenshot(group, name)
     }
 
+    /**
+     * The screen at every scroll position, as `[name]-p1`, `[name]-p2` and so on. From the top, each page scrolls every
+     * vertical list of the screen (not of a dialog) down by its own height less [PAGE_OVERLAP], so a line cut at the bottom
+     * of one page is whole on the next, until none can scroll further or [maxPages] were taken. The lists end at the top
+     * again. Two panes side by side page together.
+     */
+    fun shotFull(name: String, maxPages: Int = MAX_PAGES) {
+        scrollListsToTop()
+        var page = 1
+        shot("$name-p$page")
+        while (page < maxPages && scrollListsOnePage()) {
+            page++
+            shot("$name-p$page")
+        }
+        scrollListsToTop()
+    }
+
+    /** Scrolls each list that can go further by one page; false when none could. */
+    private fun scrollListsOnePage(): Boolean {
+        val lists = compose.onAllNodes(PAGED_LIST)
+        val overlapPx = with(compose.density) { PAGE_OVERLAP.toPx() }
+        var moved = false
+        lists.fetchSemanticsNodes().forEachIndexed { index, node ->
+            val range = node.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) ?: return@forEachIndexed
+            val step = node.boundsInRoot.height - overlapPx
+            if (range.value() >= range.maxValue() || step <= 0f) return@forEachIndexed
+            lists[index].performSemanticsAction(SemanticsActions.ScrollBy) { scrollBy -> scrollBy(0f, step) }
+            moved = true
+        }
+        compose.waitForIdle()
+        return moved
+    }
+
+    private fun scrollListsToTop() {
+        val lists = compose.onAllNodes(PAGED_LIST)
+        lists.fetchSemanticsNodes().forEachIndexed { index, node ->
+            if (node.config.getOrNull(SemanticsActions.ScrollToIndex) != null) {
+                lists[index].performScrollToIndex(0)
+            } else {
+                val offset = node.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)?.value?.invoke() ?: 0f
+                if (offset > 0f) lists[index].performSemanticsAction(SemanticsActions.ScrollBy) { scrollBy -> scrollBy(0f, -offset) }
+            }
+        }
+        compose.waitForIdle()
+    }
+
     /** Scrolls the first scrolling list of the screen back to its top. */
     fun scrollToTop() {
         compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(0)
@@ -420,6 +500,17 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
 
         /** The start of Compose testing's message when no hierarchy of the app is reachable. */
         private const val NO_HIERARCHY = "No compose hierarchies found"
+
+        /** More pages than any screen of the app takes at font scale 1.3 on a small phone. */
+        const val MAX_PAGES: Int = 8
+
+        /** What one page of [shotFull] repeats of the page before it. */
+        private val PAGE_OVERLAP = 48.dp
+
+        /** A vertical list or scrolling column of the screen itself, not of a dialog over it. */
+        private val PAGED_LIST: SemanticsMatcher = hasScrollAction() and
+            SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange) and
+            !hasAnyAncestor(isDialog())
 
         private const val PLACEHOLDER = "\u0000"
 

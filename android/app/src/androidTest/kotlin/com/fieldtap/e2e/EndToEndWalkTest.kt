@@ -1,5 +1,7 @@
 package com.fieldtap.e2e
 
+import android.accessibilityservice.AccessibilityService
+import android.app.Notification
 import android.os.Build
 import android.os.SystemClock
 import android.view.WindowManager
@@ -51,7 +53,8 @@ import org.junit.runner.RunWith
  *    cell, as on the API 31 emulator), says Android reports no LTE or NR serving cell.
  * 4. Settings: ping `10.0.2.2` (the emulator drops ICMP beyond its NAT) and a 1 MB download.
  * 5. A session with tests starts, through the pre-start sheet's "Start anyway" when it shows.
- * 6. A marker with a note; recording for `-e walk_seconds` (default 180).
+ * 6. A marker with a note on Live, and one from the session notification's Mark, whose text must then say which marker
+ *    was added and when, for a few seconds; recording for `-e walk_seconds` (default 180).
  * 7. Stop; the session's detail; a zip is built, its SHA-256 on screen checked against the file, and shared.
  *
  * The result (session directory, marker note, test targets, zip name and hashes) is written to
@@ -89,6 +92,7 @@ class EndToEndWalkTest {
         val dirName = startSession()
         val recordingSinceMs = SystemClock.elapsedRealtime()
         addMarker(recordingSinceMs)
+        markFromNotification()
         keepRecording(recordingSinceMs, walkMs, expectLteNr)
         stopSession(dirName, recordingSinceMs)
         exportAndShare(dirName)
@@ -279,6 +283,52 @@ class EndToEndWalkTest {
         save()
     }
 
+    /**
+     * Marks from the session notification, as a phone in a pocket would: the notification's own Mark action is sent, and its
+     * text must then say that marker 2 was added and when, then go back to what the session measures within seconds.
+     */
+    private fun markFromNotification() {
+        val markLabel = E2e.string(R.string.notification_action_mark)
+        var mark: Notification.Action? = null
+        screens.waitFor("the session notification's Mark action", NOTIFICATION_WAIT_MS) {
+            mark = E2e.sessionNotification()?.actions?.firstOrNull { it.title?.toString() == markLabel }
+            mark != null
+        }
+        val parts = E2e.string(R.string.notification_marker_added, 2, PLACEHOLDER).split(PLACEHOLDER, limit = 2)
+        val confirmation = Regex(Regex.escape(parts[0]) + ".+" + Regex.escape(parts.getOrElse(1) { "" }))
+        val sentAtMs = E2e.graph.clock.wallMillis()
+        checkNotNull(mark).actionIntent.send()
+        var text: String? = null
+        screens.waitFor("the notification to confirm marker 2", NOTIFICATION_WAIT_MS) {
+            text = E2e.notificationText(E2e.sessionNotification())
+            text?.let { confirmation.matches(it) } == true
+        }
+        result["notification_marker_sent_utc_ms"] = sentAtMs
+        result["notification_marker_text"] = text
+        save()
+
+        // Where the engineer reads it: the notification shade, pulled down over the app.
+        val device = E2e.device
+        device.openNotification()
+        device.wait(Until.hasObject(By.textStartsWith(parts[0])), SHADE_WAIT_MS)
+        E2e.screenshot(GROUP, "09b-notification-marker")
+        E2e.instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+        if (device.wait(Until.hasObject(By.pkg(E2e.context.packageName)), SHADE_WAIT_MS) != true) E2e.shell("cmd statusbar collapse")
+        assertTrue(
+            "The app did not come back from the notification shade",
+            device.wait(Until.hasObject(By.pkg(E2e.context.packageName)), SHARE_WAIT_MS) == true,
+        )
+
+        var after: String? = null
+        screens.waitFor("the notification to leave the marker confirmation", NOTICE_CLEARS_MS) {
+            after = E2e.notificationText(E2e.sessionNotification())
+            after?.let { !confirmation.matches(it) } == true
+        }
+        result["notification_text_after"] = after
+        result["notification_marker_text_cleared"] = true
+        save()
+    }
+
     /** Keeps the session recording until [walkMs] after it started, failing at once if it stops by itself. */
     private fun keepRecording(recordingSinceMs: Long, walkMs: Long, expectLteNr: Boolean) {
         var midwayShot = false
@@ -408,6 +458,14 @@ class EndToEndWalkTest {
         const val STOP_WAIT_MS = 60_000L
         const val EXPORT_WAIT_MS = 60_000L
         const val SHARE_WAIT_MS = 15_000L
+
+        /** The notification is rebuilt at most every 2 s. */
+        const val NOTIFICATION_WAIT_MS = 15_000L
+
+        /** The marker confirmation shows for 6 s, and the notification is rebuilt at most every 2 s. */
+        const val NOTICE_CLEARS_MS = 20_000L
+        const val SHADE_WAIT_MS = 5_000L
+        const val PLACEHOLDER = "\u0000"
 
         /** The chooser: package `android` up to Android 13, the intent resolver from Android 14. */
         val SHARE_SHEET: Pattern = Pattern.compile("android|com\\.android\\.intentresolver")
