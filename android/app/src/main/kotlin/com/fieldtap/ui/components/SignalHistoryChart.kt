@@ -61,6 +61,8 @@ data class SignalChartLabels(
     val windowEnd: String,
     /** Inside an empty panel: "No fresh samples yet". */
     val noData: String,
+    /** In place of a panel whose values the serving cell does not report: "Not reported by this cell". */
+    val notReported: String = noData,
 )
 
 /**
@@ -84,6 +86,7 @@ fun SignalHistoryChart(
     modifier: Modifier = Modifier,
     windowMs: Long = LiveStateReducer.WINDOW_MS,
     gapThresholdMs: Long = ChartMath.DEFAULT_GAP_THRESHOLD_MS,
+    sinrReported: Boolean = true,
 ) {
     val colors = FieldTapDesign.colors
     Column(
@@ -105,18 +108,23 @@ fun SignalHistoryChart(
             noDataText = labels.noData,
         )
         Spacer(modifier = Modifier.height(Spacing.Xs))
-        ChartPanelHeader(labels.sinrTitle, labels.sinrUnit, ChartMath.stats(sinr, nowElapsedMs, windowMs), colors.chartSinr)
-        TimeSeriesChart(
-            points = sinr,
-            nowElapsedMs = nowElapsedMs,
-            range = SignalScale.SINR_DISPLAY_RANGE,
-            lineColor = colors.chartSinr,
-            referenceLines = SignalScale.SINR_THRESHOLDS.boundaries,
-            keyReference = SignalScale.keyReference(SignalMetric.SINR),
-            windowMs = windowMs,
-            gapThresholdMs = gapThresholdMs,
-            noDataText = labels.noData,
-        )
+        if (sinrReported) {
+            ChartPanelHeader(labels.sinrTitle, labels.sinrUnit, ChartMath.stats(sinr, nowElapsedMs, windowMs), colors.chartSinr)
+            TimeSeriesChart(
+                points = sinr,
+                nowElapsedMs = nowElapsedMs,
+                range = SignalScale.SINR_DISPLAY_RANGE,
+                lineColor = colors.chartSinr,
+                referenceLines = SignalScale.SINR_THRESHOLDS.boundaries,
+                keyReference = SignalScale.keyReference(SignalMetric.SINR),
+                windowMs = windowMs,
+                gapThresholdMs = gapThresholdMs,
+                noDataText = labels.noData,
+            )
+        } else {
+            // An empty panel would say "not yet" for a value this cell never reports: one line says so instead.
+            ChartPanelHeader(labels.sinrTitle, labels.sinrUnit, stats = null, lineColor = colors.chartSinr, trailing = labels.notReported)
+        }
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             Row(modifier = Modifier.fillMaxWidth()) {
                 Text(labels.windowStart, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -128,7 +136,7 @@ fun SignalHistoryChart(
 }
 
 @Composable
-private fun ChartPanelHeader(title: String, unit: String, stats: SeriesStats?, lineColor: Color) {
+private fun ChartPanelHeader(title: String, unit: String, stats: SeriesStats?, lineColor: Color, trailing: String? = null) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
         Box(
             modifier = Modifier
@@ -143,6 +151,8 @@ private fun ChartPanelHeader(title: String, unit: String, stats: SeriesStats?, l
                 style = FieldTapDesign.numeric.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,
             )
+        } else if (trailing != null) {
+            Text(text = trailing, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

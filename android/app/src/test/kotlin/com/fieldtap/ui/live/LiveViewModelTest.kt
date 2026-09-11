@@ -277,6 +277,47 @@ class LiveViewModelTest {
     }
 
     @Test
+    fun aMarkTappedWhileInputsWaitForAFixSaysItIsKeptAndSaysWhenAPauseDropsIt() = runTest(main.dispatcher) {
+        graph.sessionControl.status.value = SessionStatus.Recording(TestData.snapshot().copy(holdingInputs = true))
+        val viewModel = collected()
+        runCurrent()
+
+        viewModel.mark("door 3")
+        runCurrent()
+        assertEquals(listOf<String?>("door 3"), graph.sessionControl.marks)
+        assertEquals(LiveMessage.MARK_HELD, viewModel.state.value.message?.message)
+
+        // No fix came: logging paused and the recorder dropped the marker.
+        graph.sessionControl.status.value =
+            SessionStatus.Recording(TestData.snapshot(paused = true).copy(waitingForLocation = true, markersDropped = 1))
+        runCurrent()
+        assertEquals(LiveMessage.MARK_DROPPED, viewModel.state.value.message?.message)
+
+        viewModel.mark("again")
+        runCurrent()
+        assertEquals(LiveMessage.PAUSED_NO_FIX, viewModel.state.value.message?.message)
+        assertEquals(1, graph.sessionControl.marks.size)
+    }
+
+    @Test
+    fun aMarkerDroppedAtStopIsSaidOnceAndACountFromBeforeTheScreenOpenedIsNot() = runTest(main.dispatcher) {
+        graph.sessionControl.status.value = SessionStatus.Recording(TestData.snapshot().copy(markersDropped = 1))
+        val viewModel = collected()
+        runCurrent()
+        assertNull(viewModel.state.value.message)
+
+        graph.sessionControl.lastOutcome.value = TestData.outcome(stoppedBy = "user").copy(markersDropped = 2)
+        graph.sessionControl.status.value = SessionStatus.Idle
+        runCurrent()
+        assertEquals(LiveMessage.MARK_DROPPED, viewModel.state.value.message?.message)
+        val said = viewModel.state.value.message?.id
+
+        graph.sessionControl.status.value = SessionStatus.Stopping(TestData.snapshot().copy(markersDropped = 2))
+        runCurrent()
+        assertEquals("the same count is not said twice", said, viewModel.state.value.message?.id)
+    }
+
+    @Test
     fun markWithoutASessionOrRefusedByTheRecorderSaysSo() = runTest(main.dispatcher) {
         val viewModel = collected()
 

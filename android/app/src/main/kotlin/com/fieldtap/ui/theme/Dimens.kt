@@ -85,6 +85,15 @@ object Sizes {
 
     /** From this window width the gutter is [Spacing.ScreenGutterWide] (tablets, most landscape phones). */
     val WideLayoutMinWidth: Dp = 600.dp
+
+    /**
+     * A wide window lower than this (a phone in landscape) has no room for a bottom action bar under its content: primary
+     * actions move to a column beside it.
+     */
+    val ShortWindowMaxHeight: Dp = 480.dp
+
+    /** The column that holds a screen's primary actions beside its content in a short, wide window. */
+    val ActionRailWidth: Dp = 200.dp
 }
 
 /** Animation durations in milliseconds. Keep motion short: this is an instrument, not a toy. */

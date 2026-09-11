@@ -1,5 +1,6 @@
 package com.fieldtap.ui.live
 
+import androidx.compose.ui.unit.Dp
 import com.fieldtap.app.SessionStatus
 import com.fieldtap.core.input.DataConnState
 import com.fieldtap.core.input.DataStateSnapshot
@@ -11,12 +12,16 @@ import com.fieldtap.core.input.RadioListener
 import com.fieldtap.core.input.ServiceRegState
 import com.fieldtap.core.input.ServiceStateSnapshot
 import com.fieldtap.core.input.SignalSnapshot
+import com.fieldtap.core.live.ChartPoint
 import com.fieldtap.core.live.LiveCell
 import com.fieldtap.core.live.LiveState
+import com.fieldtap.core.live.LiveStateReducer
 import com.fieldtap.core.radio.NetworkTypeNames
 import com.fieldtap.core.radio.ServingCellSelector
 import com.fieldtap.format.Rat
+import com.fieldtap.ui.components.ChartMath
 import com.fieldtap.ui.components.SessionButtonState
+import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.StatusTone
 
 /** Why Android refreshes cell info at the interval shown (docs/APP-PLAN.md, the Android facts). */
@@ -255,6 +260,19 @@ object LivePresentation {
         }
     }
 
+    /**
+     * The serving cell does not report SINR: RSRP samples fall in the chart's window and no SINR sample does. Both come
+     * from the same samples, so this is not "no fresh samples yet"; before any RSRP it is.
+     */
+    fun sinrNotReported(rsrp: List<ChartPoint>, sinr: List<ChartPoint>, nowElapsedMs: Long, windowMs: Long = LiveStateReducer.WINDOW_MS): Boolean =
+        ChartMath.stats(rsrp, nowElapsedMs, windowMs) != null && ChartMath.stats(sinr, nowElapsedMs, windowMs) == null
+
+    /**
+     * A wide window too low for a bottom action bar under two panes, a phone in landscape: Start, Stop and Mark sit in a
+     * column beside the content, so the serving cell's value stays in view.
+     */
+    fun actionsBesideContent(width: Dp, height: Dp): Boolean = width >= Sizes.WideLayoutMinWidth && height < Sizes.ShortWindowMaxHeight
+
     /** Mark writes an event only while recording outside a privacy zone. */
     fun markAllowed(status: SessionStatus): Boolean = status is SessionStatus.Recording && !status.snapshot.paused
 
@@ -264,6 +282,18 @@ object LivePresentation {
 
     /** The running session writes nothing until a location fix shows the phone outside its privacy zones. */
     fun waitingForLocation(status: SessionStatus): Boolean = status is SessionStatus.Recording && status.snapshot.waitingForLocation
+
+    /**
+     * A mark accepted now waits, with every other input, for a location fix that shows the phone outside its privacy
+     * zones, and a pause may still drop it: the confirmation must say so.
+     */
+    fun markWaitsForLocation(status: SessionStatus): Boolean =
+        status is SessionStatus.Recording && !status.snapshot.paused &&
+            (status.snapshot.holdingInputs || status.snapshot.waitingForLocation)
+
+    /** Paused because no location fix showed the phone outside its privacy zones. */
+    fun pausedWaitingForLocation(status: SessionStatus): Boolean =
+        status is SessionStatus.Recording && status.snapshot.paused && status.snapshot.waitingForLocation
 
     /** Location services are off, as the Live feed or the running session learnt it: nothing new can be measured. */
     fun locationOff(live: LiveState, status: SessionStatus): Boolean =

@@ -12,12 +12,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -55,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -107,10 +110,10 @@ import com.fieldtap.ui.components.FieldTapTopBar
 import com.fieldtap.ui.components.KeyValueRow
 import com.fieldtap.ui.components.LimitsStatementCard
 import com.fieldtap.ui.components.MetricEmphasis
-import com.fieldtap.ui.components.MetricGrid
 import com.fieldtap.ui.components.MetricTile
 import com.fieldtap.ui.components.ReadinessProblem
 import com.fieldtap.ui.components.ReadinessSheet
+import com.fieldtap.ui.components.SecondaryMetricTile
 import com.fieldtap.ui.components.SectionCard
 import com.fieldtap.ui.components.SectionDivider
 import com.fieldtap.ui.components.SessionButton
@@ -123,6 +126,7 @@ import com.fieldtap.ui.components.StatusBanner
 import com.fieldtap.ui.components.StatusChip
 import com.fieldtap.ui.components.ToggleRow
 import com.fieldtap.ui.components.TopBarAction
+import com.fieldtap.ui.components.rememberTopBarScroll
 import com.fieldtap.ui.components.statusIcon
 import com.fieldtap.ui.settings.TestSettingsRules
 import com.fieldtap.ui.theme.FieldTapDesign
@@ -180,7 +184,22 @@ data class LiveUiState(
 }
 
 /** A short confirmation or failure shown in the snackbar. */
-enum class LiveMessage { MARKED, NOT_RECORDING, PAUSED, START_FAILED, STOP_FAILED }
+enum class LiveMessage {
+    MARKED,
+
+    /** Accepted, but written only once a location fix shows it was tapped outside the privacy zones. */
+    MARK_HELD,
+
+    /** A marker accepted earlier was dropped: no fix showed it was tapped outside the privacy zones. */
+    MARK_DROPPED,
+    NOT_RECORDING,
+    PAUSED,
+
+    /** Marks are off while logging waits, paused, for a fix that shows the phone outside its privacy zones. */
+    PAUSED_NO_FIX,
+    START_FAILED,
+    STOP_FAILED,
+}
 
 /** A [LiveMessage] with an id, so the same message twice is shown twice. */
 data class LiveMessageEvent(val id: Long, val message: LiveMessage)
@@ -238,6 +257,30 @@ class LiveViewModel(private val graph: AppGraph) : ViewModel() {
                 recovered = graph.recovery.closed.value,
             ),
         )
+
+    init {
+        // A marker the recorder accepted and a privacy pause then dropped must not go unnoticed: the running session's
+        // snapshots and its outcome count them, and each rise is said once.
+        val reported = HashMap<String, Int>()
+        fun onMarkersDropped(dirName: String, count: Int) {
+            val before = reported[dirName]
+            reported[dirName] = maxOf(before ?: count, count)
+            if (before != null && count > before) post(LiveMessage.MARK_DROPPED)
+        }
+        viewModelScope.launch {
+            graph.sessionControl.status.collect { status ->
+                val snapshot = when (status) {
+                    is SessionStatus.Recording -> status.snapshot
+                    is SessionStatus.Stopping -> status.snapshot
+                    else -> null
+                }
+                if (snapshot != null) onMarkersDropped(snapshot.dirName, snapshot.markersDropped)
+            }
+        }
+        viewModelScope.launch {
+            graph.sessionControl.lastOutcome.collect { outcome -> if (outcome != null) onMarkersDropped(outcome.dirName, outcome.markersDropped) }
+        }
+    }
 
     /** Turns walk mode on or off for this screen; until then it follows the Settings default. */
     fun setWalkMode(on: Boolean) {
@@ -306,9 +349,10 @@ class LiveViewModel(private val graph: AppGraph) : ViewModel() {
     fun mark(note: String?) {
         val status = graph.sessionControl.status.value
         if (!LivePresentation.markAllowed(status)) {
-            post(if (LivePresentation.pausedInZone(status)) LiveMessage.PAUSED else LiveMessage.NOT_RECORDING)
+            post(refusedMark(status))
             return
         }
+        val waits = LivePresentation.markWaitsForLocation(status)
         val accepted = try {
             graph.sessionControl.mark(note?.trim()?.takeIf { it.isNotEmpty() })
         } catch (e: RuntimeException) {
@@ -316,11 +360,17 @@ class LiveViewModel(private val graph: AppGraph) : ViewModel() {
         }
         post(
             when {
-                accepted -> LiveMessage.MARKED
-                LivePresentation.pausedInZone(graph.sessionControl.status.value) -> LiveMessage.PAUSED
-                else -> LiveMessage.NOT_RECORDING
+                // Said so, because a pause may still drop it; MARK_DROPPED follows if one does.
+                accepted -> if (waits) LiveMessage.MARK_HELD else LiveMessage.MARKED
+                else -> refusedMark(graph.sessionControl.status.value)
             },
         )
+    }
+
+    private fun refusedMark(status: SessionStatus): LiveMessage = when {
+        LivePresentation.pausedInZone(status) -> LiveMessage.PAUSED
+        LivePresentation.pausedWaitingForLocation(status) -> LiveMessage.PAUSED_NO_FIX
+        else -> LiveMessage.NOT_RECORDING
     }
 
     fun stop() {
@@ -496,10 +546,11 @@ fun SignalChart(
     } else {
         stringResource(R.string.chart_summary_rsrp_empty)
     }
-    val sinrSummary = if (sinrStats != null) {
-        stringResource(R.string.chart_summary_sinr, sinrStats.latest, sinrStats.min, sinrStats.max)
-    } else {
-        stringResource(R.string.chart_summary_sinr_empty)
+    val sinrNotReported = LivePresentation.sinrNotReported(rsrp, sinr, nowElapsedMs, windowMs)
+    val sinrSummary = when {
+        sinrStats != null -> stringResource(R.string.chart_summary_sinr, sinrStats.latest, sinrStats.min, sinrStats.max)
+        sinrNotReported -> stringResource(R.string.chart_summary_sinr_not_reported)
+        else -> stringResource(R.string.chart_summary_sinr_empty)
     }
     SignalHistoryChart(
         rsrp = rsrp,
@@ -513,11 +564,13 @@ fun SignalChart(
             windowStart = stringResource(R.string.chart_window_start),
             windowEnd = stringResource(R.string.chart_window_end),
             noData = stringResource(R.string.chart_no_data),
+            notReported = stringResource(R.string.chart_not_reported),
         ),
         summary = "$rsrpSummary $sinrSummary",
         modifier = modifier,
         windowMs = windowMs,
         gapThresholdMs = gapThresholdMs,
+        sinrReported = !sinrNotReported,
     )
 }
 
@@ -613,43 +666,66 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
         }
     }
 
-    Scaffold(
-        modifier = modifier,
-        topBar = {
-            Column {
-                FieldTapTopBar(
-                    title = stringResource(R.string.live_title),
-                    actions = {
-                        TopBarAction(
-                            icon = FieldTapIcons.Sessions,
-                            contentDescription = stringResource(R.string.live_action_sessions),
-                            onClick = actions.onOpenSessions,
-                        )
-                        LiveOverflowMenu(actions)
-                    },
-                )
-                // Pinned under the bar while a session runs: whether it is collecting stays in view however far the list scrolls.
-                LivePresentation.recordingStrip(state.status, state.live)?.let { RecordingStatusStrip(it) }
-            }
-        },
-        bottomBar = {
-            LiveActionBar(
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        // A phone in landscape: a bottom bar would leave too little height for the serving cell's value.
+        val actionsBeside = LivePresentation.actionsBesideContent(maxWidth, maxHeight)
+        val topBarScroll = rememberTopBarScroll()
+        Scaffold(
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(topBarScroll.connection),
+            topBar = {
+                Column {
+                    FieldTapTopBar(
+                        scroll = topBarScroll,
+                        title = stringResource(R.string.live_title),
+                        actions = {
+                            TopBarAction(
+                                icon = FieldTapIcons.Sessions,
+                                contentDescription = stringResource(R.string.live_action_sessions),
+                                onClick = actions.onOpenSessions,
+                            )
+                            LiveOverflowMenu(actions)
+                        },
+                    )
+                    // Pinned under the bar while a session runs: whether it is collecting stays in view however far the list scrolls.
+                    LivePresentation.recordingStrip(state.status, state.live)?.let { RecordingStatusStrip(it) }
+                }
+            },
+            bottomBar = {
+                if (!actionsBeside) {
+                    LiveActionBar(
+                        state = state,
+                        buttonState = buttonState,
+                        onStart = { startDialogOpen = true },
+                        onStop = { stopDialogOpen = true },
+                        onMark = { markDialogOpen = true },
+                    )
+                }
+            },
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            containerColor = MaterialTheme.colorScheme.background,
+        ) { padding ->
+            LiveList(
                 state = state,
-                buttonState = buttonState,
-                onStart = { startDialogOpen = true },
-                onStop = { stopDialogOpen = true },
-                onMark = { markDialogOpen = true },
+                actions = actions,
+                requestPreciseLocation = requestPreciseLocation,
+                modifier = Modifier.padding(padding),
+                actionsBeside = if (actionsBeside) {
+                    {
+                        LiveActionRail(
+                            state = state,
+                            buttonState = buttonState,
+                            onStart = { startDialogOpen = true },
+                            onStop = { stopDialogOpen = true },
+                            onMark = { markDialogOpen = true },
+                        )
+                    }
+                } else {
+                    null
+                },
             )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        containerColor = MaterialTheme.colorScheme.background,
-    ) { padding ->
-        LiveList(
-            state = state,
-            actions = actions,
-            requestPreciseLocation = requestPreciseLocation,
-            modifier = Modifier.padding(padding),
-        )
+        }
     }
 
     if (startDialogOpen) {
@@ -742,10 +818,11 @@ private class LiveParts(
 )
 
 /**
- * Upright on a phone: the serving cell, its 5-minute trend, the cadence and the network and GPS state first, so what an
- * engineer glances at while walking is on the first screen; the cell details and neighbours follow. From
- * [Sizes.WideLayoutMinWidth] (landscape phones, tablets) two panes: the serving cell and its details on one side, the
- * trend, cadence and network state on the other, both in view.
+ * Upright on a phone: the serving cell with its RSRQ and SINR on one row, then the cadence, network and GPS state in one
+ * card, then the 5-minute trend, so what an engineer glances at while walking is on the first screen; the cell details
+ * and neighbours follow. From [Sizes.WideLayoutMinWidth] (landscape phones, tablets) two panes: the serving cell and its
+ * details on one side, the cadence, network state and trend on the other, both in view. [actionsBeside], in a short
+ * wide window, is a column of session buttons at the end.
  */
 @Composable
 private fun LiveList(
@@ -753,6 +830,7 @@ private fun LiveList(
     actions: LiveActions,
     requestPreciseLocation: () -> Unit,
     modifier: Modifier = Modifier,
+    actionsBeside: (@Composable () -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val notes = LivePresentation.listenerNotes(state.live.listeners)
@@ -796,29 +874,47 @@ private fun LiveList(
                     contentPadding = PaddingValues(vertical = Spacing.Lg),
                     verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
                 ) {
+                    conditionsItem(parts)
                     chartItem(parts)
-                    cadenceItem(parts)
-                    networkItem(parts)
                     limitsItem(parts)
                 }
+                if (actionsBeside != null) ActionColumn(actionsBeside)
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = gutter, vertical = Spacing.Lg),
-                verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                bannerItems(parts)
-                servingTilesItem(parts)
-                chartItem(parts)
-                cadenceItem(parts)
-                networkItem(parts)
-                servingCardItem(parts)
-                neighboursItem(parts)
-                limitsItem(parts)
+            Row(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    contentPadding = PaddingValues(horizontal = gutter, vertical = Spacing.Lg),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    bannerItems(parts)
+                    servingTilesItem(parts)
+                    conditionsItem(parts)
+                    chartItem(parts)
+                    servingCardItem(parts)
+                    neighboursItem(parts)
+                    limitsItem(parts)
+                }
+                if (actionsBeside != null) ActionColumn(actionsBeside, modifier = Modifier.padding(end = gutter))
             }
         }
+    }
+}
+
+/** The session buttons beside the content, at the bottom of their column where a thumb reaches them. */
+@Composable
+private fun ActionColumn(content: @Composable () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .width(Sizes.ActionRailWidth)
+            .fillMaxHeight()
+            .padding(vertical = Spacing.Lg),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        content()
     }
 }
 
@@ -947,21 +1043,15 @@ private fun LazyListScope.chartItem(parts: LiveParts) {
     }
 }
 
-private fun LazyListScope.cadenceItem(parts: LiveParts) {
-    item(key = "cadence") {
-        CadenceCard(
+private fun LazyListScope.conditionsItem(parts: LiveParts) {
+    item(key = "conditions") {
+        ConditionsCard(
             live = parts.state.live,
             walkMode = parts.state.walkMode,
             notes = parts.notes,
             onWalkModeChange = parts.actions.onWalkModeChange,
             modifier = Modifier.contentWidth(),
         )
-    }
-}
-
-private fun LazyListScope.networkItem(parts: LiveParts) {
-    item(key = "network") {
-        NetworkCard(live = parts.state.live, modifier = Modifier.contentWidth())
     }
 }
 
@@ -1015,27 +1105,53 @@ private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, modifier:
         ) {
             SignalBar(metric = SignalMetric.RSRP, value = serving?.rsrp, stateDescription = labels.of(rsrpQuality))
         }
-        MetricGrid {
-            MetricTile(
-                label = stringResource(R.string.live_rsrq),
+        // One row, whatever the width or font scale: two stacked tiles pushed the trend and the cadence off the first screen.
+        val notReported = stringResource(R.string.live_not_reported)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.Md),
+        ) {
+            SecondaryMetricTile(
+                label = stringResource(rsrqLabelRes(serving?.rat)),
                 value = serving?.rsrq?.toString(),
                 unit = stringResource(R.string.unit_db),
                 quality = rsrqQuality,
-                qualityLabel = if (serving != null) labels.of(rsrqQuality) else null,
-                badge = live.badge,
+                qualityLabel = secondaryQualityLabel(serving, serving?.rsrq, rsrqQuality, labels, notReported),
+                stale = live.badge == AgeBadge.STALE,
                 placeholder = UNKNOWN_VALUE,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
             )
-            MetricTile(
-                label = stringResource(R.string.live_sinr),
+            SecondaryMetricTile(
+                label = stringResource(sinrLabelRes(serving?.rat)),
                 value = serving?.sinr?.toString(),
                 unit = stringResource(R.string.unit_db),
                 quality = sinrQuality,
-                qualityLabel = if (serving != null) labels.of(sinrQuality) else null,
-                badge = live.badge,
+                qualityLabel = secondaryQualityLabel(serving, serving?.sinr, sinrQuality, labels, notReported),
+                stale = live.badge == AgeBadge.STALE,
                 placeholder = UNKNOWN_VALUE,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
             )
         }
     }
+}
+
+/** No word without a serving cell; "Not reported" when the cell has no such value; else the value's quality. */
+private fun secondaryQualityLabel(
+    serving: LiveCell?,
+    value: Int?,
+    quality: com.fieldtap.ui.theme.SignalQuality?,
+    labels: SignalQualityLabels,
+    notReported: String,
+): String? = when {
+    serving == null -> null
+    value == null -> notReported
+    else -> labels.of(quality)
 }
 
 @Composable
@@ -1084,16 +1200,21 @@ private fun ServingCard(live: LiveState, labels: SignalQualityLabels, modifier: 
     }
 }
 
+/**
+ * How and how often Android measures, in one card: the cadence and its reason, the service, data, 5G-icon and GPS chips,
+ * the measured interval and satellites, and walk mode with a one-line summary; its full explanation opens in a dialog.
+ */
 @Composable
-private fun CadenceCard(
+private fun ConditionsCard(
     live: LiveState,
     walkMode: Boolean,
     notes: List<ListenerNote>,
     onWalkModeChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var walkModeDetailsOpen by rememberSaveable { mutableStateOf(false) }
     SectionCard(
-        title = stringResource(R.string.live_section_cadence),
+        title = stringResource(R.string.live_section_conditions),
         icon = FieldTapIcons.Timer,
         modifier = modifier,
     ) {
@@ -1109,10 +1230,18 @@ private fun CadenceCard(
             reason = stringResource(cadenceReasonRes(LivePresentation.cadenceReason(live.conditions))),
             modifier = Modifier.fillMaxWidth(),
         )
+        NetworkChips(live)
         KeyValueRow(
             key = stringResource(R.string.live_row_measured_interval),
             value = live.recentFreshIntervalMs?.let { stringResource(R.string.seconds_value, DisplayTime.seconds(it)) } ?: UNKNOWN_VALUE,
         )
+        val gnss = live.gnss
+        if (gnss != null) {
+            KeyValueRow(
+                key = stringResource(R.string.live_row_satellites),
+                value = stringResource(R.string.live_satellites_value, gnss.satellitesUsedInFix, gnss.satellitesVisible),
+            )
+        }
         ToggleRow(
             title = stringResource(R.string.live_walk_mode),
             checked = walkMode,
@@ -1120,9 +1249,30 @@ private fun CadenceCard(
             supportingText = stringResource(R.string.live_walk_mode_supporting),
             icon = FieldTapIcons.Walk,
         )
+        TextButton(
+            onClick = { walkModeDetailsOpen = true },
+            modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+        ) {
+            Icon(imageVector = FieldTapIcons.Info, contentDescription = null, modifier = Modifier.size(Sizes.IconSmall))
+            Spacer(modifier = Modifier.width(Spacing.Sm))
+            Text(text = stringResource(R.string.live_walk_mode_details_action))
+        }
         for (note in notes) {
             ListenerNoteLine(note)
         }
+    }
+    if (walkModeDetailsOpen) {
+        AlertDialog(
+            onDismissRequest = { walkModeDetailsOpen = false },
+            confirmButton = {
+                TextButton(onClick = { walkModeDetailsOpen = false }) {
+                    Text(text = stringResource(R.string.live_walk_mode_details_close))
+                }
+            },
+            icon = { Icon(imageVector = FieldTapIcons.Walk, contentDescription = null) },
+            title = { Text(text = stringResource(R.string.live_walk_mode)) },
+            text = { Text(text = stringResource(R.string.live_walk_mode_details)) },
+        )
     }
 }
 
@@ -1151,48 +1301,40 @@ private fun ListenerNoteLine(note: ListenerNote) {
     }
 }
 
+/** Service, mobile data, the 5G icon and GPS, as chips. */
 @Composable
-private fun NetworkCard(live: LiveState, modifier: Modifier = Modifier) {
-    SectionCard(title = stringResource(R.string.live_section_network), modifier = modifier) {
-        val service = LivePresentation.serviceChip(live.service)
-        val data = LivePresentation.dataChip(live.data)
-        val dataNetwork = LivePresentation.dataNetworkName(live.data)
-        val fiveG = LivePresentation.fiveGIcon(live.display)
-        val gps = LivePresentation.gpsChip(live.lastFix, live.nowElapsedMs)
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
-            verticalArrangement = Arrangement.spacedBy(Spacing.Sm),
-        ) {
-            StatusChip(text = stringResource(serviceRes(service)), tone = service.tone)
+private fun NetworkChips(live: LiveState) {
+    val service = LivePresentation.serviceChip(live.service)
+    val data = LivePresentation.dataChip(live.data)
+    val dataNetwork = LivePresentation.dataNetworkName(live.data)
+    val fiveG = LivePresentation.fiveGIcon(live.display)
+    val gps = LivePresentation.gpsChip(live.lastFix, live.nowElapsedMs)
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
+        verticalArrangement = Arrangement.spacedBy(Spacing.Sm),
+    ) {
+        StatusChip(text = stringResource(serviceRes(service)), tone = service.tone)
+        StatusChip(
+            text = if (data == DataChip.CONNECTED && dataNetwork != null) {
+                stringResource(R.string.live_data_connected_type, dataNetwork)
+            } else {
+                stringResource(dataRes(data))
+            },
+            tone = data.tone,
+            icon = FieldTapIcons.Transfer,
+        )
+        if (fiveG != null) {
             StatusChip(
-                text = if (data == DataChip.CONNECTED && dataNetwork != null) {
-                    stringResource(R.string.live_data_connected_type, dataNetwork)
-                } else {
-                    stringResource(dataRes(data))
-                },
-                tone = data.tone,
-                icon = FieldTapIcons.Transfer,
-            )
-            if (fiveG != null) {
-                StatusChip(
-                    text = stringResource(if (fiveG) R.string.live_5g_icon_on else R.string.live_5g_icon_off),
-                    tone = if (fiveG) StatusTone.INFO else StatusTone.NEUTRAL,
-                    icon = FieldTapIcons.SignalBars,
-                )
-            }
-            StatusChip(
-                text = gpsText(gps),
-                tone = gps.tone,
-                icon = if (gps is GpsChip.Fix) FieldTapIcons.GpsFixed else FieldTapIcons.GpsOff,
+                text = stringResource(if (fiveG) R.string.live_5g_icon_on else R.string.live_5g_icon_off),
+                tone = if (fiveG) StatusTone.INFO else StatusTone.NEUTRAL,
+                icon = FieldTapIcons.SignalBars,
             )
         }
-        val gnss = live.gnss
-        if (gnss != null) {
-            KeyValueRow(
-                key = stringResource(R.string.live_row_satellites),
-                value = stringResource(R.string.live_satellites_value, gnss.satellitesUsedInFix, gnss.satellitesVisible),
-            )
-        }
+        StatusChip(
+            text = gpsText(gps),
+            tone = gps.tone,
+            icon = if (gps is GpsChip.Fix) FieldTapIcons.GpsFixed else FieldTapIcons.GpsOff,
+        )
     }
 }
 
@@ -1235,7 +1377,6 @@ private fun LiveActionBar(
     onStop: () -> Unit,
     onMark: () -> Unit,
 ) {
-    val elapsedMs = (state.status as? SessionStatus.Recording)?.snapshot?.elapsedMs
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Box(
             modifier = Modifier
@@ -1249,39 +1390,77 @@ private fun LiveActionBar(
                 horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                SessionButton(
-                    state = buttonState,
-                    startLabel = stringResource(R.string.live_start),
-                    stopLabel = stringResource(R.string.live_stop),
-                    onStart = onStart,
-                    onStop = onStop,
-                    modifier = Modifier.weight(1f),
-                    busyLabel = stringResource(
-                        when {
-                            buttonState == SessionButtonState.STOPPING -> R.string.live_stopping
-                            state.prestart is PrestartState.Checking -> R.string.live_checking
-                            else -> R.string.live_starting
-                        },
-                    ),
-                    recordingLabel = stringResource(R.string.live_recording),
-                    elapsedText = elapsedMs?.let { Formats.elapsed(it) },
-                )
+                LiveSessionButton(state, buttonState, onStart, onStop, modifier = Modifier.weight(1f))
                 if (buttonState == SessionButtonState.RECORDING) {
-                    val unavailable = stringResource(R.string.live_mark_unavailable)
-                    FilledTonalButton(
-                        onClick = onMark,
-                        enabled = state.markEnabled,
-                        modifier = Modifier
-                            .heightIn(min = Sizes.PrimaryButtonHeight)
-                            .then(if (state.markEnabled) Modifier else Modifier.semantics { contentDescription = unavailable }),
-                    ) {
-                        Icon(imageVector = FieldTapIcons.Flag, contentDescription = null, modifier = Modifier.size(Sizes.Icon))
-                        Spacer(modifier = Modifier.width(Spacing.Sm))
-                        Text(text = stringResource(R.string.live_mark))
-                    }
+                    LiveMarkButton(state, onMark, modifier = Modifier.heightIn(min = Sizes.PrimaryButtonHeight))
                 }
             }
         }
+    }
+}
+
+/** The session buttons stacked, for the column beside the content in a short, wide window. */
+@Composable
+private fun LiveActionRail(
+    state: LiveUiState,
+    buttonState: SessionButtonState,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onMark: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
+        if (buttonState == SessionButtonState.RECORDING) {
+            LiveMarkButton(
+                state,
+                onMark,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Sizes.PrimaryButtonHeight),
+            )
+        }
+        LiveSessionButton(state, buttonState, onStart, onStop, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+@Composable
+private fun LiveSessionButton(
+    state: LiveUiState,
+    buttonState: SessionButtonState,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val elapsedMs = (state.status as? SessionStatus.Recording)?.snapshot?.elapsedMs
+    SessionButton(
+        state = buttonState,
+        startLabel = stringResource(R.string.live_start),
+        stopLabel = stringResource(R.string.live_stop),
+        onStart = onStart,
+        onStop = onStop,
+        modifier = modifier,
+        busyLabel = stringResource(
+            when {
+                buttonState == SessionButtonState.STOPPING -> R.string.live_stopping
+                state.prestart is PrestartState.Checking -> R.string.live_checking
+                else -> R.string.live_starting
+            },
+        ),
+        recordingLabel = stringResource(R.string.live_recording),
+        elapsedText = elapsedMs?.let { Formats.elapsed(it) },
+    )
+}
+
+@Composable
+private fun LiveMarkButton(state: LiveUiState, onMark: () -> Unit, modifier: Modifier = Modifier) {
+    val unavailable = stringResource(R.string.live_mark_unavailable)
+    FilledTonalButton(
+        onClick = onMark,
+        enabled = state.markEnabled,
+        modifier = modifier.then(if (state.markEnabled) Modifier else Modifier.semantics { contentDescription = unavailable }),
+    ) {
+        Icon(imageVector = FieldTapIcons.Flag, contentDescription = null, modifier = Modifier.size(Sizes.Icon))
+        Spacer(modifier = Modifier.width(Spacing.Sm))
+        Text(text = stringResource(R.string.live_mark))
     }
 }
 
@@ -1548,6 +1727,10 @@ private fun rsrpLabelRes(rat: Rat?): Int = when (rat) {
 }
 
 @StringRes
+private fun rsrqLabelRes(rat: Rat?): Int = if (rat == Rat.NR) R.string.live_rsrq_nr else R.string.live_rsrq
+
+private fun sinrLabelRes(rat: Rat?): Int = if (rat == Rat.NR) R.string.live_sinr_nr else R.string.live_sinr
+
 private fun channelRes(rat: Rat): Int = when (rat) {
     Rat.LTE -> R.string.live_earfcn
     Rat.NR -> R.string.live_nrarfcn
@@ -1626,8 +1809,11 @@ private fun listenerNoteText(note: ListenerNote): String = when {
 private fun liveMessageText(message: LiveMessage): String = stringResource(
     when (message) {
         LiveMessage.MARKED -> R.string.live_message_marked
+        LiveMessage.MARK_HELD -> R.string.live_message_mark_held
+        LiveMessage.MARK_DROPPED -> R.string.live_message_mark_dropped
         LiveMessage.NOT_RECORDING -> R.string.live_message_not_recording
         LiveMessage.PAUSED -> R.string.live_message_paused
+        LiveMessage.PAUSED_NO_FIX -> R.string.live_message_paused_no_fix
         LiveMessage.START_FAILED -> R.string.live_message_start_failed
         LiveMessage.STOP_FAILED -> R.string.live_message_stop_failed
     },

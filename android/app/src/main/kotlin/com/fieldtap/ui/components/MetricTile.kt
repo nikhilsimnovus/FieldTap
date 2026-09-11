@@ -178,6 +178,76 @@ fun MetricTile(
     }
 }
 
+/**
+ * A secondary live value under a [MetricEmphasis.HERO] tile, sharing a row with another: label, number and unit, and its
+ * quality as a swatch and a word. A missing value shows [placeholder] with no unit, and [qualityLabel] says why, for
+ * example "Not reported". [stale] dims the number as a stale hero does. TalkBack reads one sentence: the label, the value
+ * with its unit or the placeholder, then the quality.
+ */
+@Composable
+fun SecondaryMetricTile(
+    label: String,
+    value: String?,
+    modifier: Modifier = Modifier,
+    unit: String? = null,
+    quality: SignalQuality? = null,
+    qualityLabel: String? = null,
+    stale: Boolean = false,
+    placeholder: String = "—",
+) {
+    val valueStyle = FieldTapDesign.numeric.medium.copy(lineHeight = 1.2.em)
+    val description = listOfNotNull(
+        label,
+        if (value != null && unit != null) "$value $unit" else value ?: placeholder,
+        qualityLabel,
+    ).joinToString(", ")
+    Surface(
+        modifier = modifier.clearAndSetSemantics { contentDescription = description },
+        shape = ShapeRoles.Tile,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = Spacing.Md, vertical = Spacing.Sm),
+            verticalArrangement = Arrangement.spacedBy(Spacing.Xxs),
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = value ?: placeholder,
+                    style = valueStyle,
+                    color = if (value == null || stale) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    softWrap = false,
+                    autoSize = TextAutoSize.StepBased(minFontSize = MIN_VALUE_FONT_SIZE_SP.sp, maxFontSize = valueStyle.fontSize, stepSize = 1.sp),
+                    modifier = Modifier
+                        .alignByBaseline()
+                        .weight(1f, fill = false),
+                )
+                if (value != null && unit != null) {
+                    Text(
+                        text = unit,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .alignByBaseline()
+                            .padding(start = Spacing.Xs),
+                    )
+                }
+            }
+            if (qualityLabel != null) {
+                SignalQualityChip(quality = if (value == null) null else quality, label = qualityLabel)
+            }
+        }
+    }
+}
+
 /** The smallest size a tile's value shrinks to before it would clip. */
 private const val MIN_VALUE_FONT_SIZE_SP: Int = 14
 

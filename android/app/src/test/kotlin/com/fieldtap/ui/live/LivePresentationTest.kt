@@ -1,5 +1,6 @@
 package com.fieldtap.ui.live
 
+import androidx.compose.ui.unit.dp
 import com.fieldtap.app.SessionStatus
 import com.fieldtap.core.input.DataConnState
 import com.fieldtap.core.input.DataStateSnapshot
@@ -11,6 +12,7 @@ import com.fieldtap.core.input.RadioListener
 import com.fieldtap.core.input.ServiceRegState
 import com.fieldtap.core.input.ServiceStateSnapshot
 import com.fieldtap.core.input.SignalSnapshot
+import com.fieldtap.core.live.ChartPoint
 import com.fieldtap.core.live.LiveCell
 import com.fieldtap.core.live.LiveState
 import com.fieldtap.core.session.RecorderSnapshot
@@ -152,6 +154,26 @@ class LivePresentationTest {
     }
 
     @Test
+    fun sinrIsNotReportedWhenRsrpFillsTheWindowAndSinrDoesNot() {
+        val now = 300_000L
+        val rsrp = listOf(ChartPoint(290_000, -90), ChartPoint(292_000, -91))
+
+        assertTrue(LivePresentation.sinrNotReported(rsrp, emptyList(), now))
+        assertFalse(LivePresentation.sinrNotReported(rsrp, listOf(ChartPoint(292_000, 12)), now))
+        assertFalse("before any sample it is not yet known", LivePresentation.sinrNotReported(emptyList(), emptyList(), now))
+        // A SINR sample older than the 5-minute window is none in it.
+        assertTrue(LivePresentation.sinrNotReported(rsrp, listOf(ChartPoint(-1_000, 12)), now))
+    }
+
+    @Test
+    fun theSessionButtonsSitBesideTheContentOnlyInAShortWideWindow() {
+        assertTrue("a phone in landscape", LivePresentation.actionsBesideContent(915.dp, 412.dp))
+        assertFalse("a phone upright", LivePresentation.actionsBesideContent(412.dp, 915.dp))
+        assertFalse("a tablet in landscape", LivePresentation.actionsBesideContent(1280.dp, 800.dp))
+        assertFalse("a narrow split screen", LivePresentation.actionsBesideContent(560.dp, 360.dp))
+    }
+
+    @Test
     fun markNeedsARecordingSessionOutsideAZone() {
         assertFalse(LivePresentation.markAllowed(SessionStatus.Idle))
         assertFalse(LivePresentation.markAllowed(SessionStatus.Starting(StartRequest("Walk"))))
@@ -237,6 +259,13 @@ class LivePresentationTest {
         assertTrue(LivePresentation.waitingForLocation(SessionStatus.Recording(waiting)))
         assertFalse("waiting for a fix is not a pause inside a zone", LivePresentation.pausedInZone(SessionStatus.Recording(waiting)))
         assertFalse(LivePresentation.markAllowed(SessionStatus.Recording(waiting)))
+        assertTrue(LivePresentation.pausedWaitingForLocation(SessionStatus.Recording(waiting)))
+        assertFalse(LivePresentation.markWaitsForLocation(SessionStatus.Recording(waiting)))
+        // Held for a second or two, before the session counts as waiting: a mark tapped then waits too.
+        assertTrue(LivePresentation.markWaitsForLocation(SessionStatus.Recording(recording.copy(holdingInputs = true))))
+        assertTrue(LivePresentation.markWaitsForLocation(SessionStatus.Recording(recording.copy(waitingForLocation = true))))
+        assertFalse(LivePresentation.markWaitsForLocation(SessionStatus.Recording(recording)))
+        assertFalse(LivePresentation.pausedWaitingForLocation(SessionStatus.Recording(recording.copy(paused = true))))
 
         val inZone = recording.copy(paused = true)
         assertEquals(RecordingState.PAUSED_IN_ZONE, LivePresentation.recordingStrip(SessionStatus.Recording(inZone), live)?.state)

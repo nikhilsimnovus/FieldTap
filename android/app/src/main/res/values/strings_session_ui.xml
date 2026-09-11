@@ -89,6 +89,9 @@
     <string name="live_rsrp">RSRP</string>
     <string name="live_rsrq">RSRQ</string>
     <string name="live_sinr">SINR</string>
+    <string name="live_rsrq_nr">SS-RSRQ</string>
+    <string name="live_sinr_nr">SS-SINR</string>
+    <string name="live_not_reported">Not reported</string>
     <string name="live_waiting_first_measurement">Waiting for the first cell measurement</string>
     <string name="live_no_lte_nr_badge">No LTE or NR cell</string>
     <string name="live_absence_location_off">Location is off</string>
@@ -130,7 +133,6 @@
     <string name="live_network_other">Not LTE or NR</string>
     <string name="live_nsa_leg">5G NR leg</string>
 
-    <string name="live_section_cadence">How often Android refreshes</string>
     <!-- How often Android refreshes cell info; docs/APP-PLAN.md labels pocket mode "10 s cadence". -->
     <string name="live_cadence_short">2 s cadence</string>
     <string name="live_cadence_long">10 s cadence</string>
@@ -142,7 +144,11 @@
     <string name="live_cadence_screen_on">Screen on, Wi-Fi off</string>
     <string name="live_row_measured_interval">Time between fresh samples</string>
     <string name="live_walk_mode">Walk mode</string>
-    <string name="live_walk_mode_supporting">Keeps the screen on with a dark surface, so Android can refresh every 2 s. Brightness follows your phone. Uses no wake lock. In a pocket with the screen off, Android refreshes every 10 s and, on battery, sends no signal-strength updates.</string>
+    <string name="live_walk_mode_supporting">Keeps the screen on, dark, for 2 s updates.</string>
+    <string name="live_walk_mode_details_action">How walk mode works</string>
+    <string name="live_walk_mode_details">Walk mode keeps the screen on with a dark surface, so Android can refresh cell information every 2 s. Brightness follows your phone, and no wake lock is used. In a pocket with the screen off, Android refreshes only every 10 s and, on battery, sends no signal-strength updates.</string>
+    <string name="live_walk_mode_details_close">Close</string>
+    <string name="live_section_conditions">Cadence and network</string>
     <string name="live_walk_wifi_prompt">Wi-Fi is connected and the phone is not charging, so Android refreshes cell info only every 10 s. Turn Wi-Fi off for 2 s updates. A charger helps only once Android counts the phone as charging, which can take 15 minutes.</string>
     <string name="live_action_wifi_settings">Wi-Fi settings</string>
 
@@ -166,12 +172,13 @@
     <string name="chart_window_start">5 min ago</string>
     <string name="chart_window_end">Now</string>
     <string name="chart_no_data">No fresh samples yet</string>
+    <string name="chart_not_reported">Not reported by this cell</string>
+    <string name="chart_summary_sinr_not_reported">This cell reports no SINR.</string>
     <string name="chart_summary_rsrp">RSRP over the last 5 minutes: latest %1$d dBm, lowest %2$d, highest %3$d.</string>
     <string name="chart_summary_rsrp_empty">No fresh RSRP samples in the last 5 minutes.</string>
     <string name="chart_summary_sinr">SINR: latest %1$d dB, lowest %2$d, highest %3$d.</string>
     <string name="chart_summary_sinr_empty">No fresh SINR samples.</string>
 
-    <string name="live_section_network">Network state</string>
     <string name="live_service_waiting">Service not reported yet</string>
     <string name="live_service_in">In service</string>
     <string name="live_service_roaming">In service, roaming</string>
@@ -259,8 +266,11 @@
     <string name="live_stop_confirm">Stop</string>
 
     <string name="live_message_marked">Marker added</string>
+    <string name="live_message_mark_held">Marker kept until your location is known</string>
+    <string name="live_message_mark_dropped">A marker was not saved: no location fix showed you outside your privacy zones</string>
     <string name="live_message_not_recording">No session is recording</string>
     <string name="live_message_paused">Marks are off while paused in a privacy zone</string>
+    <string name="live_message_paused_no_fix">Marks are off until your location is known</string>
     <string name="live_message_start_failed">The session could not start. Try again.</string>
     <string name="live_message_stop_failed">The session could not be stopped. Try again.</string>
 
