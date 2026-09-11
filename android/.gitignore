@@ -1,0 +1,27 @@
+# Gradle and Kotlin build state
+.gradle/
+.kotlin/
+build/
+local.properties
+
+# Android Studio
+.idea/
+*.iml
+captures/
+.cxx/
+.externalNativeBuild/
+
+# Build outputs, wherever they land
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Signing keys never enter the repository
+*.jks
+*.keystore
+
+# Packet and modem captures (also ignored at the repository root)
+*.pcap
+*.pcapng
+*.qmdl

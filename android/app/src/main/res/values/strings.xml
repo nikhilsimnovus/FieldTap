@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">5gto6G FieldTap</string>
+    <!-- Word for word, as on the download page and in the report. Do not reword or translate. -->
+    <string name="limits_statement" translatable="false">Reads what Android exposes: cell identity, RSRP/RSRQ/SINR, band, ARFCN, service state, plus ping and download tests. It does not decode RRC, NAS, SIB or any layer-3 signalling, cannot lock bands or cells, cannot scan operators, and needs no root.</string>
+</resources>

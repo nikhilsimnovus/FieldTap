@@ -1,0 +1,5 @@
+# core.autocrlf is on for Windows checkouts. These files must not follow it.
+*.sh            text eol=lf
+android/gradlew text eol=lf
+*.bat           text eol=crlf
+*.jar           binary
