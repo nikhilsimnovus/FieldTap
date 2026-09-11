@@ -4,6 +4,7 @@ import com.fieldtap.core.input.CellInfoAnswer
 import com.fieldtap.core.input.DataStateSnapshot
 import com.fieldtap.core.input.DisplayInfoSnapshot
 import com.fieldtap.core.input.FixSample
+import com.fieldtap.core.input.LocationAvailability
 import com.fieldtap.core.input.ServiceStateSnapshot
 import com.fieldtap.core.location.JoinResult
 import com.fieldtap.core.location.LocationPipeline
@@ -46,6 +47,8 @@ internal sealed interface FileCall {
 
     data class Heartbeat(val record: HeartbeatRecord) : FileCall
 
+    data class MarkersDropped(val count: Int) : FileCall
+
     data object Close : FileCall
 }
 
@@ -83,6 +86,8 @@ internal class FakeSessionFiles : SessionFiles {
     override fun sync() = recordCall(FileCall.Sync)
 
     override fun writeHeartbeat(record: HeartbeatRecord) = recordCall(FileCall.Heartbeat(record))
+
+    override fun writeMarkersDropped(count: Int) = recordCall(FileCall.MarkersDropped(count))
 
     override fun close() = recordCall(FileCall.Close)
 
@@ -179,10 +184,19 @@ internal class FakeLocationPipeline : LocationPipeline {
     var onTickStep: (Long, Long) -> List<EventRow> = { _, _ -> tickEvents }
     val tickCalls: MutableList<Pair<Long, Long>> = mutableListOf()
     var lastFixSample: FixSample? = null
+    val availabilityCalls: MutableList<LocationAvailability> = mutableListOf()
+
+    /** What [onLocationAvailability] returns; by default nothing. */
+    var onAvailabilityStep: (LocationAvailability) -> List<EventRow> = { emptyList() }
 
     override fun onFix(fix: FixSample): LocationStep {
         fixes += fix
         return onFixStep(fix)
+    }
+
+    override fun onLocationAvailability(availability: LocationAvailability): List<EventRow> {
+        availabilityCalls += availability
+        return onAvailabilityStep(availability)
     }
 
     override fun onTick(nowWallMs: Long, nowElapsedMs: Long): List<EventRow> {

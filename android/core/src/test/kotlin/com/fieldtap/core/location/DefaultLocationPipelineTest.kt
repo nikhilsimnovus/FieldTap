@@ -1,6 +1,7 @@
 package com.fieldtap.core.location
 
 import com.fieldtap.core.input.FixSample
+import com.fieldtap.core.input.LocationAvailability
 import com.fieldtap.core.privacy.PrivacyZone
 import com.fieldtap.core.privacy.PrivacyZoneGate
 import com.fieldtap.format.EventKind
@@ -66,6 +67,29 @@ class DefaultLocationPipelineTest {
         assertEquals(listOf(24, 44), steps.filter { it.second.pauseChanged }.map { it.first })
         assertEquals(1, pipeline.zonePauses)
         assertFalse(pipeline.paused)
+    }
+
+    @Test
+    fun locationServicesSwitchedOffAreAGpsLossAndTheNextFixAfterThemRestoresGps() {
+        val pipeline = DefaultLocationPipeline(emptyList())
+        pipeline.onFix(farSouth(0))
+        val off = LocationAvailability(
+            locationEnabled = false,
+            preciseLocationGranted = true,
+            providers = emptySet(),
+            observedWallMs = startElapsedMs + 1_500 + WALL_MINUS_ELAPSED_MS,
+            observedElapsedMs = startElapsedMs + 1_500,
+        )
+
+        val lost = pipeline.onLocationAvailability(off)
+        assertEquals(listOf(EventKind.GPS_LOST), lost.map { it.kind })
+        assertEquals(GpsEventDeriver.LOCATION_OFF_DETAIL, lost.single().detail)
+        assertEquals(off.observedWallMs, lost.single().timeUtcMs)
+        assertTrue("no timed loss follows", pipeline.onTick(1L, startElapsedMs + 30_000).isEmpty())
+
+        val on = off.copy(locationEnabled = true, providers = setOf(FixProvider.GPS), observedElapsedMs = startElapsedMs + 31_000)
+        assertTrue(pipeline.onLocationAvailability(on).isEmpty())
+        assertEquals(listOf(EventKind.GPS_RESTORED), pipeline.onFix(farSouth(32)).events.map { it.kind })
     }
 
     @Test

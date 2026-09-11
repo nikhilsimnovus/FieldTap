@@ -4,8 +4,10 @@ import com.fieldtap.core.input.CellInfoAnswer
 import com.fieldtap.core.input.CellSnapshot
 import com.fieldtap.core.input.DeviceConditions
 import com.fieldtap.core.input.FixSample
+import com.fieldtap.core.input.LocationAvailability
 import com.fieldtap.core.input.MeasurementInput
 import com.fieldtap.core.location.DefaultLocationPipeline
+import com.fieldtap.core.location.GpsEventDeriver
 import com.fieldtap.core.privacy.PrivacyZone
 import com.fieldtap.core.privacy.PrivacyZoneGate
 import com.fieldtap.core.radio.DefaultRadioPipeline
@@ -40,7 +42,13 @@ class PrivacyZoneRecordingTest {
 
     private class Timed(val atMs: Long, val input: MeasurementInput)
 
-    private class Recorded(val calls: List<FileCall>, val lastSnapshot: RecorderSnapshot, val finalMeta: SessionMeta) {
+    private class Recorded(
+        val calls: List<FileCall>,
+        val lastSnapshot: RecorderSnapshot,
+        val finalMeta: SessionMeta,
+        /** The dropped-marker counts noted beside the session, in order. */
+        val notes: List<Int>,
+    ) {
         val kpiTimes: List<Long> get() = calls.filterIsInstance<FileCall.Kpi>().map { it.row.timeEpochMs - START_WALL_MS }
         val cellInfoTimes: List<Long> get() = calls.filterIsInstance<FileCall.CellInfo>().map { it.row.timeEpochMs - START_WALL_MS }
         val events get() = calls.filterIsInstance<FileCall.Event>().map { it.row }
@@ -158,6 +166,55 @@ class PrivacyZoneRecordingTest {
         assertTrue(recorded.lastSnapshot.paused)
         assertTrue(recorded.lastSnapshot.waitingForLocation)
         assertEquals("the marker was accepted, then dropped with the hold", 1, recorded.lastSnapshot.markersDropped)
+        assertEquals("and noted for the Session detail screen", listOf(1), recorded.notes)
+    }
+
+    @Test
+    fun locationServicesSwitchedOffAreWrittenAsGpsLostAndTheFirstFixAfterThemAsGpsRestored() {
+        // No zones. Location is switched off at 10.5 s, so Android sends no fix and no cell; back on at 30.5 s, the first fix at 32 s.
+        val inputs = fixes(1_000..10_000) { FAR_NORTH } + fixes(32_000..40_000) { FAR_NORTH } +
+            answers(900..10_000) { BEFORE } + answers(33_000..40_000) { BEFORE } +
+            availability(10_500, enabled = false) + availability(30_500, enabled = true)
+
+        val recorded = record(emptyList(), inputs, endMs = 40_000)
+
+        val gps = recorded.events.filter { it.kind == EventKind.GPS_LOST || it.kind == EventKind.GPS_RESTORED }
+        assertEquals(
+            listOf(
+                Triple(EventKind.GPS_LOST, GpsEventDeriver.LOCATION_OFF_DETAIL, 10_500L),
+                Triple(EventKind.GPS_RESTORED, null, 32_000L),
+            ),
+            gps.map { Triple(it.kind, it.detail, it.timeUtcMs - START_WALL_MS) },
+        )
+        assertTrue(recorded.lastSnapshot.locationEnabled)
+        assertTrue(recorded.kpiTimes.toString(), recorded.kpiTimes.any { it > 30_000 })
+    }
+
+    @Test
+    fun locationSwitchedOffFarFromAZoneIsWrittenAndAMarkerWaitingForAFixIsDroppedAndNoted() {
+        // 11 km from the zone. Location goes off at 10.5 s; a marker at 20 s waits for a fix; 60 s after the last fix
+        // outside, logging pauses and drops it. Back on at 75 s, the fix at 76 s shows no visit was possible in between.
+        val inputs = fixes(1_000..10_000) { FAR_FROM_ZONE } + fixes(76_000..90_000) { FAR_FROM_ZONE } +
+            answers(900..10_000) { BEFORE } + answers(77_000..90_000) { BEFORE } +
+            availability(10_500, enabled = false) + availability(75_000, enabled = true)
+        val marker = 20_000L to RecorderCommand.Mark("while location is off", START_WALL_MS + 20_000)
+
+        val recorded = record(listOf(zone), inputs, endMs = 90_000, commands = listOf(marker))
+
+        val story = recorded.events.filter { it.kind in setOf(EventKind.GPS_LOST, EventKind.GPS_RESTORED, EventKind.PRIVACY_ZONE) }
+        assertEquals(
+            listOf(
+                Triple(EventKind.GPS_LOST, GpsEventDeriver.LOCATION_OFF_DETAIL, 10_500L),
+                Triple(EventKind.PRIVACY_ZONE, PrivacyZoneGate.NO_FIX_DETAIL, 71_000L),
+                Triple(EventKind.PRIVACY_ZONE, null, 76_000L),
+                Triple(EventKind.GPS_RESTORED, null, 76_000L),
+            ),
+            story.map { Triple(it.kind, it.detail, it.timeUtcMs - START_WALL_MS) },
+        )
+        assertTrue(recorded.events.none { it.kind == EventKind.MARKER })
+        assertEquals(listOf(1), recorded.notes)
+        assertEquals(0, recorded.finalMeta.privacy.zonePauses)
+        assertTrue(recorded.calls.filterIsInstance<FileCall.Track>().none { it.row.timeUtcMs - START_WALL_MS in 10_001 until 76_000 })
     }
 
     @Test
@@ -236,7 +293,12 @@ class PrivacyZoneRecordingTest {
             recorder.submit(RecorderCommand.Stop(StopCause.USER))
             runCurrent()
             run.await()
-            recorded = Recorded(files.rowsAndEvents, snapshot, files.calls.filterIsInstance<FileCall.Snapshot>().last().meta)
+            recorded = Recorded(
+                calls = files.rowsAndEvents,
+                lastSnapshot = snapshot,
+                finalMeta = files.calls.filterIsInstance<FileCall.Snapshot>().last().meta,
+                notes = files.calls.filterIsInstance<FileCall.MarkersDropped>().map { it.count },
+            )
         }
         return recorded
     }
@@ -287,6 +349,18 @@ class PrivacyZoneRecordingTest {
             Timed(atMs, SessionFixtures.fix(START_ELAPSED_MS + atMs, START_WALL_MS + atMs, position.lat, position.lon))
         }
 
+    /** Location services switched on or off at [atMs], as the location adapter reports it. */
+    private fun availability(atMs: Long, enabled: Boolean): Timed = Timed(
+        atMs,
+        LocationAvailability(
+            locationEnabled = enabled,
+            preciseLocationGranted = true,
+            providers = if (enabled) setOf(FixProvider.GPS, FixProvider.NETWORK) else emptySet(),
+            observedWallMs = START_WALL_MS + atMs,
+            observedElapsedMs = START_ELAPSED_MS + atMs,
+        ),
+    )
+
     /** One network fix, with no speed, at [atMs]. */
     private fun networkFix(atMs: Long, position: Position, accuracyM: Double): Timed {
         val fix = SessionFixtures.fix(START_ELAPSED_MS + atMs, START_WALL_MS + atMs, position.lat, position.lon)
@@ -301,6 +375,9 @@ class PrivacyZoneRecordingTest {
         val CENTRE = Position(ZONE_LAT, ZONE_LON)
         val FAR_NORTH = Position(ZONE_LAT + 0.01, ZONE_LON)
         val FAR_WEST = Position(ZONE_LAT, ZONE_LON - 0.013)
+
+        /** 11 km north: a zone takes about two minutes to reach from here, even at 100 m/s. */
+        val FAR_FROM_ZONE = Position(ZONE_LAT + 0.1, ZONE_LON)
         val EDGE_50 = Position(ZONE_LAT + 150.0 / METRES_PER_DEGREE, ZONE_LON)
         val EDGE_80 = Position(ZONE_LAT + 180.0 / METRES_PER_DEGREE, ZONE_LON)
         val CLEAR_260 = Position(ZONE_LAT + 360.0 / METRES_PER_DEGREE, ZONE_LON)

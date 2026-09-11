@@ -1,6 +1,7 @@
 package com.fieldtap.core.location
 
 import com.fieldtap.core.input.FixSample
+import com.fieldtap.core.input.LocationAvailability
 import com.fieldtap.core.privacy.PrivacyZone
 import com.fieldtap.core.privacy.PrivacyZoneGate
 import com.fieldtap.core.privacy.ZonePlacement
@@ -51,6 +52,13 @@ interface LocationPipeline {
      */
     fun onTick(nowWallMs: Long, nowElapsedMs: Long): List<EventRow>
 
+    /**
+     * Location services switched on or off ([LocationAvailability.locationEnabled]): `gps_lost` when they go off, which the
+     * recorder handles as an input observed at the switch, like the other gps events. Nothing when they come back: the
+     * next fix writes `gps_restored`.
+     */
+    fun onLocationAvailability(availability: LocationAvailability): List<EventRow> = emptyList()
+
     fun join(measurementElapsedMs: Long, nowElapsedMs: Long): JoinResult
 
     fun joinFinal(measurementElapsedMs: Long): LatLon?
@@ -99,6 +107,7 @@ interface LocationPipeline {
  *    candidate and [lastFix]; it is the fix that [LocationStep.confirmsOutside].
  *
  * [onTick] returns `gps_lost` when due, then the gate's pause once no fix outside every zone came for [holdLimitMs].
+ * [onLocationAvailability] returns `gps_lost` when location services are switched off ([GpsEventDeriver.onLocationServices]).
  *
  * The zones are copied at construction: a session keeps the zones it started with. [sessionStartElapsedMs] is when the
  * time before the first fix begins (see [PrivacyZoneGate]).
@@ -145,6 +154,10 @@ class DefaultLocationPipeline(
         val pause = gate.onTick(nowWallMs, nowElapsedMs)
         return listOfNotNull(lost, pause)
     }
+
+    override fun onLocationAvailability(availability: LocationAvailability): List<EventRow> = listOfNotNull(
+        gpsEvents.onLocationServices(availability.locationEnabled, availability.observedWallMs, availability.observedElapsedMs),
+    )
 
     override fun join(measurementElapsedMs: Long, nowElapsedMs: Long): JoinResult =
         joiner.join(measurementElapsedMs, nowElapsedMs)

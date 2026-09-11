@@ -302,6 +302,31 @@ class SessionFilesTest {
     }
 
     @Test
+    fun theDroppedMarkerNoteLivesOutsideTheSessionAndOutlastsClose() {
+        val note = File(temp.root, "session-state/$DIR_NAME.markers-dropped")
+        val files = FileSessionFiles(
+            directory = File(temp.root, "sessions/$DIR_NAME"),
+            heartbeatFile = File(temp.root, "session-state/$DIR_NAME.heartbeat"),
+            markersDroppedFile = note,
+        )
+        files.create(SessionMetaFactory.open(identity()))
+
+        files.writeMarkersDropped(1)
+        assertEquals("1\n", note.readText())
+        files.writeMarkersDropped(3)
+        assertEquals(SessionFile.entries.size, files.directory.list()!!.size)
+        files.close()
+
+        assertEquals("the Session detail screen reads it after the session stopped", "3\n", note.readText())
+        files.writeMarkersDropped(4)
+        assertEquals("4\n", note.readText())
+        assertFalse(File(note.path + AtomicFiles.TMP_SUFFIX).exists())
+        // Files built without a note write none.
+        newFiles().writeMarkersDropped(2)
+        assertEquals("4\n", note.readText())
+    }
+
+    @Test
     fun appendingBeforeCreateAndASecondCreateAreRefused() {
         val files = newFiles()
         try {

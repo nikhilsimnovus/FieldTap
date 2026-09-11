@@ -329,6 +329,21 @@ class SessionRecoveryTest {
     }
 
     @Test
+    fun findOpenKeepsTheDroppedMarkerNoteOfAClosedSessionAndForgetsOneWhoseSessionIsGone() {
+        killedSession()
+        val kept = paths.markersDropped(DIR_NAME).apply { writeText("1\n") }
+        recovery.close(interrupted())
+        val gone = paths.markersDropped("20260901-080000_Gone").apply { writeText("2\n") }
+        val goneTmp = File(paths.stateDir, "20260901-080000_Gone.markers-dropped.tmp").apply { writeText("2") }
+
+        assertTrue(recovery.findOpen().isEmpty())
+
+        assertEquals("closing a session keeps its note", "1\n", kept.readText())
+        assertFalse(gone.exists())
+        assertFalse(goneTmp.exists())
+    }
+
+    @Test
     fun plannerAndRecoveryCloseAKilledSessionEndToEnd() {
         killedSession()
         val exits = listOf(ExitRecord(pid = PID, timestampWallMs = heartbeatWall + 40_000, reason = 14, description = "freezer"))

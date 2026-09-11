@@ -46,6 +46,9 @@ import java.nio.file.StandardCopyOption
  * - [writeHeartbeat] replaces the heartbeat file atomically, creating its directory. It also works after
  *   [close]: the recorder uses that to leave its stop time behind when the final session.json could not
  *   be written, so launch recovery closes the session at the right time.
+ * - [writeMarkersDropped] replaces the dropped-marker note atomically, outside the session directory like the heartbeat,
+ *   creating its directory; it works after [close], which keeps the note, because the Session detail screen reads it
+ *   once the session has stopped.
  * - [close] flushes, syncs and closes every stream, repairs any CSV whose write failed, and deletes the
  *   heartbeat. Close is idempotent. `append*`, [flush] and [sync] after close throw IllegalStateException.
  * - An IOException propagates to the recorder, which stops the session with the cause it can.
@@ -74,12 +77,25 @@ interface SessionFiles : Closeable {
     fun sync()
 
     fun writeHeartbeat(record: HeartbeatRecord)
+
+    /**
+     * Leaves [count], the markers this session accepted and then dropped, in a note outside the session directory
+     * ([SessionPaths.markersDropped]), so the Session detail screen can still say so after the session stopped. The
+     * default writes nothing.
+     */
+    fun writeMarkersDropped(count: Int) {}
 }
 
-/** The production [SessionFiles]. Owner: workstream `session-core`. */
+/**
+ * The production [SessionFiles]. [markersDroppedFile] is the session's [SessionPaths.markersDropped] note; without one,
+ * [writeMarkersDropped] writes nothing.
+ *
+ * Owner: workstream `session-core`.
+ */
 class FileSessionFiles(
     override val directory: File,
     private val heartbeatFile: File,
+    private val markersDroppedFile: File? = null,
 ) : SessionFiles {
     private var appenders: Map<SessionFile, CsvAppender>? = null
     private var createCalled = false
@@ -175,6 +191,15 @@ class FileSessionFiles(
             throw IOException("Cannot create the heartbeat directory ${parent.name}")
         }
         AtomicFiles.write(heartbeatFile, record.encode().toByteArray(Charsets.US_ASCII))
+    }
+
+    override fun writeMarkersDropped(count: Int) {
+        val target = markersDroppedFile ?: return
+        val parent = target.absoluteFile.parentFile
+        if (parent != null && !parent.isDirectory && !parent.mkdirs() && !parent.isDirectory) {
+            throw IOException("Cannot create the directory of the dropped-marker note ${parent.name}")
+        }
+        AtomicFiles.write(target, MarkersDroppedNote.encode(count).toByteArray(Charsets.US_ASCII))
     }
 
     override fun close() {

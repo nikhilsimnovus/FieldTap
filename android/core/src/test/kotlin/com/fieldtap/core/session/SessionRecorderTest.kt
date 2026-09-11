@@ -616,6 +616,95 @@ class SessionRecorderTest {
     }
 
     @Test
+    fun eachNewDroppedMarkerCountIsNotedBesideTheSessionAndAFailedNoteStopsNothing() = runTest {
+        val rig = Rig()
+        rig.files.failWhen = { it == FileCall.MarkersDropped(1) }
+        val run = start(rig)
+        rig.location.holding = true
+        send(rig, RecorderCommand.Mark("before the pause", START_WALL_MS + 300))
+        assertTrue(notes(rig).isEmpty())
+
+        val paused = event(START_WALL_MS + 1_000, EventKind.PRIVACY_ZONE, PrivacyZoneGate.PAUSED_NO_FIX_TITLE)
+        var fired = false
+        rig.location.onTickStep = { _, _ ->
+            if (fired) {
+                emptyList()
+            } else {
+                fired = true
+                rig.location.holding = false
+                rig.location.paused = true
+                rig.location.pausedWithoutFix = true
+                listOf(paused)
+            }
+        }
+        passSeconds(rig, 1)
+        assertEquals(1, rig.recorder.snapshot.value.markersDropped)
+        assertEquals(listOf(1), notes(rig))
+        passSeconds(rig, 1)
+        assertEquals("a note that failed is tried again, and the session records on", listOf(1, 1), notes(rig))
+        assertNull(rig.recorder.outcome.value)
+        rig.files.failWhen = { false }
+        passSeconds(rig, 2)
+        assertEquals("once written, the count is noted again only when it grows", listOf(1, 1, 1), notes(rig))
+
+        // Resumed, a marker waits for a fix again, and Stop drops it.
+        rig.location.paused = false
+        rig.location.pausedWithoutFix = false
+        rig.location.holding = true
+        send(rig, RecorderCommand.Mark("at stop", START_WALL_MS + 5_000))
+        val outcome = stop(rig, run)
+
+        assertEquals(2, outcome.markersDropped)
+        assertEquals(listOf(1, 1, 1, 2), notes(rig))
+        assertEquals("user", outcome.stoppedBy)
+    }
+
+    @Test
+    fun locationServicesSwitchedOffWriteThePipelinesGpsLostLikeAnyGpsEvent() = runTest {
+        val rig = Rig()
+        val run = start(rig)
+        val off = LocationAvailability(false, true, emptySet(), START_WALL_MS + 1_200, START_ELAPSED_MS + 1_200)
+        val lost = event(START_WALL_MS + 1_200, EventKind.GPS_LOST, "GPS lost")
+        rig.location.onAvailabilityStep = { if (it.locationEnabled) emptyList() else listOf(lost) }
+
+        send(rig, RecorderCommand.Measurement(off))
+
+        assertEquals(listOf(off), rig.location.availabilityCalls)
+        assertEquals(listOf(FileCall.Event(lost)), rig.files.rowsAndEvents)
+        assertFalse(rig.recorder.snapshot.value.locationEnabled)
+
+        // While paused it is dropped with every other input.
+        rig.location.paused = true
+        send(rig, RecorderCommand.Measurement(off.copy(observedWallMs = START_WALL_MS + 2_000, observedElapsedMs = START_ELAPSED_MS + 2_000)))
+        assertEquals(listOf(FileCall.Event(lost)), rig.files.rowsAndEvents)
+        stop(rig, run)
+    }
+
+    @Test
+    fun aGpsLostForLocationSwitchedOffWaitsWithTheOtherInputsForAFix() = runTest {
+        val rig = Rig()
+        val run = start(rig)
+        rig.location.holding = true
+        val lost = event(START_WALL_MS + 1_000, EventKind.GPS_LOST, "GPS lost")
+        rig.location.onAvailabilityStep = { listOf(lost) }
+        send(rig, RecorderCommand.Measurement(LocationAvailability(false, true, emptySet(), START_WALL_MS + 1_000, START_ELAPSED_MS + 1_000)))
+        assertTrue(rig.files.rowsAndEvents.isEmpty())
+
+        val outside = fix(elapsedMs = START_ELAPSED_MS + 2_500, wallMs = START_WALL_MS + 2_500)
+        rig.location.onFixStep = { sample ->
+            rig.location.holding = false
+            rig.location.lastFixSample = sample
+            LocationStep(track = trackRow(sample), events = emptyList(), pauseChanged = false, confirmsOutside = true)
+        }
+        send(rig, RecorderCommand.Measurement(outside))
+
+        assertEquals(listOf(FileCall.Event(lost), FileCall.Track(trackRow(outside))), rig.files.rowsAndEvents)
+        stop(rig, run)
+    }
+
+    private fun notes(rig: Rig): List<Int> = rig.files.calls.filterIsInstance<FileCall.MarkersDropped>().map { it.count }
+
+    @Test
     fun theSnapshotSaysWhenLocationIsOffAndWhenTheSessionWaitsForAFix() = runTest {
         val rig = Rig()
         val run = start(rig)

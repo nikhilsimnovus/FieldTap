@@ -180,7 +180,36 @@ class SessionStoreTest {
     @Test
     fun heartbeatsLiveInTheStateDirectory() {
         assertEquals(File(temp.root, "session-state/$DIR_NAME.heartbeat"), paths.heartbeat(DIR_NAME))
+        assertEquals(File(temp.root, "session-state/$DIR_NAME.markers-dropped"), paths.markersDropped(DIR_NAME))
         assertEquals(File(temp.root, "sessions/$DIR_NAME"), paths.directory(DIR_NAME))
+    }
+
+    @Test
+    fun theDroppedMarkerNoteIsReadAndDeletedWithItsSession() {
+        writeSession(DIR_NAME, closedMeta())
+        assertEquals("no note, nothing dropped", 0, store.markersDropped(DIR_NAME))
+        paths.stateDir.mkdirs()
+        val note = paths.markersDropped(DIR_NAME).apply { writeText(MarkersDroppedNote.encode(2)) }
+
+        assertEquals(2, store.markersDropped(DIR_NAME))
+        assertEquals(0, store.markersDropped("notes"))
+        note.writeText("two\n")
+        assertEquals("an unreadable note counts nothing", 0, store.markersDropped(DIR_NAME))
+        note.writeText("2\n")
+
+        assertTrue(store.delete(DIR_NAME, activeDirName = null))
+        assertFalse(note.exists())
+    }
+
+    @Test
+    fun aDroppedMarkerNoteHoldsItsCountAndNothingElse() {
+        assertEquals("0\n", MarkersDroppedNote.encode(0))
+        assertEquals("12\n", MarkersDroppedNote.encode(12))
+        assertEquals(12, MarkersDroppedNote.decode("12\n"))
+        assertEquals(12, MarkersDroppedNote.decode("12"))
+        for (text in listOf("", "\n", "-1\n", "1 2\n", "1.5\n", "9999999999\n", "12\r\n")) {
+            assertNull(text, MarkersDroppedNote.decode(text))
+        }
     }
 
     @Test

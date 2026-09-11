@@ -151,13 +151,17 @@ class FixJoiner(
 /**
  * `gps_lost` and `gps_restored`.
  *
- * - No event before the first fix.
  * - [onTick]: when more than [lostAfterMs] of elapsed time passed since the last fix arrived (its
  *   `observedElapsedMs`, so a fix delivered a little late is not a gap) and gps_lost has not been
  *   emitted since that fix: `gps_lost`, rat `-`, severity `warn`, title [LOST_TITLE], detail
- *   `no fix for more than 5 s`, time `nowWallMs`.
+ *   `no fix for more than 5 s`, time `nowWallMs`. Never before the first fix.
+ * - [onLocationServices] with location services switched off while they were on: `gps_lost` at once, detail
+ *   [LOCATION_OFF_DETAIL], time the switch's observed wall time. It is written before the first fix too, and after a
+ *   timed loss too, because it says why no fix comes; no timed `gps_lost` follows while the loss stands. Switched on
+ *   again: nothing, because only a fix shows GPS is back.
  * - [onFix] after gps_lost: `gps_restored`, rat `-`, severity `ok`, title [RESTORED_TITLE], time the
- *   fix's observed wall time.
+ *   fix's observed wall time. While location services are off, a fix measured before they went off (delivered late)
+ *   changes nothing; a fix measured after it shows they are on again.
  * - Every fix the [FixSelector] accepted counts, including fixes suppressed inside a privacy zone
  *   (logging is paused there, so the recorder drops the events anyway).
  *
@@ -168,6 +172,9 @@ class FixJoiner(
 class GpsEventDeriver(private val lostAfterMs: Long = 5_000) {
     private var lastFixObservedElapsedMs: Long? = null
     private var lostReported = false
+
+    /** When location services were reported off, on the elapsed clock; null while they are on. */
+    private var servicesOffSinceElapsedMs: Long? = null
     private val lostDetail = "no fix for more than ${seconds(lostAfterMs)} s"
 
     init {
@@ -176,6 +183,12 @@ class GpsEventDeriver(private val lostAfterMs: Long = 5_000) {
 
     /** Records an accepted fix; returns `gps_restored` when it ends a reported loss. */
     fun onFix(fix: FixSample): EventRow? {
+        val offSince = servicesOffSinceElapsedMs
+        if (offSince != null) {
+            // Measured before location services went off and delivered late: it says nothing about GPS now.
+            if (fix.elapsedMs <= offSince) return null
+            servicesOffSinceElapsedMs = null
+        }
         lastFixObservedElapsedMs = fix.observedElapsedMs
         if (!lostReported) return null
         lostReported = false
@@ -193,19 +206,39 @@ class GpsEventDeriver(private val lostAfterMs: Long = 5_000) {
         val last = lastFixObservedElapsedMs ?: return null
         if (lostReported || nowElapsedMs - last <= lostAfterMs) return null
         lostReported = true
-        return EventRow(
-            timeUtcMs = nowWallMs,
-            rat = EventRat.NONE,
-            kind = EventKind.GPS_LOST,
-            severity = Severity.WARN,
-            title = LOST_TITLE,
-            detail = lostDetail,
-        )
+        return lost(nowWallMs, lostDetail)
     }
+
+    /**
+     * Location services switched on ([enabled]) or off, observed at [observedWallMs] and [observedElapsedMs]: returns
+     * `gps_lost` with [LOCATION_OFF_DETAIL] when they go off while they were on; nothing otherwise.
+     */
+    fun onLocationServices(enabled: Boolean, observedWallMs: Long, observedElapsedMs: Long): EventRow? {
+        if (enabled) {
+            servicesOffSinceElapsedMs = null
+            return null
+        }
+        if (servicesOffSinceElapsedMs != null) return null
+        servicesOffSinceElapsedMs = observedElapsedMs
+        lostReported = true
+        return lost(observedWallMs, LOCATION_OFF_DETAIL)
+    }
+
+    private fun lost(timeUtcMs: Long, detail: String): EventRow = EventRow(
+        timeUtcMs = timeUtcMs,
+        rat = EventRat.NONE,
+        kind = EventKind.GPS_LOST,
+        severity = Severity.WARN,
+        title = LOST_TITLE,
+        detail = detail,
+    )
 
     companion object {
         const val LOST_TITLE: String = "GPS lost"
         const val RESTORED_TITLE: String = "GPS restored"
+
+        /** The detail of the `gps_lost` written when location services are switched off. */
+        const val LOCATION_OFF_DETAIL: String = "Location services turned off"
 
         /** `5000` -> `5`, `2500` -> `2.5`: locale-independent, no trailing zeros. */
         private fun seconds(ms: Long): String = BigDecimal.valueOf(ms, 3).stripTrailingZeros().toPlainString()

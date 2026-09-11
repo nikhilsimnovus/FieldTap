@@ -266,7 +266,8 @@ data class RecorderConfig(
  *   every zone, the kept inputs observed by the new `outsideUntilMs` are handled as if they had just arrived; a pause
  *   (a fix inside a zone, a fix outside after a stretch in which the phone could have been inside one, or a wait that
  *   lasted too long) lets the pipelines learn them with `writing` false and writes nothing of them. A marker dropped
- *   so is counted in [RecorderSnapshot.markersDropped].
+ *   so is counted in [RecorderSnapshot.markersDropped], and each new count is left with [SessionFiles.writeMarkersDropped]
+ *   outside the session files, so the Session detail screen can say so later; a failure to write it stops nothing.
  * - Measurement(FixSample): `location.onFix`; its track row appended, its time raised to the row above's when the wall
  *   clock was set back since; its privacy_zone events always appended; its gps events handled as inputs unless paused;
  *   when `location.zonePauses` changed, session.json and cells.csv written at once. On a pause change to "not paused",
@@ -275,8 +276,9 @@ data class RecorderConfig(
  *   without a fix inside a zone, by the `outsideUntilMs` before it) are written with `location.joinFinal` and the
  *   later ones, which may have been measured inside a zone, are dropped, so nothing is left to write during the pause.
  * - Service, data and display snapshots: to radio with `writing = !paused`, events appended. Location
- *   availability: [RecorderSnapshot.locationEnabled]. Signal, GNSS, listener reports and request failures:
- *   snapshot only.
+ *   availability: [RecorderSnapshot.locationEnabled], and `location.onLocationAvailability`'s `gps_lost` when location
+ *   services are switched off, handled as an input observed at the switch like the other gps events. Signal, GNSS,
+ *   listener reports and request failures: snapshot only.
  * - Traffic: row and failure event appended unless paused. Mark: [SessionEvents.marker] unless paused.
  * - While paused nothing but privacy_zone events is appended, whatever the pipelines return.
  * - Tick: `radio.onTick`, `location.onTick` (privacy_zone events always, the others as inputs unless paused), pending
@@ -318,6 +320,9 @@ class SessionRecorder(
     /** Inputs kept back until a fix shows they were observed outside every privacy zone, in arrival order. */
     private val held = ArrayDeque<Held>()
     private var markersDropped = 0
+
+    /** The dropped-marker count last written with [SessionFiles.writeMarkersDropped]. */
+    private var markersDroppedNoted = 0
 
     /** The latest time any written row or event carries, so the session never stops before one; MIN_VALUE before any. */
     private var newestRowUtcMs = Long.MIN_VALUE
@@ -399,6 +404,7 @@ class SessionRecorder(
         for (command in commands) {
             val stoppedBy = stopOnFailure {
                 val token = process(command)
+                noteMarkersDropped()
                 publishSnapshot()
                 token
             }
@@ -444,8 +450,24 @@ class SessionRecorder(
             is CellInfoAnswer -> if (!input.cached) holdOrApply(Held.Input(command, input.observedElapsedMs))
             is ServiceStateSnapshot, is DataStateSnapshot, is DisplayInfoSnapshot ->
                 holdOrApply(Held.Input(command, input.observedElapsedMs))
-            is LocationAvailability -> locationEnabled = input.locationEnabled
+            is LocationAvailability -> {
+                locationEnabled = input.locationEnabled
+                // gps_lost when location services go off: held with the other inputs, and dropped while paused.
+                for (event in location.onLocationAvailability(input)) holdOrApply(Held.Event(event, input.observedElapsedMs))
+            }
             is SignalSnapshot, is GnssSnapshot, is ListenerReport, is CellInfoRequestFailed -> Unit
+        }
+    }
+
+    /** Leaves the dropped-marker count beside the heartbeat whenever it grew; a note that cannot be written stops nothing. */
+    private fun noteMarkersDropped() {
+        if (markersDropped == markersDroppedNoted) return
+        try {
+            files.writeMarkersDropped(markersDropped)
+            markersDroppedNoted = markersDropped
+        } catch (e: IOException) {
+            // Not part of the session files: the recording goes on, the outcome still carries the count, and the next
+            // command tries again.
         }
     }
 
@@ -705,6 +727,7 @@ class SessionRecorder(
         markersDropped += held.count { it is Held.Input && it.command is RecorderCommand.Mark }
         held.clear()
         pending.clear()
+        attempt { noteMarkersDropped() }
         // Never before the start, nor before a row already written: the wall clock may have been set back meanwhile.
         val stoppedUtcMs = maxOf(clock.wallMillis(), config.identity.startedUtcMs, newestRowUtcMs)
         attempt { refreshTotals() }

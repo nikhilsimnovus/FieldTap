@@ -26,17 +26,47 @@ import kotlinx.coroutines.delay
 /**
  * Where sessions live. [root] is `<getExternalFilesDir(null)>/sessions` (pullable with adb from
  * `/sdcard/Android/data/<applicationId>/files/sessions`); [stateDir] is `<filesDir>/session-state` and
- * holds heartbeats, never session files.
+ * holds heartbeats and dropped-marker notes, never session files.
  */
 data class SessionPaths(val root: File, val stateDir: File) {
     fun directory(dirName: String): File = File(root, dirName)
 
     fun heartbeat(dirName: String): File = File(stateDir, dirName + HEARTBEAT_SUFFIX)
 
+    /**
+     * How many markers the session accepted and then dropped, when it dropped any ([MarkersDroppedNote]). The session
+     * format has no place for it, so it lives beside the heartbeat, and unlike the heartbeat it stays after the session
+     * stops, until the session is deleted.
+     */
+    fun markersDropped(dirName: String): File = File(stateDir, dirName + MARKERS_DROPPED_SUFFIX)
+
     companion object {
         /** Heartbeat files are `<dirName>.heartbeat`. */
         const val HEARTBEAT_SUFFIX: String = ".heartbeat"
+
+        /** Dropped-marker notes are `<dirName>.markers-dropped`. */
+        const val MARKERS_DROPPED_SUFFIX: String = ".markers-dropped"
     }
+}
+
+/**
+ * The bytes of a [SessionPaths.markersDropped] note: the count in decimal ASCII and a line feed.
+ *
+ * Owner: workstream `session-core`.
+ */
+object MarkersDroppedNote {
+    /** The longest note [SessionStore.markersDropped] reads. */
+    const val MAX_BYTES: Long = 32
+
+    fun encode(count: Int): String {
+        require(count >= 0) { "A dropped-marker count is never negative, was $count" }
+        return "$count\n"
+    }
+
+    /** The count, or null when [text] is not one [encode] wrote. */
+    fun decode(text: String): Int? = text.removeSuffix("\n").takeIf { DIGITS.matches(it) }?.toIntOrNull()
+
+    private val DIGITS = Regex("[0-9]{1,9}")
 }
 
 /** One session directory as the sessions list sees it. */
@@ -71,9 +101,10 @@ data class AllocatedSession(
  *   tries again (never reuses, never adds a suffix, because the name must match `started_utc` and
  *   `name`). Throws IOException when the directory cannot be created.
  * - [delete]: recursive, never following symbolic links; refuses (returns false) for [activeDirName] and
- *   for names that are not session directory names; also deletes its heartbeat. True when the directory
- *   is gone afterwards.
+ *   for names that are not session directory names; also deletes its heartbeat and its dropped-marker note. True when
+ *   the directory is gone afterwards.
  * - [openSessions]: listings whose session.json decodes with `stoppedUtcMs == null`.
+ * - [markersDropped]: the count in the session's dropped-marker note; 0 without a readable one.
  *
  * Owner: workstream `session-core`.
  */
@@ -114,6 +145,7 @@ class SessionStore(private val paths: SessionPaths, private val clock: Clock) {
         if (dirName == activeDirName) return false
         if (!isSessionDirName(dirName)) return false
         deleteHeartbeat(paths, dirName)
+        deleteMarkersDroppedNote(paths, dirName)
         val directory = paths.directory(dirName)
         if (!directory.exists()) return false
         deleteTree(directory)
@@ -122,6 +154,17 @@ class SessionStore(private val paths: SessionPaths, private val clock: Clock) {
 
     fun openSessions(): List<SessionListing> =
         list().filter { listing -> listing.meta?.let { it.stoppedUtcMs == null } ?: false }
+
+    fun markersDropped(dirName: String): Int {
+        if (!isSessionDirName(dirName)) return 0
+        val file = paths.markersDropped(dirName)
+        if (!file.isFile || file.length() > MarkersDroppedNote.MAX_BYTES) return 0
+        return try {
+            MarkersDroppedNote.decode(file.readText(Charsets.US_ASCII)) ?: 0
+        } catch (e: IOException) {
+            0
+        }
+    }
 
     private fun readMeta(directory: File): MetaRead {
         val file = File(directory, SessionFile.SESSION_JSON.fileName)
@@ -289,7 +332,7 @@ object RecoveryPlanner {
  * [findOpen] gathers [OpenSession]s from the store and heartbeat files. It also deletes heartbeat files
  * whose session directory is gone or already closed (left by a process that died between writing its
  * final session.json and deleting its heartbeat); a heartbeat of a session whose session.json cannot be
- * read is kept.
+ * read is kept. A dropped-marker note is deleted only once its session directory is gone.
  *
  * [close], in this order:
  * 1. [CsvRepair.truncateToLastLineEnd] on every CSV (a torn last row crashes the report); a CSV left
@@ -472,15 +515,19 @@ class SessionRecovery(private val store: SessionStore, private val paths: Sessio
         val files = paths.stateDir.listFiles() ?: return
         for (file in files) {
             val name = file.name
+            val note = name.endsWith(MARKERS_DROPPED_TMP_SUFFIX) || name.endsWith(SessionPaths.MARKERS_DROPPED_SUFFIX)
             val dirName = when {
                 name.endsWith(HEARTBEAT_TMP_SUFFIX) -> name.removeSuffix(HEARTBEAT_TMP_SUFFIX)
                 name.endsWith(SessionPaths.HEARTBEAT_SUFFIX) -> name.removeSuffix(SessionPaths.HEARTBEAT_SUFFIX)
+                name.endsWith(MARKERS_DROPPED_TMP_SUFFIX) -> name.removeSuffix(MARKERS_DROPPED_TMP_SUFFIX)
+                name.endsWith(SessionPaths.MARKERS_DROPPED_SUFFIX) -> name.removeSuffix(SessionPaths.MARKERS_DROPPED_SUFFIX)
                 else -> continue
             }
             if (dirName in openDirNames) continue
             val listing = store.read(dirName)
-            val closedOrGone = listing == null || listing.meta?.stoppedUtcMs != null
-            if (closedOrGone) file.delete()
+            // A closed session keeps its dropped-marker note for the Session detail screen; a heartbeat it no longer needs.
+            val stale = listing == null || (!note && listing.meta?.stoppedUtcMs != null)
+            if (stale) file.delete()
         }
     }
 
@@ -543,6 +590,7 @@ class SessionRecovery(private val store: SessionStore, private val paths: Sessio
         const val CR: Byte = 0x0D
         const val LF: Byte = 0x0A
         val HEARTBEAT_TMP_SUFFIX: String = SessionPaths.HEARTBEAT_SUFFIX + AtomicFiles.TMP_SUFFIX
+        val MARKERS_DROPPED_TMP_SUFFIX: String = SessionPaths.MARKERS_DROPPED_SUFFIX + AtomicFiles.TMP_SUFFIX
         val TIME_INDEX: Int = Schema.EVENTS_HEADER.indexOf("time_utc")
         val KIND_INDEX: Int = Schema.EVENTS_HEADER.indexOf("kind")
         val CAUSE_INDEX: Int = Schema.EVENTS_HEADER.indexOf("cause")
@@ -559,6 +607,13 @@ internal fun deleteHeartbeat(paths: SessionPaths, dirName: String) {
     val heartbeat = paths.heartbeat(dirName)
     heartbeat.delete()
     File(heartbeat.path + AtomicFiles.TMP_SUFFIX).delete()
+}
+
+/** Deletes a session's dropped-marker note and its temporary file, if present. */
+internal fun deleteMarkersDroppedNote(paths: SessionPaths, dirName: String) {
+    val note = paths.markersDropped(dirName)
+    note.delete()
+    File(note.path + AtomicFiles.TMP_SUFFIX).delete()
 }
 
 /** Deletes [root] and everything below it without following symbolic links; failures are left in place. */
