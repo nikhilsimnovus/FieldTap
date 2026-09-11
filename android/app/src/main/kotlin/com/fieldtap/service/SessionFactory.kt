@@ -96,7 +96,11 @@ class DefaultSessionFactory(
                 clock = clock,
                 files = files,
                 radio = DefaultRadioPipeline(sessionStartElapsedMs = startElapsedMs),
-                location = DefaultLocationPipeline(zones = current.zones, allowMockFixes = info.debuggable),
+                location = DefaultLocationPipeline(
+                    zones = current.zones,
+                    allowMockFixes = info.debuggable,
+                    sessionStartElapsedMs = startElapsedMs,
+                ),
                 storage = {
                     StorageStatus(
                         usedBytes = StorageUsage.usedBytes(sessionPaths.root),

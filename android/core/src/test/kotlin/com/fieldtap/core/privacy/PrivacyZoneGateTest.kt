@@ -136,20 +136,79 @@ class PrivacyZoneGateTest {
 
     @Test
     fun withZonesWritesWaitFromTheStartUntilAFixShowsThePhoneClearOfThem() {
-        val gate = PrivacyZoneGate(listOf(zone))
+        val gate = PrivacyZoneGate(listOf(zone), startElapsedMs = 500)
         assertTrue(gate.holding)
+        assertNull(gate.outsideUntilMs)
         assertEquals(0L, gate.holdAgeMs(5_000))
         assertNull(gate.onFix(outside(1_000)))
         assertFalse(gate.holding)
+        // 955 m from the edge at walking speed: no zone is within 5 s, so inputs up to 5 s after the fix are outside.
+        assertEquals(6_000L, gate.outsideUntilMs)
         assertNull(gate.holdAgeMs(5_000))
+        assertEquals(1_000L, gate.holdAgeMs(7_000))
 
         assertNull(gate.onFix(north(2_000, 300.0)))
         assertEquals(ZonePlacement.NEAR, gate.lastPlacement)
+        // 145 m from the edge a zone is within 5 s: only what the fix itself places is outside.
+        assertEquals(2_000L, gate.outsideUntilMs)
         assertTrue("near a zone the next fix decides", gate.holding)
         assertNull(gate.onFix(outside(3_000)))
         assertFalse(gate.holding)
 
-        assertFalse(PrivacyZoneGate(emptyList()).holding)
+        val none = PrivacyZoneGate(emptyList())
+        assertFalse(none.holding)
+        assertEquals(Long.MAX_VALUE, none.outsideUntilMs)
+    }
+
+    @Test
+    fun aFixOutsideAfterAStretchInWhichAZoneWasWithinReachPausesUntilTwoFixesCloseTogether() {
+        val gate = PrivacyZoneGate(listOf(zone), startElapsedMs = 0)
+        assertNull(gate.onFix(outside(1_000)))
+
+        // 50 m from the edge, 20 s later: walking speed or not, the phone could have been in the zone and back.
+        val back = north(21_000, 200.0)
+        val paused = gate.onFix(back)
+
+        assertEquals(
+            EventRow(back.observedWallMs, EventRat.NONE, EventKind.PRIVACY_ZONE, Severity.INFO, PrivacyZoneGate.PAUSED_NO_FIX_TITLE, PrivacyZoneGate.NO_FIX_DETAIL),
+            paused,
+        )
+        assertTrue(gate.pausedWithoutFix)
+        assertNull(gate.outsideUntilMs)
+        assertEquals("not counted: no fix showed the phone inside", 0, gate.pauses)
+
+        // One second on, still 50 m out: no time to have been inside in between, so logging resumes.
+        val resumed = gate.onFix(north(22_000, 200.0))
+        assertEquals(PrivacyZoneGate.RESUMED_TITLE, resumed?.title)
+        assertFalse(gate.paused)
+        assertEquals(0, gate.pauses)
+    }
+
+    @Test
+    fun skirtingAZoneWithFixesTooFarApartPausesOnceAndResumesOnce() {
+        val gate = PrivacyZoneGate(listOf(zone), startElapsedMs = 1_000)
+        assertNull(gate.onFix(north(1_000, 160.0, accuracyM = 5.0).copy(speedMps = null)))
+        // Fixes with no speed, 5 m outside the edge, every 2 s: each gap could hold a visit, but it pauses only once.
+        val events = (1..5).mapNotNull { gate.onFix(north(1_000 + it * 2_000L, 160.0, accuracyM = 5.0).copy(speedMps = null)) }
+        assertEquals(listOf(PrivacyZoneGate.PAUSED_NO_FIX_TITLE), events.map { it.title })
+        assertTrue(gate.paused)
+
+        // Walking away with GPS speed, 35 m and more from the edge, a fix a second: it resumes once.
+        val walkingAway = (0..3).mapNotNull { gate.onFix(north(12_000 + it * 1_000L, 190.0 + 2 * it)) }
+        assertEquals(listOf(PrivacyZoneGate.RESUMED_TITLE), walkingAway.map { it.title })
+    }
+
+    @Test
+    fun theFirstFixOutsideAfterTheStartPausesWhenTheSessionCouldHaveStartedInsideAZone() {
+        // Started indoors next to the zone; the first fix, 80 m out, comes 25 s later.
+        val started = PrivacyZoneGate(listOf(zone), startElapsedMs = 0)
+        assertEquals(PrivacyZoneGate.PAUSED_NO_FIX_TITLE, started.onFix(north(25_000, 230.0))?.title)
+        assertEquals(PrivacyZoneGate.RESUMED_TITLE, started.onFix(north(26_000, 230.0))?.title)
+
+        // The same fix 2 s after the start: 80 m cannot be covered from inside the zone in 2 s.
+        val quick = PrivacyZoneGate(listOf(zone), startElapsedMs = 23_000)
+        assertNull(quick.onFix(north(25_000, 230.0)))
+        assertFalse(quick.paused)
     }
 
     @Test
@@ -187,17 +246,36 @@ class PrivacyZoneGateTest {
     }
 
     @Test
+    fun aFixFarFromEveryZoneStillPausesWhenNoFixFollowsWithinTheLimit() {
+        // A fix 955 m from the zone's edge, then none: the phone could be anywhere within a minute's reach.
+        val gate = PrivacyZoneGate(listOf(zone), holdLimitMs = 60_000)
+        val far = outside(1_000)
+        assertNull(gate.onFix(far))
+        assertFalse(gate.holding)
+        assertNull(gate.onTick(1L, far.elapsedMs + 5_000))
+        assertFalse("the fix itself places the next 5 s", gate.holding)
+        assertNull(gate.onTick(1L, far.elapsedMs + 6_000))
+        assertTrue(gate.holding)
+        assertNull(gate.onTick(1L, far.observedElapsedMs + 60_000))
+
+        assertEquals(PrivacyZoneGate.PAUSED_NO_FIX_TITLE, gate.onTick(1L, far.observedElapsedMs + 60_001)?.title)
+        assertTrue(gate.pausedWithoutFix)
+    }
+
+    @Test
     fun aFixWhoseAccuracyReachesIntoAZoneNeitherPausesNorResumesNorExtendsAHold() {
         val gate = PrivacyZoneGate(listOf(zone), holdLimitMs = 60_000)
-        gate.onFix(outside(1_000))
+        val outsideFix = outside(1_000)
+        gate.onFix(outsideFix)
         val coarse = north(2_000, 250.0, accuracyM = 150.0)
         assertNull(gate.onFix(coarse))
         assertEquals(ZonePlacement.AMBIGUOUS, gate.lastPlacement)
         assertFalse(gate.paused)
+        assertEquals("inputs after the coarse fix wait", coarse.elapsedMs, gate.outsideUntilMs)
         assertTrue(gate.holding)
         assertNull(gate.onFix(north(30_000, 250.0, accuracyM = 150.0)))
-        assertNull("still timed from the first coarse fix", gate.onTick(1L, coarse.observedElapsedMs + 60_000))
-        assertNotNull(gate.onTick(1L, coarse.observedElapsedMs + 60_001))
+        assertNull("timed from the last fix outside every zone", gate.onTick(1L, outsideFix.observedElapsedMs + 60_000))
+        assertNotNull(gate.onTick(1L, outsideFix.observedElapsedMs + 60_001))
 
         val paused = PrivacyZoneGate(listOf(zone))
         paused.onFix(inside(1_000))

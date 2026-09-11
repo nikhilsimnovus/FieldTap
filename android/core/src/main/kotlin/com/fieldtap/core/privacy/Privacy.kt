@@ -11,6 +11,7 @@ import com.fieldtap.format.Severity
 import java.math.BigDecimal
 import kotlin.math.asin
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -42,7 +43,10 @@ enum class ZonePlacement {
      */
     AMBIGUOUS,
 
-    /** Outside every zone, but within [PrivacyZones.NEAR_ZONE_M] of a zone's edge: the next fix may find the phone inside. */
+    /**
+     * Outside every zone, but within [PrivacyZones.NEAR_ZONE_M] of a zone's edge. Descriptive only: how long a fix outside
+     * keeps writes going is [ZoneReach]'s, from the distance itself.
+     */
     NEAR,
 
     /** Outside every zone and not near one. The only placement when there are no zones. */
@@ -91,6 +95,23 @@ object PrivacyZones {
 
     /** True when [fix] is inside at least one of [zones], accuracy margin included. */
     fun contains(zones: List<PrivacyZone>, fix: FixSample): Boolean = placement(zones, fix) == ZonePlacement.INSIDE
+
+    /**
+     * How far [fix] is from the nearest zone edge, less its whole accuracy: the least distance the phone must still
+     * cover to be inside a zone. 0 when the accuracy circle reaches into a zone or a value is not a number; infinite
+     * without zones.
+     */
+    fun marginM(zones: List<PrivacyZone>, fix: FixSample): Double {
+        if (zones.isEmpty()) return Double.POSITIVE_INFINITY
+        val reach = accuracyReach(fix.accuracyM)
+        var margin = Double.POSITIVE_INFINITY
+        for (zone in zones) {
+            val distance = distanceM(zone.lat, zone.lon, fix.lat, fix.lon) - zone.radiusM - reach
+            if (distance.isNaN()) return 0.0
+            margin = min(margin, distance)
+        }
+        return margin.coerceAtLeast(0.0)
+    }
 
     /** Where [fix] lies with respect to [zones]; INSIDE wins over AMBIGUOUS, which wins over NEAR. */
     fun placement(zones: List<PrivacyZone>, fix: FixSample): ZonePlacement {
@@ -143,41 +164,114 @@ object PrivacyZones {
 }
 
 /**
- * The pause state machine for privacy zones, and the hold that keeps writes back until a fix shows where they
- * were made.
+ * How far a phone can travel: whether it could have been inside a privacy zone while no fix placed it.
  *
- * Paused (nothing but `privacy_zone` events is written):
- * - [onFix] with a fix [ZonePlacement.INSIDE] a zone while not paused: pause, count a pause, return a
- *   `privacy_zone` event: rat `-`, severity `info`, title [PAUSED_TITLE], no detail, time the fix's
- *   observed wall time.
- * - [onFix] with a fix outside every zone ([ZonePlacement.NEAR] or [ZonePlacement.CLEAR]) while paused: resume,
- *   return title [RESUMED_TITLE]. A [ZonePlacement.AMBIGUOUS] fix never resumes.
+ * The bound is physical and deliberately generous. From the speed a fix reports, plus [SPEED_SLACK_MPS] for its error,
+ * the phone may speed up at [MAX_ACCELERATION_MPS2] (a sports car's full throttle) to [MAX_SPEED_MPS] (faster than a
+ * car on any road or a high-speed train). A fix without a usable speed counts as moving at [MAX_SPEED_MPS] already.
+ * The distance to cover is [PrivacyZones.marginM]: to the nearest zone edge, less the fix's whole accuracy.
  *
- * Holding ([holding]: writes wait for the next fix that shows the phone inside or outside, which decides whether
- * they are dropped or written) applies only when there are zones, and never while paused:
- * - from the start, before any fix: nothing yet shows where the phone is;
- * - after a [ZonePlacement.NEAR] fix, until the next fix: the phone may enter the zone before it;
- * - from a [ZonePlacement.AMBIGUOUS] fix, until a fix shows inside or outside; further ambiguous fixes do not
- *   extend the hold.
- * A [ZonePlacement.CLEAR] fix ends a hold; an INSIDE fix ends it with a pause.
- * - [onTick] ends a hold that has lasted more than [holdLimitMs] with a pause of its own ([pausedWithoutFix]):
- *   title [PAUSED_NO_FIX_TITLE], detail [NO_FIX_DETAIL], time the tick's wall time. It is counted in [pauses] only
- *   once a fix inside a zone confirms it; a fix outside resumes as usual. A hold that began before the first tick
- *   is timed from that tick.
- *
- * Neither title nor detail ever names or locates a zone, and the events carry no pci, arfcn or cause.
- * Callers pass only fixes the [com.fieldtap.core.location.FixSelector] accepted. The zones are copied at
- * construction.
+ * - [reachM]: the most distance covered in [reachM]'s time from a speed.
+ * - [reachTimeMs]: the least time to cover a margin, in whole milliseconds rounded down; [Long.MAX_VALUE] for an
+ *   infinite margin (no zones).
+ * - [forwardMs]: how long after a fix inputs count as taken outside on that fix alone: [FORWARD_MS] when reaching a
+ *   zone takes at least that long, else 0. It has two values only, so where writing stops after a fix never measures
+ *   how far a zone is.
  *
  * Owner: workstream `location-privacy-core`.
  */
-class PrivacyZoneGate(zones: List<PrivacyZone>, private val holdLimitMs: Long = HOLD_LIMIT_MS) {
+object ZoneReach {
+    const val MAX_SPEED_MPS: Double = 100.0
+    const val MAX_ACCELERATION_MPS2: Double = 10.0
+    const val SPEED_SLACK_MPS: Double = 3.0
+    const val FORWARD_MS: Long = 5_000
+
+    /** The speed a reach starts from: [speedMps] plus the slack, at most [MAX_SPEED_MPS]; unknown or unusable is [MAX_SPEED_MPS]. */
+    fun startSpeedMps(speedMps: Double?): Double =
+        if (speedMps == null || !speedMps.isFinite() || speedMps < 0.0) MAX_SPEED_MPS else min(speedMps + SPEED_SLACK_MPS, MAX_SPEED_MPS)
+
+    /** The most distance, in metres, covered in [elapsedMs] starting at [speedMps]. */
+    fun reachM(elapsedMs: Long, speedMps: Double?): Double {
+        if (elapsedMs <= 0) return 0.0
+        val seconds = elapsedMs / 1_000.0
+        val speed = startSpeedMps(speedMps)
+        val toTopSpeed = (MAX_SPEED_MPS - speed) / MAX_ACCELERATION_MPS2
+        return if (seconds <= toTopSpeed) {
+            speed * seconds + MAX_ACCELERATION_MPS2 * seconds * seconds / 2
+        } else {
+            speed * toTopSpeed + MAX_ACCELERATION_MPS2 * toTopSpeed * toTopSpeed / 2 + MAX_SPEED_MPS * (seconds - toTopSpeed)
+        }
+    }
+
+    /** The least time, in milliseconds rounded down, to cover [marginM] starting at [speedMps]. */
+    fun reachTimeMs(marginM: Double, speedMps: Double?): Long {
+        if (marginM.isNaN() || marginM <= 0.0) return 0
+        if (marginM.isInfinite()) return Long.MAX_VALUE
+        val speed = startSpeedMps(speedMps)
+        val toTopSpeed = (MAX_SPEED_MPS - speed) / MAX_ACCELERATION_MPS2
+        val speedingUpM = speed * toTopSpeed + MAX_ACCELERATION_MPS2 * toTopSpeed * toTopSpeed / 2
+        val seconds = if (marginM <= speedingUpM) {
+            (-speed + sqrt(speed * speed + 2 * MAX_ACCELERATION_MPS2 * marginM)) / MAX_ACCELERATION_MPS2
+        } else {
+            toTopSpeed + (marginM - speedingUpM) / MAX_SPEED_MPS
+        }
+        val ms = floor(seconds * 1_000)
+        return if (ms >= Long.MAX_VALUE.toDouble()) Long.MAX_VALUE else ms.toLong()
+    }
+
+    /** [FORWARD_MS] when reaching a zone takes at least that long, else 0. */
+    fun forwardMs(reachTimeMs: Long): Long = if (reachTimeMs >= FORWARD_MS) FORWARD_MS else 0
+}
+
+/**
+ * The pause state machine for privacy zones, and the hold that keeps writes back until fixes show where they were
+ * made. Without zones it never pauses and never holds.
+ *
+ * Paused (nothing but `privacy_zone` events is written):
+ * - [onFix] with a fix [ZonePlacement.INSIDE] a zone while not paused: pause, count a pause, return a `privacy_zone`
+ *   event: rat `-`, severity `info`, title [PAUSED_TITLE], no detail, time the fix's observed wall time.
+ * - [onFix] with a fix outside every zone ([ZonePlacement.NEAR] or [ZonePlacement.CLEAR]) after that pause: resume,
+ *   title [RESUMED_TITLE]. A [ZonePlacement.AMBIGUOUS] fix never resumes.
+ * - Paused without a fix ([pausedWithoutFix]), title [PAUSED_NO_FIX_TITLE], detail [NO_FIX_DETAIL]:
+ *   - [onTick], once more than [holdLimitMs] has passed since the newest fix outside every zone was observed (before
+ *     any, since the first tick); time the tick's wall time.
+ *   - [onFix] with a fix outside every zone when, since the fix outside every zone before it (before any, since the
+ *     start), the phone could have gone into a zone and back ([ZoneReach]: the two fixes' reach times add up to no
+ *     more than the time between them); time this fix's observed wall time.
+ *   It is counted in [pauses] only once a fix inside a zone confirms it, and then resumes like the pause above.
+ *   Otherwise it resumes at a fix outside every zone when the fix outside every zone before it left no time to visit
+ *   a zone in between, so a phone skirting a zone pauses once and resumes once.
+ *
+ * Holding: while not paused, an input may be written only if it was observed by [outsideUntilMs], on the elapsed
+ * clock: the newest fix outside every zone plus its [ZoneReach.forwardMs], or the time of an [ZonePlacement.AMBIGUOUS]
+ * fix after that fix if earlier; nothing before the first fix outside every zone. Later inputs wait: the next fix
+ * outside every zone either shows the phone stayed outside, and moves [outsideUntilMs] past them, or pauses logging,
+ * which drops them. [holding] is true while the newest time the gate was told, by a fix or a tick, is past
+ * [outsideUntilMs].
+ *
+ * Neither title nor detail ever names or locates a zone, and the events carry no pci, arfcn or cause. Every event time
+ * is a fix's or a tick's, never one computed from a distance. Callers pass only fixes the
+ * [com.fieldtap.core.location.FixSelector] accepted, in its order. The zones are copied at construction.
+ *
+ * @param startElapsedMs the session's start on the elapsed clock, from which the time before the first fix counts;
+ *   null takes the first time the gate is told, by a fix or a tick.
+ *
+ * Owner: workstream `location-privacy-core`.
+ */
+class PrivacyZoneGate(
+    zones: List<PrivacyZone>,
+    private val holdLimitMs: Long = HOLD_LIMIT_MS,
+    startElapsedMs: Long? = null,
+) {
     private val zones: List<PrivacyZone> = zones.toList()
     private var isPaused = false
     private var withoutFix = false
     private var pauseCount = 0
-    private var isHolding = this.zones.isNotEmpty()
-    private var holdSinceElapsedMs: Long? = null
+    private var startMs: Long? = startElapsedMs
+    private var firstTickElapsedMs: Long? = null
+    private var newestSeenElapsedMs: Long? = null
+    private var lastOutside: OutsideFix? = null
+    private var ambiguousSinceElapsedMs: Long? = null
 
     init {
         require(holdLimitMs >= 0) { "holdLimitMs must not be negative: $holdLimitMs" }
@@ -188,8 +282,27 @@ class PrivacyZoneGate(zones: List<PrivacyZone>, private val holdLimitMs: Long = 
     /** Pauses a fix inside a zone started or confirmed: `privacy.zone_pauses`. */
     val pauses: Int get() = pauseCount
 
-    /** True while writes wait for a fix that shows where they were made; never while [paused]. */
-    val holding: Boolean get() = isHolding
+    /**
+     * Inputs observed at or before this elapsed time may be written: [Long.MAX_VALUE] without zones; null while paused
+     * or before the first fix outside every zone.
+     */
+    val outsideUntilMs: Long?
+        get() {
+            if (zones.isEmpty()) return Long.MAX_VALUE
+            if (isPaused) return null
+            val outside = lastOutside ?: return null
+            val until = outside.elapsedMs + outside.forwardMs
+            return ambiguousSinceElapsedMs?.let { min(until, it) } ?: until
+        }
+
+    /** True while inputs arriving now wait for a fix that shows where they were made; never while [paused]. */
+    val holding: Boolean
+        get() {
+            if (zones.isEmpty() || isPaused) return false
+            val until = outsideUntilMs ?: return true
+            val newest = newestSeenElapsedMs ?: return false
+            return newest > until
+        }
 
     /** True while [paused] because no fix showed where the phone is, rather than because a fix was inside a zone. */
     val pausedWithoutFix: Boolean get() = isPaused && withoutFix
@@ -198,19 +311,24 @@ class PrivacyZoneGate(zones: List<PrivacyZone>, private val holdLimitMs: Long = 
     var lastPlacement: ZonePlacement = ZonePlacement.CLEAR
         private set
 
-    /** How long the current hold has lasted at [nowElapsedMs]: null when not [holding], 0 before its first tick. */
+    /** How long inputs have waited at [nowElapsedMs]: null when nothing waits then, 0 before the first tick and fix. */
     fun holdAgeMs(nowElapsedMs: Long): Long? {
-        if (!isHolding) return null
-        val since = holdSinceElapsedMs ?: return 0
+        if (zones.isEmpty() || isPaused) return null
+        val until = outsideUntilMs
+        if (until != null) return if (nowElapsedMs > until) nowElapsedMs - until else null
+        val since = firstTickElapsedMs ?: return 0
         return (nowElapsedMs - since).coerceAtLeast(0)
     }
 
     fun onFix(fix: FixSample): EventRow? {
+        if (startMs == null) startMs = fix.elapsedMs
+        newestSeenElapsedMs = maxOf(newestSeenElapsedMs ?: fix.observedElapsedMs, fix.observedElapsedMs)
         val placement = PrivacyZones.placement(zones, fix)
         lastPlacement = placement
         return when (placement) {
             ZonePlacement.INSIDE -> {
-                endHold()
+                lastOutside = null
+                ambiguousSinceElapsedMs = null
                 when {
                     !isPaused -> {
                         isPaused = true
@@ -228,47 +346,64 @@ class PrivacyZoneGate(zones: List<PrivacyZone>, private val holdLimitMs: Long = 
             }
 
             ZonePlacement.AMBIGUOUS -> {
-                if (!isPaused && !isHolding) hold(fix.observedElapsedMs)
+                if (!isPaused && ambiguousSinceElapsedMs == null) ambiguousSinceElapsedMs = fix.elapsedMs
                 null
             }
 
-            ZonePlacement.NEAR, ZonePlacement.CLEAR -> {
-                val resumed = if (isPaused) {
-                    isPaused = false
-                    withoutFix = false
-                    event(fix.observedWallMs, RESUMED_TITLE, detail = null)
-                } else {
-                    null
-                }
-                if (placement == ZonePlacement.NEAR) hold(fix.observedElapsedMs) else endHold()
-                resumed
-            }
+            ZonePlacement.NEAR, ZonePlacement.CLEAR -> onOutside(fix)
         }
     }
 
-    /** Times the hold; returns the pause that ends one lasting more than [holdLimitMs]. */
+    /** Times the wait for a fix outside every zone; returns the pause when it has lasted more than [holdLimitMs]. */
     fun onTick(nowWallMs: Long, nowElapsedMs: Long): EventRow? {
-        if (!isHolding) return null
-        val since = holdSinceElapsedMs
-        if (since == null) {
-            holdSinceElapsedMs = nowElapsedMs
-            return null
-        }
+        if (startMs == null) startMs = nowElapsedMs
+        if (firstTickElapsedMs == null) firstTickElapsedMs = nowElapsedMs
+        newestSeenElapsedMs = maxOf(newestSeenElapsedMs ?: nowElapsedMs, nowElapsedMs)
+        if (zones.isEmpty() || isPaused) return null
+        val since = lastOutside?.observedElapsedMs ?: firstTickElapsedMs ?: nowElapsedMs
         if (nowElapsedMs - since <= holdLimitMs) return null
-        endHold()
         isPaused = true
         withoutFix = true
+        ambiguousSinceElapsedMs = null
         return event(nowWallMs, PAUSED_NO_FIX_TITLE, NO_FIX_DETAIL)
     }
 
-    private fun hold(sinceElapsedMs: Long) {
-        isHolding = true
-        holdSinceElapsedMs = sinceElapsedMs
+    private fun onOutside(fix: FixSample): EventRow? {
+        ambiguousSinceElapsedMs = null
+        if (zones.isEmpty()) return null
+        val previous = lastOutside
+        val current = OutsideFix(
+            elapsedMs = fix.elapsedMs,
+            observedElapsedMs = fix.observedElapsedMs,
+            reachTimeMs = ZoneReach.reachTimeMs(PrivacyZones.marginM(zones, fix), fix.speedMps),
+        )
+        lastOutside = current
+        return when {
+            isPaused && !withoutFix -> resume(fix)
+            isPaused -> if (previous != null && !couldVisitZone(previous, current)) resume(fix) else null
+            couldVisitZone(previous, current) -> {
+                isPaused = true
+                withoutFix = true
+                event(fix.observedWallMs, PAUSED_NO_FIX_TITLE, NO_FIX_DETAIL)
+            }
+            else -> null
+        }
     }
 
-    private fun endHold() {
-        isHolding = false
-        holdSinceElapsedMs = null
+    /** Whether the phone could have been inside a zone between [previous] (null: the start) and [current]. */
+    private fun couldVisitZone(previous: OutsideFix?, current: OutsideFix): Boolean {
+        val fromMs = previous?.elapsedMs ?: startMs ?: return false
+        val betweenMs = current.elapsedMs - fromMs
+        if (betweenMs <= 0) return false
+        val previousReachMs = previous?.reachTimeMs ?: 0L
+        val reachMs = if (previousReachMs > Long.MAX_VALUE - current.reachTimeMs) Long.MAX_VALUE else previousReachMs + current.reachTimeMs
+        return reachMs <= betweenMs
+    }
+
+    private fun resume(fix: FixSample): EventRow {
+        isPaused = false
+        withoutFix = false
+        return event(fix.observedWallMs, RESUMED_TITLE, detail = null)
     }
 
     private fun event(timeUtcMs: Long, title: String, detail: String?): EventRow = EventRow(
@@ -280,13 +415,18 @@ class PrivacyZoneGate(zones: List<PrivacyZone>, private val holdLimitMs: Long = 
         detail = detail,
     )
 
+    /** A fix outside every zone, as the gate remembers it. */
+    private class OutsideFix(val elapsedMs: Long, val observedElapsedMs: Long, val reachTimeMs: Long) {
+        val forwardMs: Long get() = ZoneReach.forwardMs(reachTimeMs)
+    }
+
     companion object {
         const val PAUSED_TITLE: String = "Logging paused in a privacy zone"
         const val RESUMED_TITLE: String = "Logging resumed"
         const val PAUSED_NO_FIX_TITLE: String = "Logging paused until the location is known"
         const val NO_FIX_DETAIL: String = "no location fix showed the phone outside every privacy zone"
 
-        /** How long writes may wait for a fix before they are dropped and logging pauses. */
+        /** How long writes may wait for a fix outside every zone before they are dropped and logging pauses. */
         const val HOLD_LIMIT_MS: Long = 60_000
     }
 }

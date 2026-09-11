@@ -33,6 +33,17 @@ class PrivacyZonesTest {
     }
 
     @Test
+    fun theMarginIsTheDistanceToTheNearestEdgeLessTheWholeAccuracy() {
+        assertEquals(195.0, PrivacyZones.marginM(listOf(zone), north(300.0, accuracyM = 5.0)), 1e-6)
+        assertEquals(200.0, PrivacyZones.marginM(listOf(zone), north(300.0)), 1e-6)
+        assertEquals("the accuracy reaches into the zone", 0.0, PrivacyZones.marginM(listOf(zone), north(150.0, accuracyM = 60.0)), 0.0)
+        assertEquals(0.0, PrivacyZones.marginM(listOf(zone), north(1_000.0, accuracyM = Double.NaN)), 0.0)
+        assertEquals(Double.POSITIVE_INFINITY, PrivacyZones.marginM(emptyList(), north(0.0)), 0.0)
+        val second = zone.copy(id = "zone-2", lat = zone.lat + 600.0 / metresPerDegree)
+        assertEquals("the nearer zone counts", 150.0, PrivacyZones.marginM(listOf(zone, second), north(350.0)), 1e-6)
+    }
+
+    @Test
     fun distanceIsShortAcrossTheAntimeridian() {
         assertEquals(metresPerDegree * 0.001, PrivacyZones.distanceM(0.0, 179.9995, 0.0, -179.9995), 1e-6)
     }

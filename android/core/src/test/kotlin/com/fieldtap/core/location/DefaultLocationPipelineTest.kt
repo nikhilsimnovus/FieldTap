@@ -30,7 +30,11 @@ class DefaultLocationPipelineTest {
         lat = 38.8870 + second * 10.0 / metresPerDegree,
         lon = -77.0300,
         accuracyM = null,
+        speedMps = 10.0,
     )
+
+    /** About 5 km south of the zone, a fix [second]s after the start. */
+    private fun farSouth(second: Int): FixSample = fix(elapsedMs = startElapsedMs + second * 1_000L, lat = 38.8450, lon = -77.0300)
 
     private fun positionOf(fix: FixSample) = LatLon(fix.lat, fix.lon)
 
@@ -102,15 +106,38 @@ class DefaultLocationPipelineTest {
     @Test
     fun gpsRestoredByAFixOutsideEveryZoneIsWritten() {
         val pipeline = DefaultLocationPipeline(listOf(zone))
-        pipeline.onFix(walk(0))
-        val lost = pipeline.onTick(nowWallMs = 42L, nowElapsedMs = walk(0).observedElapsedMs + 5_001)
+        pipeline.onFix(farSouth(0))
+        val lost = pipeline.onTick(nowWallMs = 42L, nowElapsedMs = farSouth(0).observedElapsedMs + 5_001)
         assertEquals(listOf(EventKind.GPS_LOST), lost.map { it.kind })
         assertEquals(42L, lost.single().timeUtcMs)
 
-        val step = pipeline.onFix(walk(10))
+        val step = pipeline.onFix(farSouth(10))
         assertEquals(listOf(EventKind.GPS_RESTORED), step.events.map { it.kind })
         assertNotNull(step.track)
         assertFalse(step.pauseChanged)
+        assertTrue(step.confirmsOutside)
+    }
+
+    @Test
+    fun aFixAfterAStretchInWhichTheZoneWasWithinReachPausesInsteadOfRestoring() {
+        val pipeline = DefaultLocationPipeline(listOf(zone))
+        pipeline.onFix(walk(0))
+        assertEquals(1, pipeline.onTick(nowWallMs = 1L, nowElapsedMs = walk(0).observedElapsedMs + 5_001).size)
+
+        // 233.6 m out, then 133.6 m out 10 s later, at 10 m/s: the walker could have been in the zone meanwhile.
+        val back = pipeline.onFix(walk(10))
+        assertEquals(listOf(PrivacyZoneGate.PAUSED_NO_FIX_TITLE), back.events.map { it.title })
+        assertNull(back.track)
+        assertTrue(back.pauseChanged)
+        assertFalse(back.confirmsOutside)
+        assertTrue(pipeline.pausedWithoutFix)
+        assertEquals("not a join candidate", walk(0), pipeline.lastFix())
+
+        val next = pipeline.onFix(walk(11))
+        assertEquals(listOf(PrivacyZoneGate.RESUMED_TITLE), next.events.map { it.title })
+        assertNotNull(next.track)
+        assertTrue(next.confirmsOutside)
+        assertEquals(0, pipeline.zonePauses)
     }
 
     @Test
@@ -151,8 +178,11 @@ class DefaultLocationPipelineTest {
         assertTrue(pipeline.onTick(nowWallMs = 1L, nowElapsedMs = 999_999_999L).isEmpty())
         assertEquals(JoinResult.Pending, pipeline.join(measurementElapsedMs = 0, nowElapsedMs = 6_499))
         assertEquals(JoinResult.Resolved(null), pipeline.join(measurementElapsedMs = 0, nowElapsedMs = 6_500))
+        assertNull(pipeline.outsideUntilMs)
 
-        assertFalse("without zones nothing ever waits", DefaultLocationPipeline(emptyList()).holding)
+        val withoutZones = DefaultLocationPipeline(emptyList())
+        assertFalse("without zones nothing ever waits", withoutZones.holding)
+        assertEquals(Long.MAX_VALUE, withoutZones.outsideUntilMs)
     }
 
     @Test
@@ -178,8 +208,8 @@ class DefaultLocationPipelineTest {
         assertEquals(far, pipeline.lastFix())
         assertEquals(JoinResult.Resolved(null), pipeline.join(startElapsedMs + 10_000, nowElapsedMs = startElapsedMs + 20_000))
 
-        assertEquals(listOf(EventKind.GPS_LOST), pipeline.onTick(1L, coarse.observedElapsedMs + 60_000).map { it.kind })
-        val paused = pipeline.onTick(2L, coarse.observedElapsedMs + 60_001)
+        assertEquals(listOf(EventKind.GPS_LOST), pipeline.onTick(1L, far.observedElapsedMs + 60_000).map { it.kind })
+        val paused = pipeline.onTick(2L, far.observedElapsedMs + 60_001)
         assertEquals(listOf(PrivacyZoneGate.PAUSED_NO_FIX_TITLE), paused.map { it.title })
         assertTrue(pipeline.paused)
         assertTrue(pipeline.pausedWithoutFix)

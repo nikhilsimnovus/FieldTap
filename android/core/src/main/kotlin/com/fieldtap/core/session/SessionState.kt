@@ -77,6 +77,8 @@ data class SessionOutcome(
     val freshSamples: Long,
     /** The session's name as session.json holds it; null when it is not known. */
     val name: String? = null,
+    /** Markers accepted and then dropped, because no fix showed they were tapped outside the privacy zones. */
+    val markersDropped: Int = 0,
 )
 
 data class SessionState(

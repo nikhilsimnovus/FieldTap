@@ -541,6 +541,81 @@ class SessionRecorderTest {
     }
 
     @Test
+    fun aMarkerKeptBackForALocationFixIsCountedWhenAPauseDropsIt() = runTest {
+        val rig = Rig()
+        val run = start(rig)
+        rig.location.holding = true
+        send(rig, RecorderCommand.Mark("waiting for a fix", START_WALL_MS + 300))
+        assertTrue(rig.recorder.snapshot.value.holdingInputs)
+        assertEquals(0, rig.recorder.snapshot.value.markersDropped)
+
+        val paused = event(START_WALL_MS + 1_000, EventKind.PRIVACY_ZONE, PrivacyZoneGate.PAUSED_NO_FIX_TITLE)
+        var fired = false
+        rig.location.onTickStep = { _, _ ->
+            if (fired) {
+                emptyList()
+            } else {
+                fired = true
+                rig.location.holding = false
+                rig.location.paused = true
+                rig.location.pausedWithoutFix = true
+                listOf(paused)
+            }
+        }
+        passSeconds(rig, 1)
+
+        assertEquals(listOf(FileCall.Event(paused)), rig.files.rowsAndEvents)
+        val snapshot = rig.recorder.snapshot.value
+        assertEquals(1, snapshot.markersDropped)
+        assertFalse(snapshot.holdingInputs)
+        stop(rig, run)
+    }
+
+    @Test
+    fun aMarkerStillKeptBackAtStopIsCountedAsDropped() = runTest {
+        val rig = Rig()
+        val run = start(rig)
+        rig.location.holding = true
+        send(rig, RecorderCommand.Mark("just before stop", START_WALL_MS + 300))
+
+        stop(rig, run)
+
+        assertTrue(rig.files.rowsAndEvents.isEmpty())
+        assertEquals(1, rig.recorder.snapshot.value.markersDropped)
+    }
+
+    @Test
+    fun gpsEventsWaitWithTheOtherInputsForAFixThatShowsThePhoneOutside() = runTest {
+        val rig = Rig()
+        val run = start(rig)
+        rig.location.holding = true
+        val lost = event(START_WALL_MS + 1_000, EventKind.GPS_LOST, "GPS lost")
+        var fired = false
+        rig.location.onTickStep = { _, _ ->
+            if (fired) {
+                emptyList()
+            } else {
+                fired = true
+                listOf(lost)
+            }
+        }
+        passSeconds(rig, 2)
+        assertTrue(rig.files.rowsAndEvents.isEmpty())
+
+        val outside = fix(elapsedMs = START_ELAPSED_MS + 2_500, wallMs = START_WALL_MS + 2_500)
+        val restored = event(outside.observedWallMs, EventKind.GPS_RESTORED, "GPS restored")
+        rig.location.onFixStep = { sample ->
+            rig.location.holding = false
+            rig.location.lastFixSample = sample
+            LocationStep(track = trackRow(sample), events = listOf(restored), pauseChanged = false, confirmsOutside = true)
+        }
+        send(rig, RecorderCommand.Measurement(outside))
+
+        assertEquals(listOf(FileCall.Event(lost), FileCall.Event(restored), FileCall.Track(trackRow(outside))), rig.files.rowsAndEvents)
+        stop(rig, run)
+    }
+
+    @Test
     fun theSnapshotSaysWhenLocationIsOffAndWhenTheSessionWaitsForAFix() = runTest {
         val rig = Rig()
         val run = start(rig)
@@ -955,6 +1030,44 @@ class SessionRecorderTest {
 
         assertEquals(START_WALL_MS, outcome.stoppedUtcMs)
         assertEquals(START_WALL_MS, rig.files.calls.filterIsInstance<FileCall.Snapshot>().single().meta.stoppedUtcMs)
+    }
+
+    @Test
+    fun aWallClockSetBackMidSessionKeepsTheTrackInOrderAndNeverStopsBeforeARow() = runTest {
+        val rig = Rig()
+        val run = start(rig)
+        rig.location.onFixStep = { sample -> LocationStep(track = trackRow(sample), events = emptyList(), pauseChanged = false) }
+        val before = fix(elapsedMs = START_ELAPSED_MS + 1_000, wallMs = START_WALL_MS + 61_000)
+        // Android corrects the clock back by a minute between the two fixes.
+        val after = fix(elapsedMs = START_ELAPSED_MS + 2_000, wallMs = START_WALL_MS + 2_000)
+        send(rig, RecorderCommand.Measurement(before), RecorderCommand.Measurement(after))
+        rig.clock.wallMs = START_WALL_MS + 3_000
+
+        val outcome = stop(rig, run)
+
+        assertEquals(listOf(START_WALL_MS + 61_000, START_WALL_MS + 61_000), rig.files.calls.filterIsInstance<FileCall.Track>().map { it.row.timeUtcMs })
+        assertEquals(START_WALL_MS + 61_000, outcome.stoppedUtcMs)
+        assertEquals(START_WALL_MS + 61_000, rig.files.calls.filterIsInstance<FileCall.Snapshot>().last().meta.stoppedUtcMs)
+    }
+
+    @Test
+    fun aZonePauseIsWrittenToSessionJsonAtOnce() = runTest {
+        val rig = Rig()
+        val run = start(rig)
+        val inside = fix(elapsedMs = START_ELAPSED_MS + 500, wallMs = START_WALL_MS + 500)
+        val paused = event(inside.observedWallMs, EventKind.PRIVACY_ZONE, PrivacyZoneGate.PAUSED_TITLE)
+        rig.location.onFixStep = {
+            rig.location.paused = true
+            rig.location.zonePauses = 1
+            LocationStep(track = null, events = listOf(paused), pauseChanged = true)
+        }
+
+        send(rig, RecorderCommand.Measurement(inside))
+
+        val snapshot = rig.files.calls.filterIsInstance<FileCall.Snapshot>().single()
+        assertEquals(1, snapshot.meta.privacy.zonePauses)
+        assertNull(snapshot.meta.stoppedUtcMs)
+        stop(rig, run)
     }
 
     @Test
