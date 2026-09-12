@@ -42,12 +42,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -78,6 +79,7 @@ import com.fieldtap.ui.common.screenGutter
 import com.fieldtap.ui.common.signalQualityLabels
 import com.fieldtap.ui.common.stopReasonText
 import com.fieldtap.ui.components.EmptyState
+import com.fieldtap.ui.components.Eyebrow
 import com.fieldtap.ui.components.FieldTapPreviews
 import com.fieldtap.ui.components.FieldTapTopBar
 import com.fieldtap.ui.components.rememberTopBarScroll
@@ -97,6 +99,7 @@ import com.fieldtap.ui.components.StatusBanner
 import com.fieldtap.ui.components.TopBarAction
 import com.fieldtap.ui.theme.FieldTapIcons
 import com.fieldtap.ui.theme.Formats
+import com.fieldtap.ui.theme.ShapeRoles
 import com.fieldtap.ui.theme.SignalMetric
 import com.fieldtap.ui.theme.SignalScale
 import com.fieldtap.ui.theme.Sizes
@@ -439,7 +442,8 @@ private fun SessionsContent(
 private fun SessionsList(state: SessionsUiState, nowUtcMs: Long, onOpenSession: (String) -> Unit) {
     val storage = state.storage
     val labels = signalQualityLabels()
-    // The card with its bar only when storage needs attention: otherwise it sat above the sessions as the first thing read.
+    // The full card with its bar only when storage needs attention; otherwise a compact meter under the header, so the
+    // list has presence instead of a single row floating above an empty canvas.
     val storageCard = storage != null && SessionsPresentation.storageCardShown(storage)
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -468,6 +472,17 @@ private fun SessionsList(state: SessionsUiState, nowUtcMs: Long, onOpenSession: 
         }
         if (storage != null && storageCard) {
             item(key = "storage") { StorageCard(storage = storage, modifier = Modifier.contentWidth()) }
+        } else if (storage != null) {
+            item(key = "storage-meter") { StorageMeter(storage = storage, modifier = Modifier.contentWidth()) }
+        }
+        item(key = "list-header") {
+            Eyebrow(
+                text = pluralStringResource(R.plurals.sessions_count, state.sessions.size, state.sessions.size),
+                heading = true,
+                modifier = Modifier
+                    .contentWidth()
+                    .padding(top = Spacing.Xs),
+            )
         }
         items(state.sessions, key = { it.dirName }) { summary ->
             SessionRow(
@@ -478,27 +493,39 @@ private fun SessionsList(state: SessionsUiState, nowUtcMs: Long, onOpenSession: 
                 modifier = Modifier.contentWidth(),
             )
         }
-        if (storage != null && !storageCard) {
-            item(key = "storage-footer") { StorageFooter(storage = storage, modifier = Modifier.contentWidth()) }
-        }
     }
 }
 
-/** "59.5 kB of 2.0 GB used · 6.9 GB free", one line under the list. */
+/**
+ * A compact storage meter under the header: a slim bar of how full the session store is, then
+ * "59.5 kB of 2.0 GB used · 6.9 GB free" in one line. Shown whenever storage is known and not already the full
+ * [StorageCard] (which appears when storage needs attention).
+ */
 @Composable
-private fun StorageFooter(storage: StorageStatus, modifier: Modifier = Modifier) {
-    Text(
-        text = stringResource(
-            R.string.sessions_storage_footer,
-            Formats.decimalBytes(storage.usedBytes),
-            Formats.decimalBytes(storage.policy.capBytes),
-            Formats.decimalBytes(storage.freeBytes),
-        ),
-        style = MaterialTheme.typography.bodySmall.tabular(),
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        textAlign = TextAlign.Center,
-        modifier = modifier.padding(top = Spacing.Xs),
-    )
+private fun StorageMeter(storage: StorageStatus, modifier: Modifier = Modifier) {
+    val fraction = SessionsPresentation.storageFraction(storage)
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(Spacing.Xs)) {
+        LinearProgressIndicator(
+            progress = { fraction },
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(ShapeRoles.Bar),
+            color = if (storage.canStart) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            gapSize = 0.dp,
+            drawStopIndicator = {},
+        )
+        Text(
+            text = stringResource(
+                R.string.sessions_storage_footer,
+                Formats.decimalBytes(storage.usedBytes),
+                Formats.decimalBytes(storage.policy.capBytes),
+                Formats.decimalBytes(storage.freeBytes),
+            ),
+            style = MaterialTheme.typography.bodySmall.tabular(),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 @Composable
@@ -886,7 +913,9 @@ private fun OverviewCard(detail: SessionDetail, meta: SessionMeta, modifier: Mod
             listOfNotNull(meta.handset.manufacturer, meta.handset.model).joinToString(" ").ifEmpty { null },
             meta.handset.androidVersion?.let { "Android $it" },
         ).joinToString("\n")
-        KeyValueRow(key = stringResource(R.string.detail_row_handset), value = handset.ifEmpty { UNKNOWN_VALUE }, tabular = false, minHeight = dense)
+        // A long device name ("Google sdk_gphone64_x86_64 / Android 16") reads left-aligned under the key, stacked,
+        // rather than wrapping ragged and right-aligned with an orphaned second line.
+        KeyValueRow(key = stringResource(R.string.detail_row_handset), value = handset.ifEmpty { UNKNOWN_VALUE }, tabular = false, stacked = true, minHeight = dense)
         KeyValueRow(
             key = stringResource(R.string.detail_row_app),
             value = stringResource(R.string.detail_app_version_value, meta.transport.appVersion, meta.transport.versionCode),

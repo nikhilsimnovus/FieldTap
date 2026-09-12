@@ -82,6 +82,8 @@
     <string name="live_stop">Stop</string>
     <string name="live_stopping">Saving…</string>
     <string name="live_recording">Recording</string>
+    <!-- The timer button's label while a running session is not collecting (location off, waiting for a fix, paused in a zone). -->
+    <string name="live_paused">Paused</string>
     <string name="live_mark">Mark</string>
     <!-- Content description of the Mark button while marks are off. -->
     <string name="live_mark_unavailable">Mark, unavailable while logging is paused</string>
@@ -236,7 +238,7 @@
     <!-- The recording strip: one line at any font scale, so each state is a few words. -->
     <string name="live_strip_paused">Paused in a privacy zone</string>
     <string name="live_strip_waiting">Waiting for a fix</string>
-    <string name="live_strip_location_off">Not recording: location off</string>
+    <string name="live_strip_location_off">Paused · location off</string>
     <string name="live_strip_saving">Saving</string>
     <!-- %1$s is the count of fresh samples, grouped for the locale, e.g. 1,234. -->
     <plurals name="live_strip_recording">
@@ -330,6 +332,11 @@
 
     <!-- Sessions list -->
     <string name="sessions_title">Sessions</string>
+    <!-- The list's section header, e.g. "3 sessions"; %1$d is the count. -->
+    <plurals name="sessions_count">
+        <item quantity="one">%1$d session</item>
+        <item quantity="other">%1$d sessions</item>
+    </plurals>
     <string name="sessions_refresh">Refresh</string>
     <string name="sessions_loading">Reading sessions…</string>
     <string name="sessions_empty_title">No sessions yet</string>

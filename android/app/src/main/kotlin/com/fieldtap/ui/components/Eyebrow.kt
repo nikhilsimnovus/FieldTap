@@ -13,6 +13,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import com.fieldtap.ui.theme.EyebrowCase
 import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.ShapeRoles
 import com.fieldtap.ui.theme.Sizes
@@ -25,11 +26,11 @@ import com.fieldtap.ui.theme.Eyebrow as EyebrowStyle
  * ("SERVING · NR SA", "LAST 5 MIN", "MEDIAN LTE RSRP"). It replaces heavy title rows — calmer, and it
  * saves vertical space for the number.
  *
- * The text is uppercased for display, but TalkBack reads the original-case [text] (never spelled out).
- * Pass [heading] `= true` when it leads a section, so it becomes a TalkBack heading users can jump
- * between; leave it false when it labels a value inline (the hosting tile/row already reads the whole
- * phrase). [tone] colours the overline for a section that carries a state; the default is
- * `onSurfaceVariant`.
+ * The text is uppercased for display (via [EyebrowCase], which keeps unit tokens like "dBm" in their fixed
+ * casing), but TalkBack reads the original-case [text] (never spelled out). Pass [heading] `= true` when it
+ * leads a section, so it becomes a TalkBack heading users can jump between; leave it false when it labels a
+ * value inline (the hosting tile/row already reads the whole phrase). [tone] colours the overline for a
+ * section that carries a state; the default is `onSurfaceVariant`.
  */
 @Composable
 fun Eyebrow(
@@ -42,7 +43,7 @@ fun Eyebrow(
     // Read the locale observably (LocalLocale) so an eyebrow re-uppercases if the user changes their locale.
     val locale = LocalLocale.current.platformLocale
     Text(
-        text = text.uppercase(locale),
+        text = EyebrowCase.uppercase(text, locale),
         style = EyebrowStyle,
         color = color,
         maxLines = 2,
@@ -80,7 +81,7 @@ fun EyebrowTag(
         border = BorderStroke(Sizes.HairlineWidth, border),
     ) {
         Text(
-            text = text.uppercase(locale),
+            text = EyebrowCase.uppercase(text, locale),
             style = EyebrowStyle,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

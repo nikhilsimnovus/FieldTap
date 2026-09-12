@@ -7,6 +7,7 @@ import com.fieldtap.core.capability.CapabilityVerdict
 import com.fieldtap.core.capability.CellularReadout
 import com.fieldtap.core.capability.Layer3OnDevice
 import com.fieldtap.core.capability.RootConfidence
+import com.fieldtap.core.capability.RootDetector
 import com.fieldtap.core.capability.RootProbeResult
 import com.fieldtap.core.input.ListenerOutcome
 import com.fieldtap.core.input.RadioListener
@@ -133,6 +134,11 @@ internal object ProbePresentation {
      */
     fun layer3Detail(verdict: CaptureVerdict): String {
         val line = verdict.lines.getOrNull(TIER_LAYER3).orEmpty()
+            // The root-hiding caveat is stated once, in the Root & diagnostics card below; the Layer-3 row need not
+            // repeat it word for word (the no-root layer-3 line carries it, so drop it here).
+            .replace(RootDetector.CAVEAT, "")
+            .replace("  ", " ")
+            .trim()
         val laptop = verdict.laptopPath?.takeIf { verdict.layer3Signalling == Layer3OnDevice.NOT_POSSIBLE }
         return listOfNotNull(line.ifEmpty { null }, laptop).joinToString(" ")
     }

@@ -235,11 +235,15 @@ fun TimeSeriesChart(
     val lines = referenceLines.filter { it in range }
     val labelLayouts = remember(lines, axisStyle, density) { lines.associateWith { measurer.measure(it.toString(), axisStyle) } }
     val labelOrder = remember(lines, keyReference) { ChartMath.labelOrder(lines, keyReference) }
-    val zoneColors = zones.map { signal.of(it.quality).fill.copy(alpha = ZONE_ALPHA) }
     val noDataLayout = remember(noDataText, noDataStyle, density) { noDataText?.let { measurer.measure(it, noDataStyle) } }
     val segments = remember(points, nowElapsedMs, windowMs, gapThresholdMs) {
         ChartMath.segments(points, nowElapsedMs, windowMs, gapThresholdMs)
     }
+    val visibleCount = remember(segments) { segments.sumOf { it.size } }
+    // Before a trend exists (0–1 fresh samples) the zone bands are damped from a full-height red-to-green wash to a
+    // faint tint, so a lone reading does not read as an empty, unfinished panel; they reach full strength at two points.
+    val zoneAlpha = if (visibleCount >= 2) ZONE_ALPHA else ZONE_ALPHA_IDLE
+    val zoneColors = zones.map { signal.of(it.quality).fill.copy(alpha = zoneAlpha) }
 
     Canvas(
         modifier = modifier
@@ -314,6 +318,18 @@ fun TimeSeriesChart(
             return@Canvas
         }
 
+        if (visibleCount == 1) {
+            // A lone reading gets a faint current-value guide line across the plot, so a single dot has context
+            // instead of floating over the damped bands.
+            val only = segments.first().first()
+            drawLine(
+                color = lineColor.copy(alpha = IDLE_GUIDE_ALPHA),
+                start = Offset(left, y(only.value)),
+                end = Offset(right, y(only.value)),
+                strokeWidth = 1.5.dp.toPx(),
+            )
+        }
+
         val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         for (segment in segments) {
             if (segment.size == 1) {
@@ -327,9 +343,18 @@ fun TimeSeriesChart(
             drawPath(path = path, color = lineColor, style = stroke)
         }
         val newest = segments.last().last()
-        val center = Offset(x(newest.elapsedMs), y(newest.value))
-        drawCircle(color = panel, radius = 5.5.dp.toPx(), center = center)
-        drawCircle(color = lineColor, radius = 3.5.dp.toPx(), center = center)
+        val haloRadius = 5.5.dp.toPx()
+        // Clamp the marker's centre into the plot inset by its halo, and clip it to the panel's rounded rect, so a
+        // strong reading's marker is never sliced by the 14 dp panel corner into a detached crescent over the card behind.
+        val center = Offset(
+            x = x(newest.elapsedMs).coerceIn(left + haloRadius, (right - haloRadius).coerceAtLeast(left + haloRadius)),
+            y = y(newest.value).coerceIn(top + haloRadius, (bottom - haloRadius).coerceAtLeast(top + haloRadius)),
+        )
+        val markerClip = Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, size.height, corner)) }
+        clipPath(markerClip) {
+            drawCircle(color = panel, radius = haloRadius, center = center)
+            drawCircle(color = lineColor, radius = 3.5.dp.toPx(), center = center)
+        }
     }
 }
 
@@ -341,6 +366,12 @@ private val LabelGap: Dp = Spacing.Xxs
 
 /** The zones sit behind the line as a hint of the scale, never as strong as the line or a level's swatch. */
 private const val ZONE_ALPHA: Float = 0.12f
+
+/** Before a trend exists (0–1 samples) the bands are barely tinted, so the panel does not read as a full pastel wash. */
+private const val ZONE_ALPHA_IDLE: Float = 0.05f
+
+/** The lone-reading guide line: a faint hint of the line's colour, so a single dot has a baseline for context. */
+private const val IDLE_GUIDE_ALPHA: Float = 0.25f
 
 @FieldTapPreviews
 @Composable

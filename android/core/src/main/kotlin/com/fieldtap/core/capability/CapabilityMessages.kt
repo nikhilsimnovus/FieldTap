@@ -15,10 +15,17 @@ package com.fieldtap.core.capability
 object CapabilityMessages {
     // ---- Tier lines (the tiered "What 5gto6G FieldTap can capture on this phone" verdict) ----
 
-    /** Tier 1 — public-API measurements, always available. */
+    /** Tier 1 — public-API measurements, always available. The hero lede on the Capability screen. */
     fun tier1(): String =
         "Measures serving-cell RSRP, RSRQ and SINR, band, ARFCN and service state, and logs a walk — " +
             "on any phone, no root."
+
+    /**
+     * Tier 1's short form for the tiered-verdict row, so the Public-API row does not repeat the hero lede ([tier1]) word
+     * for word inside the same viewport: the row names what it measures; the hero carries the full confident sentence.
+     */
+    fun tier1Short(): String =
+        "Serving-cell RSRP, RSRQ and SINR, plus band, ARFCN and service state."
 
     /** Tier 2 — push cell updates, which need the Phone permission. The app works fully without it. */
     fun tier2(phoneGranted: Boolean): String =

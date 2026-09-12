@@ -654,7 +654,8 @@ private fun TieredCard(snapshot: CapabilitySnapshot, rootProbe: RootProbeResult?
             title = stringResource(R.string.probe_tier_public_api),
             tone = ProbePresentation.captureAnswerTone(verdict.publicApiMeasurements),
             statusText = captureAnswerText(verdict.publicApiMeasurements),
-            detail = ProbePresentation.tier1Detail(verdict),
+            // A short line, distinct from the hero lede above (which shows tier1Detail), so the two do not repeat verbatim.
+            detail = CapabilityMessages.tier1Short(),
             icon = FieldTapIcons.SignalBars,
         )
         SectionDivider()

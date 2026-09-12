@@ -1324,6 +1324,9 @@ private fun CadenceDetailsCard(live: LiveState, notes: List<ListenerNote>, modif
             key = stringResource(R.string.live_row_cadence_reason),
             value = stringResource(cadenceReasonRes(LivePresentation.cadenceReason(live.conditions))),
             tabular = false,
+            // The reason can run past one line ("Charging keeps 2 s with Wi-Fi on"); stacked, it reads left-aligned
+            // under the key instead of wrapping ragged and right-aligned with an orphaned second line.
+            stacked = true,
             minHeight = dense,
         )
         KeyValueRow(
@@ -1394,33 +1397,41 @@ private fun StatusChips(live: LiveState, modifier: Modifier = Modifier) {
                     null -> R.string.live_cadence_unknown
                 },
             ),
-            tone = cadenceTone(live.shortInterval),
+            tone = calmChipTone(cadenceTone(live.shortInterval)),
             icon = FieldTapIcons.Timer,
         )
-        StatusChip(text = stringResource(serviceRes(service)), tone = service.tone)
+        StatusChip(text = stringResource(serviceRes(service)), tone = calmChipTone(service.tone))
         StatusChip(
             text = if (data == DataChip.CONNECTED && dataNetwork != null) {
                 stringResource(R.string.live_data_connected_type, dataNetwork)
             } else {
                 stringResource(dataRes(data))
             },
-            tone = data.tone,
+            tone = calmChipTone(data.tone),
             icon = FieldTapIcons.Transfer,
         )
         if (fiveG != null) {
             StatusChip(
                 text = stringResource(if (fiveG) R.string.live_5g_icon_on else R.string.live_5g_icon_off),
-                tone = if (fiveG) StatusTone.INFO else StatusTone.NEUTRAL,
+                tone = StatusTone.NEUTRAL,
                 icon = FieldTapIcons.SignalBars,
             )
         }
         StatusChip(
             text = gpsText(gps),
-            tone = gps.tone,
+            tone = calmChipTone(gps.tone),
             icon = if (gps is GpsChip.Fix) FieldTapIcons.GpsFixed else FieldTapIcons.GpsOff,
         )
     }
 }
+
+/**
+ * Calms a steady-state chip to neutral, so colour is reserved for the one or two chips that signal a problem
+ * (out of service, mobile data off, GPS lost): the row parses as a glanceable status line, not a swatch sampler of
+ * green, cobalt and grey. A WARNING or ERROR keeps its colour; the reassuring "in service" / "GPS fix" states go grey.
+ */
+private fun calmChipTone(tone: StatusTone): StatusTone =
+    if (tone == StatusTone.WARNING || tone == StatusTone.ERROR) tone else StatusTone.NEUTRAL
 
 @Composable
 private fun NeighboursCard(neighbours: List<LiveCell>, labels: SignalQualityLabels, modifier: Modifier = Modifier) {
@@ -1528,6 +1539,9 @@ private fun LiveSessionButton(
     stacked: Boolean = false,
 ) {
     val elapsedMs = (state.status as? SessionStatus.Recording)?.snapshot?.elapsedMs
+    // A running session that is not collecting (location off, waiting for a fix, paused in a zone) reads "Paused", so the
+    // button never says "Recording" while the strip above says the session is not recording.
+    val paused = buttonState == SessionButtonState.RECORDING && LivePresentation.recordingPaused(state.status, state.live)
     SessionButton(
         state = buttonState,
         startLabel = stringResource(if (stacked) R.string.live_start_short else R.string.live_start),
@@ -1544,7 +1558,7 @@ private fun LiveSessionButton(
                 else -> R.string.live_starting
             },
         ),
-        recordingLabel = stringResource(R.string.live_recording),
+        recordingLabel = stringResource(if (paused) R.string.live_paused else R.string.live_recording),
         elapsedText = elapsedMs?.let { Formats.elapsed(it) },
     )
 }

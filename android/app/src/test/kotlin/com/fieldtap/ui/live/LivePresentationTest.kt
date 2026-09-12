@@ -284,6 +284,21 @@ class LivePresentationTest {
         assertFalse(LivePresentation.locationOff(live, SessionStatus.Idle))
     }
 
+    @Test
+    fun theTimerButtonReadsPausedWhileARunningSessionIsNotCollecting() {
+        val live = LiveState()
+        val recording = snapshot()
+        // A plain running session records, so the button says "Recording", not "Paused".
+        assertFalse(LivePresentation.recordingPaused(SessionStatus.Recording(recording), live))
+        // Location off, waiting for a first fix, or paused in a zone: it collects nothing, so the button says "Paused".
+        assertTrue(LivePresentation.recordingPaused(SessionStatus.Recording(recording), live.copy(locationEnabled = false)))
+        assertTrue(LivePresentation.recordingPaused(SessionStatus.Recording(recording.copy(paused = true, waitingForLocation = true, hasRecentFix = false, trackRows = 0)), live))
+        assertTrue(LivePresentation.recordingPaused(SessionStatus.Recording(recording.copy(paused = true)), live))
+        // Idle and saving are never "paused recording".
+        assertFalse(LivePresentation.recordingPaused(SessionStatus.Idle, live))
+        assertFalse(LivePresentation.recordingPaused(SessionStatus.Stopping(recording.copy(stopping = true)), live))
+    }
+
     private fun snapshot(): RecorderSnapshot = RecorderSnapshot(
         dirName = "20260910-143000_Walk",
         startedUtcMs = 1_789_050_600_000L,

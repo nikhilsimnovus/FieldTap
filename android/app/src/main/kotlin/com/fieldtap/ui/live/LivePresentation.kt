@@ -329,6 +329,17 @@ object LivePresentation {
         return RecordingStrip(state = state, freshSamples = snapshot.freshSamples, gps = gps)
     }
 
+    /**
+     * A running session that is collecting nothing right now — location off, waiting for a first fix, or paused inside a
+     * privacy zone — so the timer button reads "Paused", not "Recording". This keeps the button from saying "Recording"
+     * while the status strip says the session is not collecting: the two never contradict each other in one view.
+     */
+    fun recordingPaused(status: SessionStatus, live: LiveState): Boolean =
+        when (recordingStrip(status, live)?.state) {
+            RecordingState.LOCATION_OFF, RecordingState.WAITING_FOR_LOCATION, RecordingState.PAUSED_IN_ZONE -> true
+            RecordingState.RECORDING, RecordingState.SAVING, null -> false
+        }
+
     /** The session button: busy while the checks or the start call run, then the session's own state. */
     fun buttonState(status: SessionStatus, prestart: PrestartState): SessionButtonState = when (status) {
         is SessionStatus.Idle ->
