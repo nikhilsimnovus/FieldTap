@@ -10,12 +10,13 @@ import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.Sizes
 
 /**
- * Depth in the "Fieldbook" model, shared by every card, tile, well and the floating action bar so they
- * lift the same way in both themes. `tonalElevation` is always 0.
+ * Depth in the "Clearsheet" model, shared by every card, tile, well and the floating action bar so they
+ * lift the same way in both themes. `tonalElevation` is always 0; the look is hairline-led and near-flat.
  *
- * - **Light:** a soft [Elevation.Card] / [Elevation.Raised] shadow **plus** [cardHairline], because the
- *   paper→card luminance step is only 1.08:1 — a card is never defined by shadow alone (daylight).
- * - **Dark:** no shadow (shadows do not read on ink); the [cardHairline] carries the edge.
+ * - **Light:** a 1 px [cardHairline] **plus** a whisper of [Elevation.Card] / [Elevation.Raised] shadow,
+ *   because the canvas→card luminance step is tiny — a card is never defined by shadow alone (daylight).
+ * - **Dark:** no shadow (shadows do not read on a true-dark canvas); the [cardHairline] and the lift of
+ *   `surfaceContainerLow` over the canvas carry the edge.
  * - **Wells** (chart panels, metric tiles): [cardHairline] and no shadow in either theme.
  */
 @Composable

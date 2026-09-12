@@ -18,9 +18,9 @@ private val Base = Typography()
 
 /**
  * The Material 3 type scale in the system font (`FontFamily.Default`; no bundled face, which the product
- * constraints forbid and which would break the user's font scale). The editorial "Fieldbook" character
- * comes from scale, weight and tracking: **Bold** display styles (splash and empty moments) and **Bold**
- * headlines and `titleLarge` for punch, SemiBold `titleMedium`/`titleSmall`, and Normal body/label. Sizes
+ * constraints forbid and which would break the user's font scale). The "Clearsheet" character is quiet and
+ * familiar — the weight comes from scale, not from tracking or a display face: **Bold** display styles and
+ * **Bold** headlines and `titleLarge`, SemiBold `titleMedium`/`titleSmall`, and Normal body/label. Sizes
  * are Material's, in sp, so they follow the user's font scale.
  */
 val FieldTapTypography: Typography = Typography(
@@ -42,15 +42,22 @@ val FieldTapTypography: Typography = Typography(
 )
 
 /**
- * The editorial **eyebrow**: a small, uppercase, letter-spaced overline above every metric and every
- * section header, replacing heavy title rows. The colour and the UPPERCASE transform are applied by the
- * [com.fieldtap.ui.components.Eyebrow] component (which also carries `heading()` semantics when used as a
- * section header), so this style holds only the size, weight and tracking. Derived from `labelSmall`.
+ * The **section label** (the eyebrow, re-skinned for Clearsheet): a calm, sentence-case overline above a
+ * metric or a section header — no uppercase, no letter-spacing, no shouting. Rendered by the
+ * [com.fieldtap.ui.components.Eyebrow] component (which paints it in `onSurfaceVariant` and carries
+ * `heading()` semantics when it leads a section). A step up in size from the old label (14 sp
+ * `labelLarge`) so it still reads as a heading without capitals. The label text is shown verbatim.
  */
-val Eyebrow: TextStyle = FieldTapTypography.labelSmall.copy(
+val SectionLabel: TextStyle = FieldTapTypography.labelLarge.copy(
     fontWeight = FontWeight.SemiBold,
-    letterSpacing = 0.09.em,
+    letterSpacing = 0.sp,
 )
+
+/**
+ * The former name of the section-label style, kept so the [com.fieldtap.ui.components.Eyebrow] contract is
+ * unchanged; it is exactly [SectionLabel] (sentence case, no tracking).
+ */
+val Eyebrow: TextStyle = SectionLabel
 
 /**
  * Styles for numbers, all tabular. Read them with `FieldTapDesign.numeric`. Exactly one [display] or
@@ -85,7 +92,8 @@ val FieldTapNumeric: NumericStyles = NumericStyles(
         fontWeight = FontWeight.SemiBold,
         fontSize = 56.sp,
         lineHeight = 60.sp,
-        letterSpacing = (-0.02).em,
+        // Relaxed from −0.02em: a readable system numeral, not a condensed display face.
+        letterSpacing = (-0.01).em,
         fontFeatureSettings = TABULAR_FIGURES,
     ),
     hero = TextStyle(
@@ -93,7 +101,7 @@ val FieldTapNumeric: NumericStyles = NumericStyles(
         fontWeight = FontWeight.SemiBold,
         fontSize = 44.sp,
         lineHeight = 48.sp,
-        letterSpacing = (-0.02).em,
+        letterSpacing = (-0.01).em,
         fontFeatureSettings = TABULAR_FIGURES,
     ),
     large = TextStyle(

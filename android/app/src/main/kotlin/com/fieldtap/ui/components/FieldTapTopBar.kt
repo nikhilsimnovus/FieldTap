@@ -69,7 +69,7 @@ fun FieldTapTopBar(
     navigationIcon: ImageVector = FieldTapIcons.ArrowBack,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
-    // The bar is the paper/ink ground; once content scrolls under it a 1 px hairline fades in to keep the
+    // The bar is the canvas ground; once content scrolls under it a 1 px hairline fades in to keep the
     // bar and the cards moving beneath it apart (a shadow does not read on the bright ground; the hairline does).
     val overlapped = (scroll?.behavior?.state?.overlappedFraction ?: 0f) > 0.01f
     val hairlineAlpha by animateFloatAsState(

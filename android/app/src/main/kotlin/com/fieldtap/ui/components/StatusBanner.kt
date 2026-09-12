@@ -44,6 +44,11 @@ fun statusIcon(tone: StatusTone): ImageVector = when (tone) {
  * Put banners at the top of the content they concern, full width, one at a time per cause. Use a
  * dialog only when the user must decide before anything else can happen.
  *
+ * The tonal `container`/`onContainer` fill is used **only** for WARNING and ERROR, which announce
+ * themselves; NEUTRAL, INFO and SUCCESS sit on a calm `surfaceContainerLow` card with an `outlineVariant`
+ * hairline, their tone carried by the leading icon (in the tone colour) and the words. The optional fix is
+ * an accent text button.
+ *
  * WARNING and ERROR banners are a polite live region by default, so TalkBack announces them when they
  * appear. The close button shows only when both [onDismiss] and [dismissContentDescription] are given.
  */
@@ -61,6 +66,13 @@ fun StatusBanner(
     announce: Boolean = tone == StatusTone.WARNING || tone == StatusTone.ERROR,
 ) {
     val family = FieldTapDesign.colors.status(tone)
+    // Only WARNING and ERROR (which announce themselves) get the tonal container fill; the calm tones sit
+    // on a plain card with an outlineVariant hairline, their tone carried by the leading icon and the word.
+    val announcing = tone == StatusTone.WARNING || tone == StatusTone.ERROR
+    val containerColor = if (announcing) family.container else MaterialTheme.colorScheme.surfaceContainerLow
+    val onColor = if (announcing) family.onContainer else MaterialTheme.colorScheme.onSurface
+    val borderColor = if (announcing) family.color else MaterialTheme.colorScheme.outlineVariant
+    val messageColor = if (announcing) family.onContainer else MaterialTheme.colorScheme.onSurfaceVariant
     val dismiss = if (dismissContentDescription != null) onDismiss else null
     val action = if (actionLabel != null) onAction else null
     val showDismiss = dismiss != null
@@ -70,9 +82,9 @@ fun StatusBanner(
             .fillMaxWidth()
             .semantics { if (announce) liveRegion = LiveRegionMode.Polite },
         shape = ShapeRoles.Card,
-        color = family.container,
-        contentColor = family.onContainer,
-        border = BorderStroke(Sizes.HairlineWidth, family.color),
+        color = containerColor,
+        contentColor = onColor,
+        border = BorderStroke(Sizes.HairlineWidth, borderColor),
     ) {
         Column(
             modifier = Modifier.padding(
@@ -86,6 +98,7 @@ fun StatusBanner(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
+                    tint = family.color,
                     modifier = Modifier.size(Sizes.Icon),
                 )
                 Column(
@@ -95,9 +108,9 @@ fun StatusBanner(
                     verticalArrangement = Arrangement.spacedBy(Spacing.Xxs),
                 ) {
                     if (title != null) {
-                        Text(text = title, style = MaterialTheme.typography.titleSmall)
+                        Text(text = title, style = MaterialTheme.typography.titleSmall, color = onColor)
                     }
-                    Text(text = message, style = MaterialTheme.typography.bodyMedium)
+                    Text(text = message, style = MaterialTheme.typography.bodyMedium, color = messageColor)
                 }
                 if (dismiss != null) {
                     IconButton(onClick = dismiss) {
@@ -109,7 +122,8 @@ fun StatusBanner(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(
                         onClick = action,
-                        colors = ButtonDefaults.textButtonColors(contentColor = family.onContainer),
+                        // The fix is the accent text button (it reads on the tonal containers too, ≥ 4.9:1).
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary),
                     ) {
                         Text(text = actionLabel.orEmpty(), style = MaterialTheme.typography.labelLarge)
                     }

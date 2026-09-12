@@ -125,8 +125,9 @@ fun SignalQualityChip(
  * The signature element: a continuous four-zone **signal meter**. It draws the metric's
  * `SignalScale.barRange` (RSRP −130..−50 dBm) as four edge-stroked flat zone bands in ramp order (POOR,
  * FAIR, GOOD, EXCELLENT) over a `surfaceContainerHighest` track, a slim value marker plotted over them in
- * `onSurface` with a 1 px `surface` halo so it reads on any zone, and — from [Sizes.SignalBarLabelsMinWidth]
- * wide — the three thresholds ticked and labelled beneath ("−105", "−95", "−85"). A value beyond the range
+ * `onSurface` with a 2 dp `surfaceContainerLow` halo so it reads on any zone, and — from
+ * [Sizes.SignalBarLabelsMinWidth] wide — the three thresholds ticked and labelled beneath ("−105", "−95",
+ * "−85"), the −105 key reference a hair heavier. A value beyond the range
  * pins to the end; the number beside the meter is always the true reading, so pair it with the value and a
  * [SignalQualityChip]. The marker glides to a new value ([Motion.spatial], instant under reduced motion);
  * zones and ticks are static.
@@ -149,13 +150,15 @@ fun SignalMeter(
     val signal = FieldTapDesign.signal
     val trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
     val markerColor = MaterialTheme.colorScheme.onSurface
-    val halo = MaterialTheme.colorScheme.surface
+    // The halo is the card the meter sits on (surfaceContainerLow), so the neutral marker reads on any zone.
+    val halo = MaterialTheme.colorScheme.surfaceContainerLow
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
     val labelStyle = FieldTapDesign.numeric.axis
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val reduced = LocalReducedMotion.current
     val thresholds = remember(metric) { SignalScale.thresholds(metric).boundaries.sorted() }
+    val keyReference = remember(metric) { SignalScale.keyReference(metric) }
     val labelLayouts = remember(thresholds, labelStyle, density) { thresholds.map { measurer.measure(it.toString(), labelStyle) } }
     val labelHeightPx = labelLayouts.maxOfOrNull { it.size.height } ?: 0
 
@@ -249,11 +252,13 @@ fun SignalMeter(
             val labelTop = markerHeight + Spacing.Xxs.toPx()
             thresholds.forEachIndexed { i, threshold ->
                 val x = xAtValue(threshold)
+                // The key reference (−105 dBm) tick is a hair heavier, so the report's line stands out.
+                val keyTick = threshold == keyReference
                 drawLine(
                     color = labelColor,
                     start = Offset(x, trackTop + trackHeight),
                     end = Offset(x, markerHeight),
-                    strokeWidth = stroke,
+                    strokeWidth = if (keyTick) stroke * 1.6f else stroke,
                 )
                 val layout = labelLayouts[i]
                 val left = (x - layout.size.width / 2f).coerceIn(0f, (size.width - layout.size.width).coerceAtLeast(0f))
@@ -282,8 +287,8 @@ private val MeterCorner: Dp = 2.dp
 /** The gap between two zones of a [SignalMeter]. */
 private val MeterZoneGap: Dp = Spacing.Xxs
 
-/** The surface-coloured edge that keeps a [SignalMeter]'s marker apart from the zone under it. */
-private val MarkerHalo: Dp = 1.dp
+/** The card-coloured halo that keeps a [SignalMeter]'s neutral marker apart from the zone under it. */
+private val MarkerHalo: Dp = 2.dp
 
 /** A meter with no reading: the zones are drawn this faint. */
 private const val MUTED_ALPHA: Float = 0.30f

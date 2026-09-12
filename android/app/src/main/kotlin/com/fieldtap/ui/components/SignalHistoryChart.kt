@@ -73,10 +73,11 @@ data class SignalChartLabels(
 )
 
 /**
- * Five minutes of serving RSRP and SINR, as two panels on one time axis. Behind each line the signal scale's four zones
- * are flat bands in their level's colour; dashed reference lines sit at the thresholds, the report's -105 dBm line (0 dB
- * for SINR) stronger. The thresholds are labelled as far as the labels fit apart, the key line's first
- * ([ChartMath.labelOrder]). Lines break at sampling gaps.
+ * Five minutes of serving RSRP and SINR, as two panels on one neutral well. Behind each line the signal scale's four
+ * zones are a faint tint (≤ 12 % of the level's colour), not saturated bands; 1 dp dashed reference lines sit at the
+ * thresholds, and the report's -105 dBm key line (0 dB for SINR) is drawn solid and a hair heavier. The RSRP line (the
+ * accent series) carries a faint accent area fill; SINR does not. The thresholds are labelled as far as the labels fit
+ * apart, the key line's first ([ChartMath.labelOrder]). Lines break at sampling gaps.
  *
  * [rsrpRange] and [sinrRange] default to the report's axes (RSRP -140..-40 dBm, SINR -25..40 dB); Live passes
  * `ChartMath.fittedRange`, so a steady signal is not squeezed into a fifth of the panel. With [sinrReported] false the SINR
@@ -130,6 +131,7 @@ fun SignalHistoryChart(
             height = rsrpPanelHeight,
             noDataText = labels.noData,
             zones = SignalScale.zones(SignalMetric.RSRP, rsrpRange),
+            areaFill = true,
         )
         Spacer(modifier = Modifier.height(Spacing.Xs))
         if (sinrReported) {
@@ -203,11 +205,14 @@ private fun ChartPanelHeader(
 
 /**
  * One chart panel: a line of [points] against time over [windowMs] ending at [nowElapsedMs], on a
- * vertical [range], over [zones] drawn as flat bands in their level's colour, with dashed [referenceLines] and
- * [keyReference] drawn stronger. The lines are labelled by their values in [ChartMath.labelOrder]; a label that would
- * come within 2 dp of one already drawn is left out, so labels never overlap at any panel height or font scale. Single
- * points between gaps are dots; the newest point has a marker. Draws in LTR in every locale, like the report. Decorative
- * for TalkBack: the caller describes it (see [SignalHistoryChart]).
+ * vertical [range], over a neutral well ([Sizes] `surfaceContainerHigh` + an `outlineVariant` hairline
+ * frame), with [zones] as a faint tint (≤ 12 % of the level's colour), 1 dp dashed [referenceLines] in
+ * `chartReference` and the [keyReference] drawn **solid** in `chartKeyReference`, a hair heavier. The lines
+ * are labelled by their values in [ChartMath.labelOrder]; a label that would come within 2 dp of one
+ * already drawn is left out, so labels never overlap at any panel height or font scale. [areaFill] draws a
+ * faint fill of [lineColor] under the line (the accent RSRP series uses it; SINR does not). Single points
+ * between gaps are dots; the newest point has a marker. Draws in LTR in every locale, like the report.
+ * Decorative for TalkBack: the caller describes it (see [SignalHistoryChart]).
  */
 @Composable
 fun TimeSeriesChart(
@@ -223,10 +228,12 @@ fun TimeSeriesChart(
     height: Dp = Sizes.ChartPanelHeight,
     noDataText: String? = null,
     zones: List<SignalZone> = emptyList(),
+    areaFill: Boolean = false,
 ) {
     val colors = FieldTapDesign.colors
     val signal = FieldTapDesign.signal
-    val panel = MaterialTheme.colorScheme.surfaceContainerLowest
+    val panel = MaterialTheme.colorScheme.surfaceContainerHigh
+    val frame = MaterialTheme.colorScheme.outlineVariant
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
     val axisStyle = FieldTapDesign.numeric.axis
     val noDataStyle = MaterialTheme.typography.bodySmall
@@ -252,6 +259,15 @@ fun TimeSeriesChart(
     ) {
         val corner = CornerRadius(PanelCornerRadius.toPx())
         drawRoundRect(color = panel, cornerRadius = corner)
+        // The neutral well carries a 1 px hairline frame, inset by half its width so it reads fully.
+        val frameStroke = 1.dp.toPx()
+        drawRoundRect(
+            color = frame,
+            topLeft = Offset(frameStroke / 2f, frameStroke / 2f),
+            size = Size(size.width - frameStroke, size.height - frameStroke),
+            cornerRadius = corner,
+            style = Stroke(frameStroke),
+        )
         val labelWidth = labelLayouts.values.maxOfOrNull { it.size.width }?.toFloat() ?: 0f
         val left = Spacing.Sm.toPx() + labelWidth + if (labelWidth > 0f) Spacing.Xs.toPx() else 0f
         val right = size.width - Spacing.Sm.toPx()
@@ -278,11 +294,12 @@ fun TimeSeriesChart(
             val key = value == keyReference
             val yy = y(value)
             drawLine(
-                color = if (key) colors.chartReference else colors.chartGrid,
+                // Thresholds are 1 dp dashed chartReference; the key line (−105 dBm / 0 dB) is solid and heavier.
+                color = if (key) colors.chartKeyReference else colors.chartReference,
                 start = Offset(left, yy),
                 end = Offset(right, yy),
                 strokeWidth = if (key) 1.5.dp.toPx() else 1.dp.toPx(),
-                pathEffect = dash,
+                pathEffect = if (key) null else dash,
             )
         }
         val grow = LabelGap.toPx()
@@ -330,6 +347,22 @@ fun TimeSeriesChart(
             )
         }
 
+        if (areaFill) {
+            // A faint fill of the (accent) line colour under the RSRP line, clipped to the well's corners.
+            val fillClip = Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, size.height, corner)) }
+            clipPath(fillClip) {
+                for (segment in segments) {
+                    if (segment.size < 2) continue
+                    val area = Path()
+                    area.moveTo(x(segment.first().elapsedMs), bottom)
+                    segment.forEach { area.lineTo(x(it.elapsedMs), y(it.value)) }
+                    area.lineTo(x(segment.last().elapsedMs), bottom)
+                    area.close()
+                    drawPath(path = area, color = lineColor.copy(alpha = AREA_FILL_ALPHA))
+                }
+            }
+        }
+
         val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         for (segment in segments) {
             if (segment.size == 1) {
@@ -366,6 +399,9 @@ private val LabelGap: Dp = Spacing.Xxs
 
 /** The zones sit behind the line as a hint of the scale, never as strong as the line or a level's swatch. */
 private const val ZONE_ALPHA: Float = 0.12f
+
+/** The accent RSRP line's area fill: a faint wash of the line colour under it. */
+private const val AREA_FILL_ALPHA: Float = 0.08f
 
 /** Before a trend exists (0–1 samples) the bands are barely tinted, so the panel does not read as a full pastel wash. */
 private const val ZONE_ALPHA_IDLE: Float = 0.05f

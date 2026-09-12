@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-        5gto6G "Cobalt" brand tones for the launcher icon and the window theme. They equal
-        com.fieldtap.ui.theme.BrandColors and the Compose surfaces; change both together
-        (BrandResourcesTest compares them).
+        5gto6G launcher/signature tones for the adaptive icon. They equal
+        com.fieldtap.ui.theme.BrandColors; change both together (BrandResourcesTest compares them). These
+        are the launcher identity only, never the app's UI chrome (the UI accent is brand_primary_*).
     -->
     <color name="brand_gradient_start">#1D24C4</color>
     <color name="brand_gradient_end">#5A2BD6</color>
@@ -11,8 +11,9 @@
     <color name="brand_mark_accent">#7FE7FF</color>
 
     <!-- Compose's surface in each theme, so the window, splash and first frame match (no launch flash). -->
-    <color name="window_background_light">#F6F6F4</color>
-    <color name="window_background_dark">#0A0B0D</color>
-    <color name="brand_primary_light">#2C33C7</color>
-    <color name="brand_primary_dark">#A7B2FF</color>
+    <color name="window_background_light">#F7F8FA</color>
+    <color name="window_background_dark">#121316</color>
+    <!-- The calm UI accent (Compose primary in each theme), for the window's colorPrimary/colorAccent. -->
+    <color name="brand_primary_light">#2C5CB0</color>
+    <color name="brand_primary_dark">#9EC1FF</color>
 </resources>

@@ -40,7 +40,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.fieldtap.ui.theme.BrandColors
 import com.fieldtap.ui.theme.Durations
 import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.FieldTapIcons
@@ -59,11 +58,10 @@ enum class SessionButtonState {
 }
 
 /**
- * The primary action of the Live screen: Start a session, or Stop the running one.
+ * The primary action of the Live screen: Start a session, or Stop the running one. The one dominant,
+ * clearly primary control per screen.
  *
- * - IDLE: the brand **Cobalt** fill in both themes (deep in dark, so the signature control never flips to a washed
- *   lavender), a cyan brand-spark play icon — the mark's sixth bar, carried onto the screen the customer looks at — and
- *   [startLabel].
+ * - IDLE: the calm accent fill (`primary` / `onPrimary`) in both themes, a plain play icon and [startLabel].
  * - STARTING / STOPPING: disabled with a spinner and [busyLabel], so a double tap cannot start twice.
  * - RECORDING: the recording colour, a pulsing dot, [recordingLabel] and [elapsedText] on the start
  *   side, and a stop icon with [stopLabel] on the end side. The change of colour, icon and words makes
@@ -99,23 +97,17 @@ fun SessionButton(
     val recording = state == SessionButtonState.RECORDING
     val busy = state == SessionButtonState.STARTING || state == SessionButtonState.STOPPING
     val reduced = LocalReducedMotion.current
-    // The filled Start button keeps a recognizable Cobalt in both themes: primary is Cobalt in light, but Material flips
-    // it to a washed lavender in dark, so the deep-cobalt primaryContainer holds the brand there instead.
-    val brandContainer = if (colors.isDark) scheme.primaryContainer else scheme.primary
-    val brandContent = if (colors.isDark) scheme.onPrimaryContainer else scheme.onPrimary
+    // The one filled accent control per screen: Material's own primary / onPrimary in both themes.
     val container by animateColorAsState(
-        targetValue = if (recording) colors.recording.color else brandContainer,
+        targetValue = if (recording) colors.recording.color else scheme.primary,
         animationSpec = Motion.effect(reduced),
         label = "sessionButtonContainer",
     )
     val content by animateColorAsState(
-        targetValue = if (recording) colors.recording.onColor else brandContent,
+        targetValue = if (recording) colors.recording.onColor else scheme.onPrimary,
         animationSpec = Motion.effect(reduced),
         label = "sessionButtonContent",
     )
-    // The cyan brand spark on the play icon, on the cobalt fill in both themes; falls back to the content colour when the
-    // button is disabled (a cyan mark on a greyed control would read as live).
-    val playTint = if (enabled) BrandColors.MarkAccent else content
     Button(
         onClick = { if (recording) onStop() else onStart() },
         enabled = enabled && !busy,
@@ -142,7 +134,7 @@ fun SessionButton(
         when (state) {
             SessionButtonState.IDLE -> if (stacked) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Spacing.Xxs)) {
-                    Icon(imageVector = FieldTapIcons.Play, contentDescription = null, tint = playTint, modifier = Modifier.size(Sizes.Icon))
+                    Icon(imageVector = FieldTapIcons.Play, contentDescription = null, tint = content, modifier = Modifier.size(Sizes.Icon))
                     val labelStyle = MaterialTheme.typography.titleMedium
                     Text(
                         text = startLabel,
@@ -153,7 +145,7 @@ fun SessionButton(
                     )
                 }
             } else {
-                Icon(imageVector = FieldTapIcons.Play, contentDescription = null, tint = playTint, modifier = Modifier.size(Sizes.Icon))
+                Icon(imageVector = FieldTapIcons.Play, contentDescription = null, tint = content, modifier = Modifier.size(Sizes.Icon))
                 Spacer(modifier = Modifier.width(Spacing.Sm))
                 Text(text = startLabel, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }

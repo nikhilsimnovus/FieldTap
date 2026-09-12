@@ -109,8 +109,10 @@ data class SignalColors(
  * Colours Material 3 has no role for. Read them with `FieldTapDesign.colors`.
  *
  * [recording] is the running-session colour (Stop button, recording dot); it is not [error], so a
- * running session never reads as a failure in code. Chart colours: RSRP is the brand blue, SINR the
- * brand violet, neither of which is on the signal scale.
+ * running session never reads as a failure in code. [info] maps to the calm accent (`primary`). Chart
+ * colours: RSRP is the accent blue ([chartRsrp] = `primary`), SINR a muted violet ([chartSinr] =
+ * `tertiary`), neither of which is on the signal scale; [chartReference] is the `outline` dashed
+ * threshold, [chartKeyReference] the `onSurfaceVariant` solid −105 dBm key line.
  */
 @Immutable
 data class FieldTapColors(

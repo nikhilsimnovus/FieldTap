@@ -154,8 +154,9 @@ object Sizes {
 }
 
 /**
- * Depth tokens. `tonalElevation` is always **0**; depth is shadow + a 1 px hairline in light, and a
- * hairline + a top highlight in dark (see the card recipes in `DESIGN.md`). Read as `Elevation.Card`.
+ * Depth tokens. `tonalElevation` is always **0**; depth is hairline-led — a 1 px hairline plus a whisper
+ * of shadow in light, and the hairline plus the lift of `surfaceContainerLow` over the canvas in dark (no
+ * shadow), see the card recipes in `DESIGN.md`. Read as `Elevation.Card`.
  */
 object Elevation {
     /** Resting cards, tiles, rows. */
@@ -168,7 +169,7 @@ object Elevation {
     val Flat: Dp = 0.dp
 }
 
-/** Animation durations in milliseconds. Keep motion short: this is an instrument, not a toy. */
+/** Animation durations in milliseconds. Keep motion short, standard and calm — never showy. */
 object Durations {
     const val SHORT: Int = 150
     const val MEDIUM: Int = 250
@@ -179,8 +180,8 @@ object Durations {
 }
 
 /**
- * Motion specs for FieldTap's own components — physical, strictly-bounded springs that settle like an
- * instrument, never a bounce for its own sake. Built on `androidx.compose.animation.core` (always
+ * Motion specs for FieldTap's own components — calm, standard-easing tweens and strictly-bounded,
+ * **no-overshoot** springs. Nothing bounces. Built on `androidx.compose.animation.core` (always
  * available), independent of Material's `MotionScheme`, so the behaviour is unit-testable.
  *
  * Numbers never tween their value; only their **colour** and the **meter marker's position** move. Each
@@ -199,9 +200,12 @@ object Motion {
     fun <T> container(reduced: Boolean = false): FiniteAnimationSpec<T> =
         if (reduced) snap() else spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 300f)
 
-    /** Card and list entry: a whisper of bounce, one-shot only (never on the live feed). */
+    /**
+     * Card and list entry: a calm settle with **no bounce** (`dampingRatio = 1.0`), one-shot only (never on
+     * the live feed). Clearsheet drops Fieldbook's whisper of overshoot so appearance never reads as a toy.
+     */
     fun <T> entry(reduced: Boolean = false): FiniteAnimationSpec<T> =
-        if (reduced) snap() else spring(dampingRatio = 0.85f, stiffness = 300f)
+        if (reduced) snap() else spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 300f)
 
     /** Colour and opacity cross-fades: standard easing, short. */
     fun <T> effect(reduced: Boolean = false): FiniteAnimationSpec<T> =

@@ -198,7 +198,7 @@ fun MetricTile(
     }
     val container = MaterialTheme.colorScheme.surfaceContainerLow
     when {
-        // The hero is an open editorial block on the paper ground, not a card.
+        // The hero is an open block on the canvas, not a card.
         isHero -> Box(modifier = modifier.then(semantics)) { body() }
         // Non-hero tiles are bordered wells: a 1 px hairline, no shadow.
         onClick != null -> Surface(onClick = onClick, modifier = modifier.then(semantics), shape = ShapeRoles.Tile, color = container, border = cardHairline(), content = body)

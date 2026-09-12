@@ -73,10 +73,11 @@ fun SectionCard(
                     horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
                 ) {
                     if (icon != null) {
+                        // Neutral, not accent: the accent is reserved for the primary action, selection and focus.
                         Icon(
                             imageVector = icon,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(Sizes.IconSmall),
                         )
                     }

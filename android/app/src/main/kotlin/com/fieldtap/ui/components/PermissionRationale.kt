@@ -86,9 +86,10 @@ fun PermissionRationale(
             horizontalArrangement = Arrangement.spacedBy(Spacing.Lg),
         ) {
             Surface(
+                // A neutral tonal circle, not an accent-tinted one: the accent stays on the fix button.
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
             ) {
                 Box(modifier = Modifier.size(Sizes.IconContainer), contentAlignment = Alignment.Center) {
                     Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(Sizes.Icon))
