@@ -17,6 +17,18 @@ import com.fieldtap.app.SettingsRepository
 import com.fieldtap.app.SoakControl
 import com.fieldtap.app.SoakState
 import com.fieldtap.app.StartResult
+import com.fieldtap.core.capability.CapabilitySnapshot
+import com.fieldtap.core.capability.CapabilityVerdict
+import com.fieldtap.core.capability.CellularReadout
+import com.fieldtap.core.capability.DiagDevice
+import com.fieldtap.core.capability.KernelConfigProbe
+import com.fieldtap.core.capability.Layer3OnDevice
+import com.fieldtap.core.capability.PassiveInputs
+import com.fieldtap.core.capability.RootDetector
+import com.fieldtap.core.capability.RootProbeResult
+import com.fieldtap.core.capability.SelinuxMode
+import com.fieldtap.core.capability.SuStatus
+import com.fieldtap.core.capability.UsbDebugState
 import com.fieldtap.core.export.ExportResult
 import com.fieldtap.core.input.FixSample
 import com.fieldtap.core.live.LiveState
@@ -36,6 +48,8 @@ import com.fieldtap.core.time.ManualClock
 import com.fieldtap.format.FixProvider
 import com.fieldtap.format.HandsetMeta
 import com.fieldtap.format.LocationPrecision
+import com.fieldtap.platform.capability.CapabilityInspector
+import com.fieldtap.ui.probe.CapabilitySource
 import java.io.File
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -163,6 +177,56 @@ class FakeCapabilityProbe : CapabilityProbe {
     }
 }
 
+class FakeCapabilitySource : CapabilitySource {
+    /** Returned by passive(); replace before a reload. When [passiveFailure] is set, passive() throws it. */
+    var snapshot: CapabilitySnapshot = SetupSamples.capabilitySnapshot()
+    var passiveFailure: RuntimeException? = null
+    var passiveCalls: Int = 0
+        private set
+
+    /** What checkWithRoot() returns once completed; replace before another check. */
+    var rootResult: CompletableDeferred<RootProbeResult> = CompletableDeferred()
+    var rootChecks: Int = 0
+        private set
+
+    var exportFile: File = File("capability-Google-Pixel-9-20260910-143000.json")
+    var exportFailure: Exception? = null
+
+    /** Each exportCapability() call's arguments, for assertions. */
+    val exported = mutableListOf<Pair<CapabilitySnapshot, RootProbeResult?>>()
+
+    override suspend fun passive(): CapabilitySnapshot {
+        passiveCalls++
+        passiveFailure?.let { throw it }
+        return snapshot
+    }
+
+    override suspend fun checkWithRoot(): RootProbeResult {
+        rootChecks++
+        return rootResult.await()
+    }
+
+    override suspend fun exportCapability(snapshot: CapabilitySnapshot, rootProbe: RootProbeResult?): File {
+        exportFailure?.let { throw it }
+        exported += snapshot to rootProbe
+        return exportFile
+    }
+}
+
+/**
+ * A [CapabilityInspector] for the graph. The Capability screen reaches capability through the bound
+ * [FakeCapabilitySource] instead, so this only has to satisfy the [AppGraph] contract; it returns the same
+ * sample snapshot and an unrun (NOT_PRESENT) root probe.
+ */
+class FakeCapabilityInspector : CapabilityInspector {
+    var snapshot: CapabilitySnapshot = SetupSamples.capabilitySnapshot()
+    var rootResult: RootProbeResult = SetupSamples.rootProbeResult()
+
+    override suspend fun passive(): CapabilitySnapshot = snapshot
+
+    override suspend fun checkWithRoot(): RootProbeResult = rootResult
+}
+
 class FakeSoakControl : SoakControl {
     override val state = MutableStateFlow<SoakState>(SoakState.Idle)
 
@@ -213,6 +277,7 @@ class FakeAppGraph(initialSettings: AppSettings = SetupSamples.settings()) : App
     val fakeLive = FakeLiveFeed()
     val fakeReadiness = FakeReadinessChecker { SetupSamples.readinessReport() }
     val fakeProbe = FakeCapabilityProbe()
+    val fakeCapability = FakeCapabilityInspector()
     val fakeSoak = FakeSoakControl()
 
     override val settings: SettingsRepository get() = fakeSettings
@@ -221,6 +286,7 @@ class FakeAppGraph(initialSettings: AppSettings = SetupSamples.settings()) : App
     override val live: LiveFeed get() = fakeLive
     override val readiness: ReadinessChecker get() = fakeReadiness
     override val probe: CapabilityProbe get() = fakeProbe
+    override val capability: CapabilityInspector get() = fakeCapability
     override val soak: SoakControl get() = fakeSoak
     override val recovery: RecoveryNotices = FakeRecoveryNotices()
 }
@@ -265,6 +331,68 @@ object SetupSamples {
         sdkInt = 36,
         handset = HandsetMeta(manufacturer = "Google", model = model, androidVersion = "16"),
         permissions = linkedMapOf("android.permission.ACCESS_FINE_LOCATION" to true),
+    )
+
+    /** A passive capability snapshot. Defaults to the no-root emulator case; pass root managers for a rooted one. */
+    fun capabilitySnapshot(
+        rootManagerPackages: List<String> = emptyList(),
+        adbEnabled: Boolean = false,
+        developerOptionsEnabled: Boolean = false,
+        readPhoneStateGranted: Boolean = false,
+        preciseLocationGranted: Boolean = true,
+        locationServicesEnabled: Boolean = true,
+        simReady: Boolean = true,
+    ): CapabilitySnapshot {
+        val usb = UsbDebugState(
+            adbEnabled = adbEnabled,
+            wirelessDebugEnabled = false,
+            developerOptionsEnabled = developerOptionsEnabled,
+        )
+        val cellular = CellularReadout(
+            readPhoneStateGranted = readPhoneStateGranted,
+            preciseLocationGranted = preciseLocationGranted,
+            locationServicesEnabled = locationServicesEnabled,
+            simReady = simReady,
+            mockLocationAppSet = false,
+            buildAcceptsMockLocations = false,
+        )
+        val root = RootDetector.assess(
+            PassiveInputs(
+                props = emptyMap(),
+                buildTags = "release-keys",
+                suBinariesPresent = emptyList(),
+                rootManagerPackages = rootManagerPackages,
+                writableSystemPaths = emptyList(),
+                usb = usb,
+                cellular = cellular,
+            ),
+        )
+        return CapabilitySnapshot(
+            root = root,
+            usb = usb,
+            cellular = cellular,
+            verdict = CapabilityVerdict.snapshot(root, usb, cellular),
+        )
+    }
+
+    /** A "Check with root" result; defaults to the OnePlus case (rooted, no diag device). */
+    fun rootProbeResult(
+        suStatus: SuStatus = SuStatus.GRANTED,
+        isRoot: Boolean = true,
+        selinux: SelinuxMode = SelinuxMode.ENFORCING,
+        diagDevice: DiagDevice = DiagDevice.ABSENT,
+        kernelDiag: KernelConfigProbe = KernelConfigProbe.DIAG_ABSENT,
+        layer3: Layer3OnDevice = Layer3OnDevice.NOT_POSSIBLE,
+        message: String = "Layer-3 capture is not possible on this phone.",
+    ): RootProbeResult = RootProbeResult(
+        suStatus = suStatus,
+        isRoot = isRoot,
+        selinux = selinux,
+        diagDevice = diagDevice,
+        kernelDiag = kernelDiag,
+        layer3 = layer3,
+        elapsedMs = 420,
+        message = message,
     )
 
     fun fix(elapsedMs: Long, lat: Double = 52.520008, lon: Double = 13.404954, accuracyM: Double? = 8.0): FixSample = FixSample(

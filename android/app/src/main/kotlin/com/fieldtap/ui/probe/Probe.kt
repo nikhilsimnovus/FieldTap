@@ -2,6 +2,7 @@ package com.fieldtap.ui.probe
 
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,27 +34,43 @@ import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.fieldtap.R
 import com.fieldtap.app.AppGraph
+import com.fieldtap.app.FieldTapApplication
+import com.fieldtap.core.capability.CapabilityMessages
+import com.fieldtap.core.capability.CapabilitySnapshot
+import com.fieldtap.core.capability.CaptureAnswer
+import com.fieldtap.core.capability.CellularReadout
+import com.fieldtap.core.capability.DiagDevice
+import com.fieldtap.core.capability.KernelConfigProbe
+import com.fieldtap.core.capability.Layer3OnDevice
+import com.fieldtap.core.capability.RootConfidence
+import com.fieldtap.core.capability.RootDetector
+import com.fieldtap.core.capability.RootProbeResult
+import com.fieldtap.core.capability.RootSignals
+import com.fieldtap.core.capability.SelinuxMode
+import com.fieldtap.core.capability.UsbDebugState
 import com.fieldtap.core.input.ListenerOutcome
 import com.fieldtap.core.input.RadioListener
 import com.fieldtap.core.probe.CellInfoProbe
 import com.fieldtap.core.probe.ProbeNotes
-import com.fieldtap.core.probe.ProbeRecorder
 import com.fieldtap.core.probe.ProbeReport
 import com.fieldtap.core.probe.ServiceStateProbe
 import com.fieldtap.format.HandsetMeta
 import com.fieldtap.platform.Permissions
 import com.fieldtap.ui.common.FileSharer
 import com.fieldtap.ui.components.ChecklistRow
+import com.fieldtap.ui.components.Eyebrow
 import com.fieldtap.ui.components.FieldTapPreviews
 import com.fieldtap.ui.components.KeyValueRow
 import com.fieldtap.ui.components.PreviewSurface
 import com.fieldtap.ui.components.SectionCard
 import com.fieldtap.ui.components.SectionDivider
 import com.fieldtap.ui.components.StatusBanner
+import com.fieldtap.ui.components.StatusChip
 import com.fieldtap.ui.components.statusIcon
 import com.fieldtap.ui.setup.ButtonProgress
 import com.fieldtap.ui.setup.SetupFormats
@@ -62,6 +79,7 @@ import com.fieldtap.ui.setup.SetupScreenScaffold
 import com.fieldtap.ui.setup.setupContentWidth
 import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.FieldTapIcons
+import com.fieldtap.ui.theme.ShapeRoles
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
 import com.fieldtap.ui.theme.StatusTone
@@ -80,71 +98,178 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * What the Probe screen shows.
+ * What the Capability screen shows.
  *
- * @param running a probe run is listening.
- * @param progress the runner's progress line, for example "Listening: 12 s of 30 s, 12 answers".
- * @param report the finished report, or null before the first run finished (or while a new run listens).
+ * @param running the 30 s telephony probe is listening.
+ * @param progress the telephony runner's progress line, for example "Listening: 12 s of 30 s, 12 answers".
+ * @param report the finished telephony report, or null before the first run finished (or while a new run listens).
  * @param exported the JSON file of [report] once exported.
+ * @param capability the root/diag/USB/verdict panel's state, read passively when the screen opens.
  */
 data class ProbeUiState(
     val running: Boolean,
     val progress: String?,
     val report: ProbeReport?,
     val exported: File?,
+    val capability: CapabilityUiState = CapabilityUiState(),
 )
 
-/** Why the Probe screen shows a banner. */
+/**
+ * The capability panel's state: the passive snapshot (verdict, root signals, USB, cell access), the result
+ * of an explicit "Check with root", and the capability JSON export.
+ *
+ * @param snapshot the passive reading, or null before it has loaded.
+ * @param loadFailed the passive read failed; [snapshot] is the last good one, if any.
+ * @param rootProbe the last "Check with root" result, or null before one ran.
+ * @param checkingRoot a root check is running.
+ * @param exported the exported `fieldtap-capability/1` file, once written.
+ * @param exporting the capability export is being written.
+ */
+data class CapabilityUiState(
+    val snapshot: CapabilitySnapshot? = null,
+    val loadFailed: Boolean = false,
+    val rootProbe: RootProbeResult? = null,
+    val checkingRoot: Boolean = false,
+    val exported: File? = null,
+    val exporting: Boolean = false,
+)
+
+/** Why the Capability screen shows a banner. */
 enum class ProbeProblem {
-    /** The run ended with an error; no report. */
+    /** The telephony run ended with an error; no report. */
     RUN_FAILED,
 
-    /** The run was cancelled because the screen left the foreground; no report. */
+    /** The telephony run was cancelled because the screen left the foreground; no report. */
     INTERRUPTED,
 
-    /** The report could not be written for sharing. */
+    /** The telephony report could not be written for sharing. */
     EXPORT_FAILED,
+
+    /** The capability report could not be written for sharing. */
+    CAPABILITY_EXPORT_FAILED,
 }
 
 /**
- * The capability probe run and its export.
+ * The Capability screen's state: the passive capability snapshot (loaded when the screen binds its source),
+ * the explicit root check, the 30 s telephony probe, and the two JSON exports.
  *
- * - [run] listens for [DURATION_MS] through `CapabilityProbe.run`; progress lines go to [state]. A new run replaces
- *   the old report. [stop] (the user) and [interrupt] (the screen left) cancel it, which unregisters every listener;
- *   updates from a cancelled run are ignored, even when a new run has started.
- * - [export] writes the report through `CapabilityProbe.export`, sets [ProbeUiState.exported] and emits the file on
- *   [shareRequests]; a failure sets [problem] to [ProbeProblem.EXPORT_FAILED].
+ * The passive read and the root check reach the phone through a [CapabilitySource] the screen binds once
+ * ([bindCapability]); tests bind a fake. The telephony probe stays on `AppGraph.probe`.
  *
- * Owner: workstream `ui-setup`.
+ * - [refreshCapability] runs `CapabilitySource.passive` (no su); the screen calls it on open and on resume, so
+ *   USB-debugging and permission rows stay fresh after a trip to Android's settings. A failure sets
+ *   [CapabilityUiState.loadFailed] and keeps the last snapshot.
+ * - [checkWithRoot] runs the read-only root check; a second tap while one is in flight is ignored, and leaving
+ *   the screen cancels it (the su process is destroyed in the runner's `finally`).
+ * - [exportCapability] writes `fieldtap-capability/1` and asks the screen to share it; [export] does the same
+ *   for the telephony `fieldtap-probe/1`.
+ * - [run]/[stop]/[interrupt] drive the telephony probe exactly as before; a cancelled run's updates are ignored.
+ *
+ * Owner: workstream `screens-setup`.
  */
 class ProbeViewModel(private val graph: AppGraph) : ViewModel() {
-    private val mutableState = MutableStateFlow(ProbeUiState(running = false, progress = null, report = null, exported = null))
+    private val mutableState = MutableStateFlow(
+        ProbeUiState(running = false, progress = null, report = null, exported = null, capability = CapabilityUiState()),
+    )
     private val mutableProblem = MutableStateFlow<ProbeProblem?>(null)
     private val mutableExporting = MutableStateFlow(false)
     private val shares = Channel<File>(Channel.BUFFERED)
+    private val capabilityShares = Channel<File>(Channel.BUFFERED)
     private var runJob: Job? = null
     private var exportJob: Job? = null
+    private var loadJob: Job? = null
+    private var rootJob: Job? = null
+    private var capabilityExportJob: Job? = null
     private var runId = 0L
+    private var capabilitySource: CapabilitySource? = null
 
     val state: StateFlow<ProbeUiState> = mutableState.asStateFlow()
 
     /** Why a banner shows, or null. */
     val problem: StateFlow<ProbeProblem?> = mutableProblem.asStateFlow()
 
-    /** An export is being written. */
+    /** The telephony probe report is being exported. */
     val exporting: StateFlow<Boolean> = mutableExporting.asStateFlow()
 
-    /** Each exported file, once, for the screen to share. */
+    /** Each exported telephony report file, once, for the screen to share. */
     val shareRequests: Flow<File> = shares.receiveAsFlow()
 
-    /** Starts a 30 s run unless one is listening. The screen must stay on and visible while it runs. */
+    /** Each exported capability report file, once, for the screen to share. */
+    val capabilityShareRequests: Flow<File> = capabilityShares.receiveAsFlow()
+
+    /** Binds the capability source once (the screen binds the platform one, tests a fake), then reads it passively. */
+    internal fun bindCapability(source: CapabilitySource) {
+        if (capabilitySource != null) return
+        capabilitySource = source
+        refreshCapability()
+    }
+
+    /** Reads the passive capability snapshot (no su call). Ignores a call while a read is in flight. */
+    fun refreshCapability() {
+        val source = capabilitySource ?: return
+        if (loadJob?.isActive == true) return
+        loadJob = viewModelScope.launch {
+            try {
+                val snapshot = source.passive()
+                mutableState.update { it.copy(capability = it.capability.copy(snapshot = snapshot, loadFailed = false)) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: RuntimeException) {
+                mutableState.update { it.copy(capability = it.capability.copy(loadFailed = true)) }
+            }
+        }
+    }
+
+    /** Runs the read-only root check on an explicit tap; a second tap while one runs is ignored. */
+    fun checkWithRoot() {
+        val source = capabilitySource ?: return
+        if (rootJob?.isActive == true) return
+        mutableState.update { it.copy(capability = it.capability.copy(checkingRoot = true)) }
+        rootJob = viewModelScope.launch {
+            try {
+                val result = source.checkWithRoot()
+                mutableState.update { it.copy(capability = it.capability.copy(rootProbe = result, checkingRoot = false)) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: RuntimeException) {
+                mutableState.update { it.copy(capability = it.capability.copy(checkingRoot = false)) }
+            }
+        }
+    }
+
+    /** Builds and writes the `fieldtap-capability/1` report, then asks the screen to share it. */
+    fun exportCapability() {
+        val source = capabilitySource ?: return
+        val capability = mutableState.value.capability
+        val snapshot = capability.snapshot ?: return
+        if (capability.exporting || capabilityExportJob?.isActive == true) return
+        if (mutableProblem.value == ProbeProblem.CAPABILITY_EXPORT_FAILED) mutableProblem.value = null
+        mutableState.update { it.copy(capability = it.capability.copy(exporting = true)) }
+        capabilityExportJob = viewModelScope.launch {
+            try {
+                val file = source.exportCapability(snapshot, capability.rootProbe)
+                mutableState.update { it.copy(capability = it.capability.copy(exported = file)) }
+                capabilityShares.send(file)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: IOException) {
+                mutableProblem.value = ProbeProblem.CAPABILITY_EXPORT_FAILED
+            } catch (e: RuntimeException) {
+                mutableProblem.value = ProbeProblem.CAPABILITY_EXPORT_FAILED
+            } finally {
+                mutableState.update { it.copy(capability = it.capability.copy(exporting = false)) }
+            }
+        }
+    }
+
+    /** Starts a 30 s telephony run unless one is listening. The screen must stay on and visible while it runs. */
     fun run() {
         if (runJob?.isActive == true) return
         exportJob?.cancel()
         val id = ++runId
         mutableProblem.value = null
         mutableExporting.value = false
-        mutableState.value = ProbeUiState(running = true, progress = null, report = null, exported = null)
+        mutableState.update { it.copy(running = true, progress = null, report = null, exported = null) }
         runJob = viewModelScope.launch {
             try {
                 val report = graph.probe.run(DURATION_MS) { text ->
@@ -161,17 +286,24 @@ class ProbeViewModel(private val graph: AppGraph) : ViewModel() {
         }
     }
 
-    /** Cancels a run at the user's request. */
+    /** Cancels a telephony run at the user's request. */
     fun stop() {
         cancelRun(problem = null)
     }
 
-    /** Cancels a run because the screen left the foreground, and says so. Does nothing when no run listens. */
+    /**
+     * Cancels a telephony run and a root check because the screen left the foreground. Says the run was
+     * interrupted; the silent root-check cancel destroys its su process. Does nothing when neither is running.
+     */
     fun interrupt() {
+        if (rootJob?.isActive == true) {
+            rootJob?.cancel()
+            mutableState.update { it.copy(capability = it.capability.copy(checkingRoot = false)) }
+        }
         cancelRun(problem = ProbeProblem.INTERRUPTED)
     }
 
-    /** Writes the report as JSON and asks the screen to share it. */
+    /** Writes the telephony report as JSON and asks the screen to share it. */
     fun export() {
         val current = mutableState.value
         val report = current.report ?: return
@@ -210,20 +342,23 @@ class ProbeViewModel(private val graph: AppGraph) : ViewModel() {
     }
 
     companion object {
-        /** How long a run listens. */
+        /** How long a telephony run listens. */
         const val DURATION_MS: Long = 30_000
     }
 }
 
 /**
- * Capability probe: Run (30 s, screen must stay on), the report as readable rows (neighbours, band lists,
- * timestamps advance, SINR range, refused listeners and permissions), and Export JSON shared through
- * com.fieldtap.ui.common.FileSharer.
+ * Capability: the app's signal-analyser self-test panel. The tiered "What 5gto6G FieldTap can capture on this
+ * phone" verdict, a Root & diagnostics card with the explicit read-only "Check with root" button, USB-debugging
+ * rows, the cell-access readout, then the 30 s telephony probe's findings and detail cards, and JSON export of
+ * both `fieldtap-capability/1` and `fieldtap-probe/1` through the system share sheet.
  *
- * While a run listens the screen is kept on (`View.keepScreenOn`, no wake lock). Leaving the screen cancels the
- * run, except for a configuration change such as a rotation.
+ * The screen never gains root, never decodes signalling, and never claims to. The passive read is safe on open;
+ * the root check runs only on an explicit tap. While a telephony run listens or a root check runs the screen is
+ * kept on (`View.keepScreenOn`, no wake lock). Leaving the screen cancels both, except across a configuration
+ * change such as a rotation.
  *
- * Owner: workstream `ui-setup`.
+ * Owner: workstream `screens-setup`.
  */
 @Composable
 fun ProbeScreen(
@@ -238,11 +373,25 @@ fun ProbeScreen(
     val activity = LocalActivity.current
     val view = LocalView.current
     val snackbarHostState = remember { SnackbarHostState() }
-    val shareSubject = stringResource(R.string.probe_share_subject)
+    val probeSubject = stringResource(R.string.probe_share_subject)
+    val capabilitySubject = stringResource(R.string.probe_capability_share_subject)
     val shareFailedText = stringResource(R.string.setup_share_failed)
     val currentContext by rememberUpdatedState(context)
 
-    if (state.running) {
+    LaunchedEffect(viewModel, context) {
+        val application = context.applicationContext as? FieldTapApplication
+        if (application != null) {
+            val graph = application.graph
+            viewModel.bindCapability(
+                AndroidCapabilitySource(context.applicationContext, graph.appInfo, graph.clock, graph.capability),
+            )
+        }
+    }
+    LifecycleResumeEffect(viewModel) {
+        viewModel.refreshCapability()
+        onPauseOrDispose { }
+    }
+    if (state.running || state.capability.checkingRoot) {
         DisposableEffect(view) {
             val previous = view.keepScreenOn
             view.keepScreenOn = true
@@ -253,16 +402,10 @@ fun ProbeScreen(
         if (activity?.isChangingConfigurations != true) viewModel.interrupt()
     }
     LaunchedEffect(viewModel) {
-        viewModel.shareRequests.collect { file ->
-            val shared = try {
-                FileSharer.share(currentContext, file, JSON_MIME_TYPE, shareSubject, null)
-                true
-            } catch (e: RuntimeException) {
-                // No share target, or a file the FileProvider does not serve: say so rather than crash.
-                false
-            }
-            if (!shared) snackbarHostState.showSnackbar(shareFailedText)
-        }
+        viewModel.shareRequests.collect { file -> shareOrToast(currentContext, file, probeSubject, snackbarHostState, shareFailedText) }
+    }
+    LaunchedEffect(viewModel) {
+        viewModel.capabilityShareRequests.collect { file -> shareOrToast(currentContext, file, capabilitySubject, snackbarHostState, shareFailedText) }
     }
     ProbeContent(
         state = state,
@@ -272,6 +415,9 @@ fun ProbeScreen(
         onRun = viewModel::run,
         onStop = viewModel::stop,
         onExport = viewModel::export,
+        onCheckRoot = viewModel::checkWithRoot,
+        onExportCapability = viewModel::exportCapability,
+        onRetryCapability = viewModel::refreshCapability,
         modifier = modifier,
         snackbarHostState = snackbarHostState,
     )
@@ -279,7 +425,24 @@ fun ProbeScreen(
 
 private const val JSON_MIME_TYPE = "application/json"
 
-/** The Probe screen without its view model, for previews. */
+private suspend fun shareOrToast(
+    context: android.content.Context,
+    file: File,
+    subject: String,
+    snackbarHostState: SnackbarHostState,
+    shareFailedText: String,
+) {
+    val shared = try {
+        FileSharer.share(context, file, JSON_MIME_TYPE, subject, null)
+        true
+    } catch (e: RuntimeException) {
+        // No share target, or a file the FileProvider does not serve: say so rather than crash.
+        false
+    }
+    if (!shared) snackbarHostState.showSnackbar(shareFailedText)
+}
+
+/** The Capability screen without its view model, for previews. */
 @Composable
 internal fun ProbeContent(
     state: ProbeUiState,
@@ -289,51 +452,77 @@ internal fun ProbeContent(
     onRun: () -> Unit,
     onStop: () -> Unit,
     onExport: () -> Unit,
+    onCheckRoot: () -> Unit,
+    onExportCapability: () -> Unit,
+    onRetryCapability: () -> Unit,
     modifier: Modifier = Modifier,
     snackbarHostState: SnackbarHostState? = null,
 ) {
     val titleText = stringResource(R.string.probe_title)
     val report = state.report
+    val capability = state.capability
     SetupScreenScaffold(title = titleText, modifier = modifier, onBack = onBack, snackbarHostState = snackbarHostState) {
         if (problem != null) {
             item(key = "problem") {
-                ProblemBanner(problem = problem, onRun = onRun, onExport = onExport, modifier = Modifier.setupContentWidth())
+                ProblemBanner(problem = problem, onRun = onRun, onExport = onExport, onExportCapability = onExportCapability, modifier = Modifier.setupContentWidth())
             }
         }
-        when {
-            state.running -> item(key = "running") {
-                RunningCard(progress = state.progress, onStop = onStop, modifier = Modifier.setupContentWidth())
+        item(key = "verdict") {
+            VerdictBlock(
+                capability = capability,
+                running = state.running,
+                progress = state.progress,
+                hasReport = report != null,
+                onRun = onRun,
+                onStop = onStop,
+                onRetry = onRetryCapability,
+                modifier = Modifier.setupContentWidth(),
+            )
+        }
+        if (capability.snapshot != null) {
+            val snapshot = capability.snapshot
+            item(key = "tiers") { TieredCard(snapshot = snapshot, rootProbe = capability.rootProbe, modifier = Modifier.setupContentWidth()) }
+            item(key = "root") {
+                RootDiagnosticsCard(
+                    root = snapshot.root,
+                    usb = snapshot.usb,
+                    rootProbe = capability.rootProbe,
+                    checkingRoot = capability.checkingRoot,
+                    onCheckRoot = onCheckRoot,
+                    modifier = Modifier.setupContentWidth(),
+                )
             }
-            report == null -> item(key = "intro") { IntroCard(onRun = onRun, modifier = Modifier.setupContentWidth()) }
-            else -> {
-                item(key = "summary") {
-                    SummaryCard(
-                        report = report,
-                        exported = state.exported,
-                        exporting = exporting,
-                        onExport = onExport,
-                        onRun = onRun,
-                        modifier = Modifier.setupContentWidth(),
-                    )
-                }
-                item(key = "findings") { FindingsCard(notes = report.notes, modifier = Modifier.setupContentWidth()) }
-                item(key = "cell-info") { CellInfoCard(probe = report.cellInfo, modifier = Modifier.setupContentWidth()) }
-                item(key = "service") {
-                    ServiceCard(
-                        probe = report.serviceState,
-                        overrides = report.displayOverridesSeen,
-                        modifier = Modifier.setupContentWidth(),
-                    )
-                }
-                item(key = "listeners") { ListenersCard(listeners = report.listeners, modifier = Modifier.setupContentWidth()) }
-                item(key = "permissions") { PermissionsCard(permissions = report.permissions, modifier = Modifier.setupContentWidth()) }
+            item(key = "cell-access") { CellAccessCard(cellular = snapshot.cellular, modifier = Modifier.setupContentWidth()) }
+        }
+        if (report != null) {
+            item(key = "apis") {
+                Eyebrow(text = stringResource(R.string.probe_intro_title), heading = true, modifier = Modifier.setupContentWidth())
             }
+            item(key = "summary") { SummaryCard(report = report, modifier = Modifier.setupContentWidth()) }
+            item(key = "findings") { FindingsCard(notes = report.notes, modifier = Modifier.setupContentWidth()) }
+            item(key = "cell-info") { CellInfoCard(probe = report.cellInfo, modifier = Modifier.setupContentWidth()) }
+            item(key = "service") {
+                ServiceCard(probe = report.serviceState, overrides = report.displayOverridesSeen, modifier = Modifier.setupContentWidth())
+            }
+            item(key = "listeners") { ListenersCard(listeners = report.listeners, modifier = Modifier.setupContentWidth()) }
+            item(key = "permissions") { PermissionsCard(permissions = report.permissions, modifier = Modifier.setupContentWidth()) }
+        }
+        item(key = "exports") {
+            ExportsCard(
+                capability = capability,
+                report = report,
+                probeExported = state.exported,
+                exporting = exporting,
+                onExport = onExport,
+                onExportCapability = onExportCapability,
+                modifier = Modifier.setupContentWidth(),
+            )
         }
     }
 }
 
 @Composable
-private fun ProblemBanner(problem: ProbeProblem, onRun: () -> Unit, onExport: () -> Unit, modifier: Modifier) {
+private fun ProblemBanner(problem: ProbeProblem, onRun: () -> Unit, onExport: () -> Unit, onExportCapability: () -> Unit, modifier: Modifier) {
     when (problem) {
         ProbeProblem.RUN_FAILED -> StatusBanner(
             message = stringResource(R.string.probe_failed),
@@ -356,45 +545,260 @@ private fun ProblemBanner(problem: ProbeProblem, onRun: () -> Unit, onExport: ()
             onAction = onExport,
             modifier = modifier,
         )
-    }
-}
-
-@Composable
-private fun IntroCard(onRun: () -> Unit, modifier: Modifier) {
-    SectionCard(title = stringResource(R.string.probe_intro_title), icon = FieldTapIcons.Search, modifier = modifier) {
-        SetupParagraph(text = stringResource(R.string.probe_intro))
-        SetupParagraph(text = stringResource(R.string.probe_keep_open))
-        Button(onClick = onRun, modifier = Modifier.heightIn(min = Sizes.MinTouchTarget)) {
-            Text(text = stringResource(R.string.probe_run))
-        }
-    }
-}
-
-@Composable
-private fun RunningCard(progress: String?, onStop: () -> Unit, modifier: Modifier) {
-    SectionCard(title = stringResource(R.string.probe_running_title), icon = FieldTapIcons.Search, modifier = modifier) {
-        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        Text(
-            text = progress ?: stringResource(R.string.probe_starting),
-            style = MaterialTheme.typography.bodyLarge.tabular(),
-            color = MaterialTheme.colorScheme.onSurface,
+        ProbeProblem.CAPABILITY_EXPORT_FAILED -> StatusBanner(
+            message = stringResource(R.string.probe_export_failed),
+            tone = StatusTone.ERROR,
+            actionLabel = stringResource(R.string.setup_try_again),
+            onAction = onExportCapability,
+            modifier = modifier,
         )
-        SetupParagraph(text = stringResource(R.string.probe_keep_open))
-        OutlinedButton(onClick = onStop, modifier = Modifier.heightIn(min = Sizes.MinTouchTarget)) {
-            Text(text = stringResource(R.string.probe_stop))
-        }
     }
 }
 
+/**
+ * The open verdict block (on the ground, no card): the eyebrow, the SUCCESS/WARNING verdict chip, the honest
+ * plain sentence (from `:core`), and the primary "Run capability probe" control (or its progress, or "Run again").
+ */
 @Composable
-private fun SummaryCard(
-    report: ProbeReport,
-    exported: File?,
-    exporting: Boolean,
-    onExport: () -> Unit,
+private fun VerdictBlock(
+    capability: CapabilityUiState,
+    running: Boolean,
+    progress: String?,
+    hasReport: Boolean,
     onRun: () -> Unit,
+    onStop: () -> Unit,
+    onRetry: () -> Unit,
     modifier: Modifier,
 ) {
+    val snapshot = capability.snapshot
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(Spacing.Md)) {
+        Eyebrow(text = stringResource(R.string.probe_capability_verdict_eyebrow), heading = true)
+        when {
+            snapshot != null -> {
+                val verdict = ProbePresentation.verdict(snapshot, capability.rootProbe)
+                val canMeasure = ProbePresentation.canMeasureNow(snapshot.cellular)
+                StatusChip(
+                    text = stringResource(if (canMeasure) R.string.probe_capability_can_measure else R.string.probe_capability_needs_location),
+                    tone = if (canMeasure) StatusTone.SUCCESS else StatusTone.WARNING,
+                )
+                Text(
+                    text = ProbePresentation.tier1Detail(verdict),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            capability.loadFailed -> {
+                StatusBanner(
+                    message = stringResource(R.string.probe_capability_failed),
+                    tone = StatusTone.WARNING,
+                    actionLabel = stringResource(R.string.setup_try_again),
+                    onAction = onRetry,
+                )
+            }
+            else -> SetupParagraph(text = stringResource(R.string.probe_capability_gathering))
+        }
+        RunControls(running = running, progress = progress, hasReport = hasReport, onRun = onRun, onStop = onStop)
+    }
+}
+
+@Composable
+private fun RunControls(running: Boolean, progress: String?, hasReport: Boolean, onRun: () -> Unit, onStop: () -> Unit) {
+    when {
+        running -> {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            Text(
+                text = progress ?: stringResource(R.string.probe_starting),
+                style = MaterialTheme.typography.bodyLarge.tabular(),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            SetupParagraph(text = stringResource(R.string.probe_keep_open))
+            OutlinedButton(
+                onClick = onStop,
+                shape = ShapeRoles.Control,
+                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Text(text = stringResource(R.string.probe_stop))
+            }
+        }
+        hasReport -> {
+            OutlinedButton(
+                onClick = onRun,
+                shape = ShapeRoles.Control,
+                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Text(text = stringResource(R.string.probe_run_again))
+            }
+        }
+        else -> {
+            SetupParagraph(text = stringResource(R.string.probe_intro))
+            SetupParagraph(text = stringResource(R.string.probe_keep_open))
+            Button(
+                onClick = onRun,
+                shape = ShapeRoles.Control,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Sizes.PrimaryButtonHeight),
+            ) {
+                Text(text = stringResource(R.string.probe_run))
+            }
+        }
+    }
+}
+
+/** The tiered "What this phone can capture" card: three rows, honest sentences from `:core`, grey where neutral. */
+@Composable
+private fun TieredCard(snapshot: CapabilitySnapshot, rootProbe: RootProbeResult?, modifier: Modifier) {
+    val verdict = ProbePresentation.verdict(snapshot, rootProbe)
+    SectionCard(title = stringResource(R.string.probe_tiers_title), icon = FieldTapIcons.SignalBars, modifier = modifier) {
+        ChecklistRow(
+            title = stringResource(R.string.probe_tier_public_api),
+            tone = ProbePresentation.captureAnswerTone(verdict.publicApiMeasurements),
+            statusText = captureAnswerText(verdict.publicApiMeasurements),
+            detail = ProbePresentation.tier1Detail(verdict),
+            icon = FieldTapIcons.SignalBars,
+        )
+        SectionDivider()
+        ChecklistRow(
+            title = stringResource(R.string.probe_tier_push_updates),
+            tone = ProbePresentation.captureAnswerTone(verdict.pushCellUpdates),
+            statusText = captureAnswerText(verdict.pushCellUpdates),
+            detail = ProbePresentation.tier2Detail(verdict),
+            icon = FieldTapIcons.Phone,
+        )
+        SectionDivider()
+        ChecklistRow(
+            title = stringResource(R.string.probe_tier_layer3),
+            tone = ProbePresentation.layer3Tone(verdict.layer3Signalling),
+            statusText = layer3Text(verdict.layer3Signalling),
+            detail = ProbePresentation.layer3Detail(verdict),
+            icon = FieldTapIcons.Storage,
+        )
+    }
+}
+
+/**
+ * Root & diagnostics: the passive confidence with the always-present root-hiding caveat, the explicit read-only
+ * "Check with root" button (which states its consequence), the SELinux/`/dev/diag`/kernel-config rows it fills
+ * in, and the USB-debugging rows with the line on why they matter for the laptop-over-USB path.
+ */
+@Composable
+private fun RootDiagnosticsCard(
+    root: RootSignals,
+    usb: UsbDebugState,
+    rootProbe: RootProbeResult?,
+    checkingRoot: Boolean,
+    onCheckRoot: () -> Unit,
+    modifier: Modifier,
+) {
+    SectionCard(title = stringResource(R.string.probe_root_title), icon = FieldTapIcons.Shield, modifier = modifier) {
+        ChecklistRow(
+            title = rootConfidenceText(root.confidence),
+            tone = ProbePresentation.rootConfidenceTone(root.confidence),
+            statusText = null,
+            detail = root.caveat,
+            icon = FieldTapIcons.Shield,
+        )
+        if (rootProbe != null) {
+            SetupParagraph(text = rootProbe.message)
+            KeyValueRow(key = stringResource(R.string.probe_root_selinux), value = selinuxText(rootProbe.selinux), tabular = false)
+            KeyValueRow(key = stringResource(R.string.probe_root_diag_device), value = diagDeviceText(rootProbe.diagDevice), tabular = false)
+            KeyValueRow(key = stringResource(R.string.probe_root_kernel_diag), value = kernelDiagText(rootProbe.kernelDiag), tabular = false)
+        }
+        OutlinedButton(
+            onClick = onCheckRoot,
+            enabled = !checkingRoot,
+            shape = ShapeRoles.Control,
+            modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+        ) {
+            if (checkingRoot) {
+                ButtonProgress()
+                Spacer(modifier = Modifier.width(ButtonDefaults.IconSpacing))
+            }
+            Text(text = stringResource(if (checkingRoot) R.string.probe_checking_root else R.string.probe_check_root))
+        }
+        SetupParagraph(text = stringResource(R.string.probe_check_root_consequence))
+        SectionDivider()
+        SetupParagraph(text = CapabilityMessages.whyUsbMatters())
+        KeyValueRow(key = stringResource(R.string.probe_usb_adb), value = onOffText(usb.adbEnabled), tabular = false)
+        KeyValueRow(key = stringResource(R.string.probe_usb_wireless), value = onOffText(usb.wirelessDebugEnabled), tabular = false)
+        KeyValueRow(key = stringResource(R.string.probe_usb_dev_options), value = onOffText(usb.developerOptionsEnabled), tabular = false)
+    }
+}
+
+/** Cell access: the permission/SIM/location facts that decide whether measurements return anything. */
+@Composable
+private fun CellAccessCard(cellular: CellularReadout, modifier: Modifier) {
+    SectionCard(title = stringResource(R.string.probe_cellular_title), icon = FieldTapIcons.Sim, modifier = modifier) {
+        KeyValueRow(key = stringResource(R.string.probe_cellular_phone), value = allowedText(cellular.readPhoneStateGranted), tabular = false)
+        KeyValueRow(key = stringResource(R.string.probe_cellular_precise), value = allowedText(cellular.preciseLocationGranted), tabular = false)
+        KeyValueRow(key = stringResource(R.string.probe_cellular_location_services), value = onOffText(cellular.locationServicesEnabled), tabular = false)
+        KeyValueRow(key = stringResource(R.string.probe_cellular_sim), value = simText(cellular.simReady), tabular = false)
+        KeyValueRow(key = stringResource(R.string.probe_cellular_mock), value = mockText(cellular.mockLocationAppSet), tabular = false)
+        KeyValueRow(
+            key = stringResource(R.string.probe_cellular_mock_build),
+            value = stringResource(if (cellular.buildAcceptsMockLocations) R.string.setup_yes else R.string.setup_no),
+            tabular = false,
+        )
+    }
+}
+
+/**
+ * The two JSON exports, shared through the system share sheet: `fieldtap-capability/1` (available once the
+ * passive read has loaded) and `fieldtap-probe/1` (available once the telephony probe has a report). Each
+ * confirms its saved file name once written.
+ */
+@Composable
+private fun ExportsCard(
+    capability: CapabilityUiState,
+    report: ProbeReport?,
+    probeExported: File?,
+    exporting: Boolean,
+    onExport: () -> Unit,
+    onExportCapability: () -> Unit,
+    modifier: Modifier,
+) {
+    SectionCard(title = stringResource(R.string.probe_exports_title), icon = FieldTapIcons.Share, modifier = modifier) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
+            verticalArrangement = Arrangement.spacedBy(Spacing.Sm),
+        ) {
+            Button(
+                onClick = onExportCapability,
+                enabled = capability.snapshot != null && !capability.exporting,
+                shape = ShapeRoles.Control,
+                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                if (capability.exporting) {
+                    ButtonProgress()
+                    Spacer(modifier = Modifier.width(ButtonDefaults.IconSpacing))
+                }
+                Text(text = stringResource(R.string.probe_export_capability))
+            }
+            OutlinedButton(
+                onClick = onExport,
+                enabled = report != null && !exporting,
+                shape = ShapeRoles.Control,
+                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                if (exporting) {
+                    ButtonProgress()
+                    Spacer(modifier = Modifier.width(ButtonDefaults.IconSpacing))
+                }
+                Text(text = stringResource(R.string.probe_export))
+            }
+        }
+        if (capability.exported != null) {
+            SetupParagraph(text = stringResource(R.string.probe_exported, capability.exported.name))
+        }
+        if (probeExported != null) {
+            SetupParagraph(text = stringResource(R.string.probe_exported, probeExported.name))
+        }
+    }
+}
+
+@Composable
+private fun SummaryCard(report: ProbeReport, modifier: Modifier) {
     val noValue = stringResource(R.string.setup_no_value)
     val phoneTitle = stringResource(R.string.probe_section_phone)
     val handset = report.handset
@@ -420,29 +824,6 @@ private fun SummaryCard(
             key = stringResource(R.string.probe_key_listened),
             value = stringResource(R.string.probe_value_seconds, ProbePresentation.seconds(report.durationMs)),
         )
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
-            verticalArrangement = Arrangement.spacedBy(Spacing.Sm),
-        ) {
-            Button(
-                onClick = onExport,
-                enabled = !exporting,
-                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
-            ) {
-                if (exporting) {
-                    ButtonProgress()
-                    Spacer(modifier = Modifier.width(ButtonDefaults.IconSpacing))
-                }
-                Text(text = stringResource(R.string.probe_export))
-            }
-            OutlinedButton(onClick = onRun, modifier = Modifier.heightIn(min = Sizes.MinTouchTarget)) {
-                Text(text = stringResource(R.string.probe_run_again))
-            }
-        }
-        if (exported != null) {
-            SetupParagraph(text = stringResource(R.string.probe_exported, exported.name))
-        }
     }
 }
 
@@ -608,6 +989,79 @@ private fun reportedText(reported: Boolean): String =
     stringResource(if (reported) R.string.probe_value_reported else R.string.probe_value_not_reported)
 
 @Composable
+private fun onOffText(on: Boolean): String =
+    stringResource(if (on) R.string.probe_state_on else R.string.probe_state_off)
+
+@Composable
+private fun allowedText(allowed: Boolean): String =
+    stringResource(if (allowed) R.string.probe_permission_allowed else R.string.probe_permission_not_allowed)
+
+@Composable
+private fun simText(ready: Boolean): String =
+    stringResource(if (ready) R.string.probe_sim_ready else R.string.probe_sim_not_ready)
+
+@Composable
+private fun mockText(set: Boolean): String =
+    stringResource(if (set) R.string.probe_mock_set else R.string.probe_mock_none)
+
+@Composable
+private fun captureAnswerText(answer: CaptureAnswer): String = stringResource(
+    when (answer) {
+        CaptureAnswer.YES -> R.string.setup_yes
+        CaptureAnswer.NO -> R.string.setup_no
+        CaptureAnswer.UNKNOWN -> R.string.probe_layer3_unknown
+    },
+)
+
+@Composable
+private fun layer3Text(l3: Layer3OnDevice): String = stringResource(
+    when (l3) {
+        Layer3OnDevice.POSSIBLE -> R.string.probe_layer3_possible
+        Layer3OnDevice.NOT_POSSIBLE -> R.string.probe_layer3_not_possible
+        Layer3OnDevice.UNKNOWN -> R.string.probe_layer3_unknown
+    },
+)
+
+@Composable
+private fun rootConfidenceText(confidence: RootConfidence): String = stringResource(
+    when (confidence) {
+        RootConfidence.NONE -> R.string.probe_root_confidence_none
+        RootConfidence.LOW -> R.string.probe_root_confidence_low
+        RootConfidence.MEDIUM -> R.string.probe_root_confidence_medium
+        RootConfidence.HIGH -> R.string.probe_root_confidence_high
+    },
+)
+
+@Composable
+private fun selinuxText(mode: SelinuxMode): String = stringResource(
+    when (mode) {
+        SelinuxMode.ENFORCING -> R.string.probe_selinux_enforcing
+        SelinuxMode.PERMISSIVE -> R.string.probe_selinux_permissive
+        SelinuxMode.DISABLED -> R.string.probe_selinux_disabled
+        SelinuxMode.UNKNOWN -> R.string.probe_selinux_unknown
+    },
+)
+
+@Composable
+private fun diagDeviceText(device: DiagDevice): String = stringResource(
+    when (device) {
+        DiagDevice.PRESENT -> R.string.probe_diag_present
+        DiagDevice.ABSENT -> R.string.probe_diag_absent
+        DiagDevice.PERMISSION_DENIED -> R.string.probe_diag_denied
+        DiagDevice.UNKNOWN -> R.string.probe_diag_unknown
+    },
+)
+
+@Composable
+private fun kernelDiagText(kernel: KernelConfigProbe): String = stringResource(
+    when (kernel) {
+        KernelConfigProbe.DIAG_PRESENT -> R.string.probe_kernel_present
+        KernelConfigProbe.DIAG_ABSENT -> R.string.probe_kernel_absent
+        KernelConfigProbe.CONFIG_UNAVAILABLE -> R.string.probe_kernel_unavailable
+    },
+)
+
+@Composable
 private fun listenerText(word: ListenerWord): String = stringResource(
     when (word) {
         ListenerWord.REGISTERED -> R.string.probe_listener_registered
@@ -628,15 +1082,51 @@ private fun permissionText(name: String): String = when (ProbePresentation.permi
     ProbePermissionLabel.OTHER -> name
 }
 
-private fun previewReport(): ProbeReport = ProbeRecorder().report(
+private fun previewSnapshot(): CapabilitySnapshot {
+    val root = RootDetector.assess(
+        com.fieldtap.core.capability.PassiveInputs(
+            props = emptyMap(),
+            buildTags = "release-keys",
+            suBinariesPresent = emptyList(),
+            rootManagerPackages = listOf("com.topjohnwu.magisk"),
+            writableSystemPaths = emptyList(),
+            usb = UsbDebugState(adbEnabled = true, wirelessDebugEnabled = false, developerOptionsEnabled = true),
+            cellular = CellularReadout(
+                readPhoneStateGranted = false,
+                preciseLocationGranted = true,
+                locationServicesEnabled = true,
+                simReady = true,
+                mockLocationAppSet = false,
+                buildAcceptsMockLocations = false,
+            ),
+        ),
+    )
+    val usb = UsbDebugState(adbEnabled = true, wirelessDebugEnabled = false, developerOptionsEnabled = true)
+    val cellular = CellularReadout(
+        readPhoneStateGranted = false,
+        preciseLocationGranted = true,
+        locationServicesEnabled = true,
+        simReady = true,
+        mockLocationAppSet = false,
+        buildAcceptsMockLocations = false,
+    )
+    return CapabilitySnapshot(
+        root = root,
+        usb = usb,
+        cellular = cellular,
+        verdict = com.fieldtap.core.capability.CapabilityVerdict.snapshot(root, usb, cellular),
+    )
+}
+
+private fun previewReport(): ProbeReport = com.fieldtap.core.probe.ProbeRecorder().report(
     createdUtcMs = 1_789_050_600_000L,
     durationMs = 30_000,
     appVersion = "0.1.0",
     versionCode = 1,
     sdkInt = 36,
     handset = HandsetMeta(
-        manufacturer = "Google",
-        model = "Pixel 9",
+        manufacturer = "OnePlus",
+        model = "10 Pro",
         androidVersion = "16",
         operatorName = "T-Mobile",
         operatorMccmnc = "310260",
@@ -655,13 +1145,22 @@ private fun previewReport(): ProbeReport = ProbeRecorder().report(
 private fun ProbeReportPreview() {
     PreviewSurface {
         ProbeContent(
-            state = ProbeUiState(running = false, progress = null, report = previewReport(), exported = null),
+            state = ProbeUiState(
+                running = false,
+                progress = null,
+                report = previewReport(),
+                exported = null,
+                capability = CapabilityUiState(snapshot = previewSnapshot()),
+            ),
             problem = null,
             exporting = false,
             onBack = {},
             onRun = {},
             onStop = {},
             onExport = {},
+            onCheckRoot = {},
+            onExportCapability = {},
+            onRetryCapability = {},
         )
     }
 }
@@ -671,13 +1170,22 @@ private fun ProbeReportPreview() {
 private fun ProbeRunningPreview() {
     PreviewSurface {
         ProbeContent(
-            state = ProbeUiState(running = true, progress = "Listening: 12 s of 30 s, 12 answers", report = null, exported = null),
+            state = ProbeUiState(
+                running = true,
+                progress = "Listening: 12 s of 30 s, 12 answers",
+                report = null,
+                exported = null,
+                capability = CapabilityUiState(snapshot = previewSnapshot(), checkingRoot = false),
+            ),
             problem = ProbeProblem.INTERRUPTED,
             exporting = false,
             onBack = {},
             onRun = {},
             onStop = {},
             onExport = {},
+            onCheckRoot = {},
+            onExportCapability = {},
+            onRetryCapability = {},
         )
     }
 }

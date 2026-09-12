@@ -1,11 +1,17 @@
 package com.fieldtap.ui.probe
 
+import com.fieldtap.core.capability.CaptureAnswer
+import com.fieldtap.core.capability.DiagDevice
+import com.fieldtap.core.capability.Layer3OnDevice
+import com.fieldtap.core.capability.RootConfidence
 import com.fieldtap.core.input.ListenerOutcome
 import com.fieldtap.core.input.RadioListener
+import com.fieldtap.ui.setup.SetupSamples
 import com.fieldtap.ui.theme.StatusTone
 import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProbePresentationTest {
@@ -84,5 +90,63 @@ class ProbePresentationTest {
         assertNull(ProbePresentation.joined(listOf(" ", "")))
         assertEquals("LTE", ProbePresentation.joined(listOf("LTE")))
         assertEquals("LTE · NR", ProbePresentation.joined(listOf("LTE", "", "NR")))
+    }
+
+    @Test
+    fun theVerdictIsThePassiveSnapshotUntilARootCheckFoldsIn() {
+        val snapshot = SetupSamples.capabilitySnapshot(rootManagerPackages = listOf("com.topjohnwu.magisk"))
+        // A rooted phone with no root check yet cannot say whether it has a diag device.
+        assertEquals(Layer3OnDevice.UNKNOWN, ProbePresentation.verdict(snapshot, null).layer3Signalling)
+        assertEquals(snapshot.verdict, ProbePresentation.verdict(snapshot, null))
+
+        // The OnePlus case: rooted, but /dev/diag absent -> not possible on this phone.
+        val probe = SetupSamples.rootProbeResult()
+        assertEquals(Layer3OnDevice.NOT_POSSIBLE, ProbePresentation.verdict(snapshot, probe).layer3Signalling)
+    }
+
+    @Test
+    fun theTopChipWarnsOnlyWhenMeasurementWouldReturnNothing() {
+        assertTrue(ProbePresentation.canMeasureNow(SetupSamples.capabilitySnapshot().cellular))
+        val noLocation = SetupSamples.capabilitySnapshot(preciseLocationGranted = false).cellular
+        assertEquals(false, ProbePresentation.canMeasureNow(noLocation))
+        val servicesOff = SetupSamples.capabilitySnapshot(locationServicesEnabled = false).cellular
+        assertEquals(false, ProbePresentation.canMeasureNow(servicesOff))
+    }
+
+    @Test
+    fun tierAndLayer3TonesFollowTheAnswer() {
+        assertEquals(StatusTone.SUCCESS, ProbePresentation.captureAnswerTone(CaptureAnswer.YES))
+        assertEquals(StatusTone.WARNING, ProbePresentation.captureAnswerTone(CaptureAnswer.NO))
+        assertEquals(StatusTone.NEUTRAL, ProbePresentation.captureAnswerTone(CaptureAnswer.UNKNOWN))
+        // Layer-3 being impossible is a normal fact, not a fault: grey, never red.
+        assertEquals(StatusTone.SUCCESS, ProbePresentation.layer3Tone(Layer3OnDevice.POSSIBLE))
+        assertEquals(StatusTone.NEUTRAL, ProbePresentation.layer3Tone(Layer3OnDevice.NOT_POSSIBLE))
+        assertEquals(StatusTone.NEUTRAL, ProbePresentation.layer3Tone(Layer3OnDevice.UNKNOWN))
+    }
+
+    @Test
+    fun theRootConfidenceStaysCalm() {
+        assertEquals(StatusTone.INFO, ProbePresentation.rootConfidenceTone(RootConfidence.HIGH))
+        assertEquals(StatusTone.INFO, ProbePresentation.rootConfidenceTone(RootConfidence.MEDIUM))
+        assertEquals(StatusTone.NEUTRAL, ProbePresentation.rootConfidenceTone(RootConfidence.LOW))
+        assertEquals(StatusTone.NEUTRAL, ProbePresentation.rootConfidenceTone(RootConfidence.NONE))
+    }
+
+    @Test
+    fun theLayer3DetailAddsTheUsbLineOnlyWhenCaptureIsNotPossible() {
+        val snapshot = SetupSamples.capabilitySnapshot(rootManagerPackages = listOf("com.topjohnwu.magisk"))
+
+        val notPossible = ProbePresentation.verdict(snapshot, SetupSamples.rootProbeResult())
+        assertEquals(Layer3OnDevice.NOT_POSSIBLE, notPossible.layer3Signalling)
+        val laptop = notPossible.laptopPath!!
+        assertTrue(ProbePresentation.layer3Detail(notPossible).contains(laptop))
+
+        val possible = ProbePresentation.verdict(
+            snapshot,
+            SetupSamples.rootProbeResult(diagDevice = DiagDevice.PRESENT, layer3 = Layer3OnDevice.POSSIBLE),
+        )
+        assertEquals(Layer3OnDevice.POSSIBLE, possible.layer3Signalling)
+        assertNull(possible.laptopPath)
+        assertEquals(possible.lines.last(), ProbePresentation.layer3Detail(possible))
     }
 }

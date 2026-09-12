@@ -4,6 +4,7 @@ package com.fieldtap.ui.probe
 
 import com.fieldtap.core.probe.ProbeReport
 import com.fieldtap.ui.setup.FakeAppGraph
+import com.fieldtap.ui.setup.FakeCapabilitySource
 import com.fieldtap.ui.setup.SetupMainDispatcherRule
 import com.fieldtap.ui.setup.SetupSamples
 import java.io.File
@@ -209,6 +210,134 @@ class ProbeViewModelTest {
 
         assertTrue(graph.fakeProbe.exported.isEmpty())
         assertFalse(viewModel.exporting.value)
+    }
+
+    @Test
+    fun bindingReadsThePassiveSnapshotOnceAndIsIdempotent() = runTest {
+        val graph = FakeAppGraph()
+        val source = FakeCapabilitySource()
+        val viewModel = ProbeViewModel(graph)
+
+        viewModel.bindCapability(source)
+        advanceUntilIdle()
+        assertEquals(source.snapshot, viewModel.state.value.capability.snapshot)
+        assertFalse(viewModel.state.value.capability.loadFailed)
+        assertEquals(1, source.passiveCalls)
+
+        viewModel.bindCapability(FakeCapabilitySource())
+        advanceUntilIdle()
+        assertEquals(1, source.passiveCalls)
+        assertEquals(source.snapshot, viewModel.state.value.capability.snapshot)
+    }
+
+    @Test
+    fun aFailedPassiveReadSaysSoThenRecoversOnRefresh() = runTest {
+        val graph = FakeAppGraph()
+        val source = FakeCapabilitySource()
+        source.passiveFailure = IllegalStateException("settings unreadable")
+        val viewModel = ProbeViewModel(graph)
+
+        viewModel.bindCapability(source)
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.capability.loadFailed)
+        assertNull(viewModel.state.value.capability.snapshot)
+
+        source.passiveFailure = null
+        viewModel.refreshCapability()
+        advanceUntilIdle()
+        assertFalse(viewModel.state.value.capability.loadFailed)
+        assertEquals(source.snapshot, viewModel.state.value.capability.snapshot)
+    }
+
+    @Test
+    fun checkWithRootFoldsTheResultAndIgnoresASecondTapWhileRunning() = runTest {
+        val graph = FakeAppGraph()
+        val source = FakeCapabilitySource()
+        val viewModel = ProbeViewModel(graph)
+        viewModel.bindCapability(source)
+        advanceUntilIdle()
+
+        viewModel.checkWithRoot()
+        assertTrue(viewModel.state.value.capability.checkingRoot)
+        viewModel.checkWithRoot()
+        advanceUntilIdle()
+        assertEquals(1, source.rootChecks)
+
+        val result = SetupSamples.rootProbeResult()
+        source.rootResult.complete(result)
+        advanceUntilIdle()
+        assertEquals(result, viewModel.state.value.capability.rootProbe)
+        assertFalse(viewModel.state.value.capability.checkingRoot)
+    }
+
+    @Test
+    fun leavingTheScreenCancelsARootCheckWithoutABanner() = runTest {
+        val graph = FakeAppGraph()
+        val source = FakeCapabilitySource()
+        val viewModel = ProbeViewModel(graph)
+        viewModel.bindCapability(source)
+        advanceUntilIdle()
+
+        viewModel.checkWithRoot()
+        assertTrue(viewModel.state.value.capability.checkingRoot)
+        viewModel.interrupt()
+        advanceUntilIdle()
+
+        assertFalse(viewModel.state.value.capability.checkingRoot)
+        assertNull(viewModel.state.value.capability.rootProbe)
+        assertNull(viewModel.problem.value)
+    }
+
+    @Test
+    fun exportCapabilityWritesTheReportAndAsksTheScreenToShareIt() = runTest {
+        val graph = FakeAppGraph()
+        val source = FakeCapabilitySource()
+        val viewModel = ProbeViewModel(graph)
+        viewModel.bindCapability(source)
+        advanceUntilIdle()
+        val shared = mutableListOf<File>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.capabilityShareRequests.collect { shared += it } }
+
+        viewModel.exportCapability()
+        assertTrue(viewModel.state.value.capability.exporting)
+        advanceUntilIdle()
+
+        assertEquals(source.exportFile, viewModel.state.value.capability.exported)
+        assertEquals(listOf(source.exportFile), shared)
+        assertEquals(1, source.exported.size)
+        assertEquals(source.snapshot, source.exported.single().first)
+        assertNull(source.exported.single().second)
+        assertFalse(viewModel.state.value.capability.exporting)
+        assertNull(viewModel.problem.value)
+    }
+
+    @Test
+    fun exportCapabilityNeedsALoadedSnapshot() = runTest {
+        val graph = FakeAppGraph()
+        val viewModel = ProbeViewModel(graph)
+
+        viewModel.exportCapability()
+        advanceUntilIdle()
+
+        assertFalse(viewModel.state.value.capability.exporting)
+        assertNull(viewModel.state.value.capability.exported)
+    }
+
+    @Test
+    fun aFailedCapabilityExportSaysSo() = runTest {
+        val graph = FakeAppGraph()
+        val source = FakeCapabilitySource()
+        source.exportFailure = IOException("no space")
+        val viewModel = ProbeViewModel(graph)
+        viewModel.bindCapability(source)
+        advanceUntilIdle()
+
+        viewModel.exportCapability()
+        advanceUntilIdle()
+
+        assertEquals(ProbeProblem.CAPABILITY_EXPORT_FAILED, viewModel.problem.value)
+        assertNull(viewModel.state.value.capability.exported)
+        assertFalse(viewModel.state.value.capability.exporting)
     }
 
     private fun TestScope.finishedRun(graph: FakeAppGraph): ProbeViewModel {
