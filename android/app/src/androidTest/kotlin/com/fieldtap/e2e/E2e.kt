@@ -328,6 +328,15 @@ fun hasDescriptionMatching(regex: Regex): SemanticsMatcher = SemanticsMatcher("h
 }
 
 /**
+ * Matches a node by its visible label [text], whether it is exposed as text or as a content description, and
+ * regardless of case. Section headers and metric eyebrows now render UPPERCASE for display (the `Eyebrow`
+ * component), while keeping the original-case word as a content description for TalkBack, so a screen is
+ * awaited by its label rather than by an exact-case string.
+ */
+fun hasLabel(text: String): SemanticsMatcher =
+    hasText(text, ignoreCase = true) or hasContentDescription(text, ignoreCase = true)
+
+/**
  * Steps on the app's screens through Compose semantics. Each waits for what it needs, and a timeout names what was
  * awaited and prints the semantics tree to logcat.
  */
@@ -360,7 +369,7 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
         return compose.onAllNodes(matcher, useUnmergedTree = unmerged).onFirst()
     }
 
-    fun awaitText(@StringRes id: Int, timeoutMs: Long = WAIT_MS): SemanticsNodeInteraction = await(hasText(E2e.string(id)), timeoutMs)
+    fun awaitText(@StringRes id: Int, timeoutMs: Long = WAIT_MS): SemanticsNodeInteraction = await(hasLabel(E2e.string(id)), timeoutMs)
 
     fun click(matcher: SemanticsMatcher, timeoutMs: Long = WAIT_MS) {
         await(matcher, timeoutMs).performClick()
@@ -517,7 +526,7 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
     fun awaitServingCell(timeoutMs: Long = SERVING_CELL_WAIT_MS) {
         try {
             await(hasDescriptionMatching(ageBadge()) and hasDescriptionMatching(pciLabel()), timeoutMs)
-            scrollTo(hasText(E2e.string(R.string.live_section_serving)))
+            scrollTo(hasLabel(E2e.string(R.string.live_section_serving)))
             compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(0)
             compose.waitForIdle()
         } catch (e: AssertionError) {
