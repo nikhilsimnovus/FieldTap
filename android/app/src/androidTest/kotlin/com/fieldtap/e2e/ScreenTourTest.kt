@@ -100,8 +100,12 @@ class ScreenTourTest {
     private fun visitProbe(screens: Screens) {
         screens.openMenuItem(R.string.live_menu_probe)
         screens.awaitText(R.string.probe_run)
-        // The Root & diagnostics card is present once the passive read has loaded; its button sits inside it.
-        screens.awaitText(R.string.probe_root_title)
+        // Wait for the passive capability read at the top of the screen (its verdict chip replaces "Reading this
+        // phone…"), so the Root & diagnostics card below the fold is composed by the time we scroll to it.
+        screens.await(
+            hasLabel(E2e.string(R.string.probe_capability_can_measure)) or
+                hasLabel(E2e.string(R.string.probe_capability_needs_location)),
+        )
         screens.shotFull("07-probe")
         val checkRoot = hasText(E2e.string(R.string.probe_check_root)) and hasClickAction()
         screens.scrollTo(checkRoot)

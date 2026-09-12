@@ -671,10 +671,11 @@ main() {
   instrument recording-strip RecordingStripTest || true
   walk || true
   tour || true
-  capability || true
   location_off || true
   recovery force_stop || true
   recovery kill_9 || true
+  # Last: its pm clear resets permissions and consent, so it must not precede a UI test that expects Live.
+  capability || true
   stop_feeders
   checks
 }
