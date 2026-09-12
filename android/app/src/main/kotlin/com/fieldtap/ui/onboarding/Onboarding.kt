@@ -587,7 +587,8 @@ private fun DisclosureActions(
             Button(
                 onClick = if (consentCurrent) onContinue else onAccept,
                 enabled = !saving,
-                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+                shape = ShapeRoles.Control,
+                modifier = Modifier.heightIn(min = Sizes.PrimaryButtonHeight),
             ) {
                 if (saving) {
                     ButtonProgress()
