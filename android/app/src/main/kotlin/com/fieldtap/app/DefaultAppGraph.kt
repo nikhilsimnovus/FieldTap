@@ -18,6 +18,8 @@ import com.fieldtap.format.LocationPrecision
 import com.fieldtap.nettest.CellularNetworks
 import com.fieldtap.nettest.CellularTestTransport
 import com.fieldtap.platform.AppInfoReader
+import com.fieldtap.platform.capability.AndroidCapabilityInspector
+import com.fieldtap.platform.capability.CapabilityInspector
 import com.fieldtap.platform.clock.AndroidClock
 import com.fieldtap.platform.device.DeviceStateSource
 import com.fieldtap.platform.exit.ExitReasonReader
@@ -187,6 +189,8 @@ class DefaultAppGraph(private val application: Application) : AppGraph {
         override suspend fun export(report: ProbeReport): File =
             withContext(Dispatchers.IO) { probeRunner }.export(report)
     }
+
+    override val capability: CapabilityInspector by lazy { AndroidCapabilityInspector(application, appInfo) }
 
     override val soak: SoakControl by lazy { ServiceSoakControl(runtime) }
 

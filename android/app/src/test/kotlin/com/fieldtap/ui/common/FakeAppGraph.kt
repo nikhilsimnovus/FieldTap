@@ -15,10 +15,13 @@ import com.fieldtap.app.SettingsRepository
 import com.fieldtap.app.SoakControl
 import com.fieldtap.app.SoakState
 import com.fieldtap.app.StartResult
+import com.fieldtap.core.capability.CapabilitySnapshot
+import com.fieldtap.core.capability.RootProbeResult
 import com.fieldtap.core.export.ExportResult
 import com.fieldtap.core.live.LiveState
 import com.fieldtap.core.privacy.Consent
 import com.fieldtap.core.probe.ProbeReport
+import com.fieldtap.platform.capability.CapabilityInspector
 import com.fieldtap.core.readiness.ReadinessCheck
 import com.fieldtap.core.readiness.ReadinessItem
 import com.fieldtap.core.readiness.ReadinessLevel
@@ -57,6 +60,7 @@ class FakeAppGraph(
     override val live: FakeLiveFeed = FakeLiveFeed(),
     override val readiness: FakeReadinessChecker = FakeReadinessChecker(),
     override val probe: CapabilityProbe = UnusedProbe,
+    override val capability: CapabilityInspector = UnusedCapability,
     override val soak: SoakControl = IdleSoak,
     override val recovery: FakeRecoveryNotices = FakeRecoveryNotices(),
 ) : AppGraph
@@ -187,6 +191,14 @@ object UnusedProbe : CapabilityProbe {
 
     override suspend fun export(report: ProbeReport): File =
         throw UnsupportedOperationException("The session screens never export a probe report")
+}
+
+object UnusedCapability : CapabilityInspector {
+    override suspend fun passive(): CapabilitySnapshot =
+        throw UnsupportedOperationException("The session screens never inspect capability")
+
+    override suspend fun checkWithRoot(): RootProbeResult =
+        throw UnsupportedOperationException("The session screens never inspect capability")
 }
 
 object IdleSoak : SoakControl {

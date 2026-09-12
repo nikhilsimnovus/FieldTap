@@ -17,6 +17,7 @@ import com.fieldtap.core.time.Clock
 import com.fieldtap.format.LocationPrecision
 import com.fieldtap.format.SessionFile
 import com.fieldtap.format.SessionMeta
+import com.fieldtap.platform.capability.CapabilityInspector
 import java.io.File
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,6 +40,7 @@ interface AppGraph {
     val live: LiveFeed
     val readiness: ReadinessChecker
     val probe: CapabilityProbe
+    val capability: CapabilityInspector
     val soak: SoakControl
     val recovery: RecoveryNotices
 }
