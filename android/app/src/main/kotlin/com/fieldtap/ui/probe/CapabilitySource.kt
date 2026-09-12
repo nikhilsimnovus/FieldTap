@@ -20,7 +20,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Everything the Capability screen needs from the app: the passive/active capability inspection and the
- * `fieldtap-capability/1` export. Split behind this interface so [ProbeViewModel] can be driven by a fake
+ * `fieldtap-capability/2` export. Split behind this interface so [ProbeViewModel] can be driven by a fake
  * in tests, and so nothing platform-bound leaks into the view-model's own logic.
  *
  * [passive] and [checkWithRoot] are the [CapabilityInspector] facade (capability spec §1). [exportCapability]
@@ -41,7 +41,7 @@ internal interface CapabilitySource {
     suspend fun checkWithRoot(): RootProbeResult
 
     /**
-     * Builds the `fieldtap-capability/1` report from [snapshot] (folded with [rootProbe] when one ran),
+     * Builds the `fieldtap-capability/2` report from [snapshot] (folded with [rootProbe] when one ran),
      * writes it as JSON to a shareable file, and returns the file. Throws [IOException] when it cannot be
      * written.
      */

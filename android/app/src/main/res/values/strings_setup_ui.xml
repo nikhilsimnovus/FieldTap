@@ -143,7 +143,7 @@
     <string name="probe_intro_title">What this phone’s APIs return</string>
     <string name="probe_intro">For 30 seconds, records what this phone reports: neighbour cells, band lists, whether measurements refresh, the SINR range and which updates Android allows. Share the report to have this phone qualified.</string>
     <string name="probe_keep_open">Keep FieldTap open with the screen on until it finishes.</string>
-    <string name="probe_run">Run probe</string>
+    <string name="probe_run">Run diagnostics</string>
     <string name="probe_run_again">Run again</string>
     <string name="probe_starting">Starting…</string>
     <string name="probe_stop">Stop</string>
@@ -255,6 +255,38 @@
     <string name="probe_usb_dev_options">Developer options</string>
     <string name="probe_state_on">On</string>
     <string name="probe_state_off">Off</string>
+
+    <!-- Deep diagnostics: the richer read-only readout after "Check with root", and the honest on-device
+         layer-3 sub-verdict. Facts only — no raw log line, packet byte, diag dump or identifier. The verdict
+         and consequence sentences come from :core; these are only the structural labels and value words. -->
+    <string name="probe_deep_title">Deep diagnostics</string>
+    <string name="probe_deep_placeholder">Check with root to test the kernel, diag device and modem interfaces on this phone.</string>
+    <string name="probe_deep_root_manager">Root manager</string>
+    <string name="probe_deep_root_manager_none">None found</string>
+    <string name="probe_deep_kernel">Kernel</string>
+    <string name="probe_deep_unknown">Unknown</string>
+    <string name="probe_deep_kernel_smp" translatable="false">SMP</string>
+    <string name="probe_deep_kernel_preempt" translatable="false">PREEMPT</string>
+    <!-- %1$s is the node's mode and owner, e.g. 660 radio:radio. -->
+    <string name="probe_deep_diag_present_meta">Present · %1$s</string>
+    <string name="probe_deep_diag_present_denied">Present, access denied</string>
+    <string name="probe_deep_modem">Modem interfaces</string>
+    <string name="probe_deep_modem_none">None</string>
+    <!-- %1$d is the interface count, %2$s the comma-joined names, e.g. 3 — rmnet_data0, rmnet_data1, qmux0. -->
+    <string name="probe_deep_modem_value">%1$d — %2$s</string>
+    <string name="probe_deep_capture">Capture tooling</string>
+    <!-- %1$s is the tcpdump path(s). -->
+    <string name="probe_deep_capture_present">tcpdump present (%1$s)</string>
+    <string name="probe_deep_capture_none">Not present</string>
+    <string name="probe_deep_radio_log">Radio log</string>
+    <!-- %1$d is a redacted line count from the device shell; never a log line. -->
+    <string name="probe_deep_radio_readable">Readable (%1$d lines sampled)</string>
+    <string name="probe_deep_radio_not_readable">Not readable</string>
+    <string name="probe_deep_usb_off_dev">Off — developer options off</string>
+    <string name="probe_deep_verdict_title">On-device layer-3 (diag) capture</string>
+    <string name="probe_deep_verdict_viable">Viable</string>
+    <string name="probe_deep_verdict_not_viable">Not viable</string>
+    <string name="probe_deep_verdict_unknown">Unknown</string>
     <string name="probe_cellular_title">Cell access</string>
     <string name="probe_cellular_phone">Phone permission</string>
     <string name="probe_cellular_precise">Precise location</string>

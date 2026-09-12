@@ -418,9 +418,11 @@ private fun SummaryPoint(topic: SummaryTopic, point: ConsentPoint) {
         horizontalArrangement = Arrangement.spacedBy(Spacing.Lg),
     ) {
         Surface(
+            // A neutral tonal circle, not an accent-tinted one: Clearsheet keeps the accent for the primary
+            // action, selection and focus only (design §2.3); a disclosure point's icon is neutral.
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         ) {
             Box(modifier = Modifier.size(Sizes.IconContainer), contentAlignment = Alignment.Center) {
                 Icon(imageVector = topic.icon, contentDescription = null, modifier = Modifier.size(Sizes.Icon))
@@ -462,7 +464,8 @@ private fun FullNotice(paragraphs: List<String>, expanded: Boolean, onToggle: ()
                 Icon(
                     imageVector = FieldTapIcons.File,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
+                    // Neutral: the accent stays off decorative icons (design §2.3).
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(Sizes.Icon),
                 )
                 Column(modifier = Modifier.weight(1f)) {
@@ -543,7 +546,8 @@ private fun NoticeParagraph(topic: ConsentTopic, text: String) {
                 ConsentTopic.GENERAL -> FieldTapIcons.Info
             },
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+            // Neutral: the accent stays off decorative icons (design §2.3).
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .padding(top = Spacing.Xxs)
                 .size(Sizes.Icon),

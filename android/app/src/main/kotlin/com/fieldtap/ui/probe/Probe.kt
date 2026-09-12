@@ -47,6 +47,8 @@ import com.fieldtap.core.capability.CellularReadout
 import com.fieldtap.core.capability.DiagDevice
 import com.fieldtap.core.capability.KernelConfigProbe
 import com.fieldtap.core.capability.Layer3OnDevice
+import com.fieldtap.core.capability.OnDeviceLayer3
+import com.fieldtap.core.capability.OnDeviceLayer3Verdict
 import com.fieldtap.core.capability.RootConfidence
 import com.fieldtap.core.capability.RootDetector
 import com.fieldtap.core.capability.RootProbeResult
@@ -122,7 +124,7 @@ data class ProbeUiState(
  * @param loadFailed the passive read failed; [snapshot] is the last good one, if any.
  * @param rootProbe the last "Check with root" result, or null before one ran.
  * @param checkingRoot a root check is running.
- * @param exported the exported `fieldtap-capability/1` file, once written.
+ * @param exported the exported `fieldtap-capability/2` file, once written.
  * @param exporting the capability export is being written.
  */
 data class CapabilityUiState(
@@ -161,7 +163,7 @@ enum class ProbeProblem {
  *   [CapabilityUiState.loadFailed] and keeps the last snapshot.
  * - [checkWithRoot] runs the read-only root check; a second tap while one is in flight is ignored, and leaving
  *   the screen cancels it (the su process is destroyed in the runner's `finally`).
- * - [exportCapability] writes `fieldtap-capability/1` and asks the screen to share it; [export] does the same
+ * - [exportCapability] writes `fieldtap-capability/2` and asks the screen to share it; [export] does the same
  *   for the telephony `fieldtap-probe/1`.
  * - [run]/[stop]/[interrupt] drive the telephony probe exactly as before; a cancelled run's updates are ignored.
  *
@@ -237,7 +239,7 @@ class ProbeViewModel(private val graph: AppGraph) : ViewModel() {
         }
     }
 
-    /** Builds and writes the `fieldtap-capability/1` report, then asks the screen to share it. */
+    /** Builds and writes the `fieldtap-capability/2` report, then asks the screen to share it. */
     fun exportCapability() {
         val source = capabilitySource ?: return
         val capability = mutableState.value.capability
@@ -351,7 +353,7 @@ class ProbeViewModel(private val graph: AppGraph) : ViewModel() {
  * Capability: the app's signal-analyser self-test panel. The tiered "What 5gto6G FieldTap can capture on this
  * phone" verdict, a Root & diagnostics card with the explicit read-only "Check with root" button, USB-debugging
  * rows, the cell-access readout, then the 30 s telephony probe's findings and detail cards, and JSON export of
- * both `fieldtap-capability/1` and `fieldtap-probe/1` through the system share sheet.
+ * both `fieldtap-capability/2` and `fieldtap-probe/1` through the system share sheet.
  *
  * The screen never gains root, never decodes signalling, and never claims to. The passive read is safe on open;
  * the root check runs only on an explicit tap. While a telephony run listens or a root check runs the screen is
@@ -679,8 +681,14 @@ private fun TieredCard(snapshot: CapabilitySnapshot, rootProbe: RootProbeResult?
 
 /**
  * Root & diagnostics: the passive confidence with the always-present root-hiding caveat, the explicit read-only
- * "Check with root" button (which states its consequence), the SELinux/`/dev/diag`/kernel-config rows it fills
- * in, and the USB-debugging rows with the line on why they matter for the laptop-over-USB path.
+ * "Check with root" button (which states its consequence), then the **Deep diagnostics** sub-section it fills in
+ * (kernel, SELinux, diag node, kernel diag config, modem interfaces, capture tooling, radio-log readability, USB
+ * debugging) with the single honest on-device layer-3 sub-verdict, and finally the wider USB-debugging detail
+ * with the line on why it matters for the laptop-over-USB path.
+ *
+ * Honesty and privacy stay the product: the deep readout shows only capability facts (from the `:core`
+ * [com.fieldtap.core.capability.DeepDiagnostics] model, which has no field for a log line or diag byte), the
+ * sub-verdict copy comes from `:core`, and layer-3 being not viable stays neutral grey — a normal fact, never red.
  */
 @Composable
 private fun RootDiagnosticsCard(
@@ -691,6 +699,7 @@ private fun RootDiagnosticsCard(
     onCheckRoot: () -> Unit,
     modifier: Modifier,
 ) {
+    val labels = deepDiagnosticsLabels()
     SectionCard(title = stringResource(R.string.probe_root_title), icon = FieldTapIcons.Shield, modifier = modifier) {
         ChecklistRow(
             title = rootConfidenceText(root.confidence),
@@ -699,12 +708,6 @@ private fun RootDiagnosticsCard(
             detail = root.caveat,
             icon = FieldTapIcons.Shield,
         )
-        if (rootProbe != null) {
-            SetupParagraph(text = rootProbe.message)
-            KeyValueRow(key = stringResource(R.string.probe_root_selinux), value = selinuxText(rootProbe.selinux), tabular = false)
-            KeyValueRow(key = stringResource(R.string.probe_root_diag_device), value = diagDeviceText(rootProbe.diagDevice), tabular = false)
-            KeyValueRow(key = stringResource(R.string.probe_root_kernel_diag), value = kernelDiagText(rootProbe.kernelDiag), tabular = false)
-        }
         OutlinedButton(
             onClick = onCheckRoot,
             enabled = !checkingRoot,
@@ -719,12 +722,126 @@ private fun RootDiagnosticsCard(
         }
         SetupParagraph(text = stringResource(R.string.probe_check_root_consequence))
         SectionDivider()
+        DeepDiagnosticsSection(root = root, usb = usb, rootProbe = rootProbe, labels = labels)
+        SectionDivider()
         SetupParagraph(text = CapabilityMessages.whyUsbMatters())
-        KeyValueRow(key = stringResource(R.string.probe_usb_adb), value = onOffText(usb.adbEnabled), tabular = false)
         KeyValueRow(key = stringResource(R.string.probe_usb_wireless), value = onOffText(usb.wirelessDebugEnabled), tabular = false)
         KeyValueRow(key = stringResource(R.string.probe_usb_dev_options), value = onOffText(usb.developerOptionsEnabled), tabular = false)
     }
 }
+
+/**
+ * The Deep diagnostics sub-section (deep-root-spec §5): after "Check with root" folds a deep result, the nine
+ * fact rows, the SELinux consequence sentence, and the honest on-device layer-3 sub-verdict. When su was
+ * absent/denied/timed-out the deep block is null, so the `/1` facts and the passive rows still inform; before any
+ * run, a one-line placeholder and the passive facts that need no su (root manager, USB debugging).
+ *
+ * The rows are mapped by the pure [ProbePresentation.deepRows]; the screen adds only the structural labels. The
+ * value tones are carried in the model (and unit-tested) but not painted on the values here: the accent stays off
+ * data rows (design §2.3), and the only interpreted mark is the sub-verdict's, which is neutral grey unless viable.
+ */
+@Composable
+private fun DeepDiagnosticsSection(
+    root: RootSignals,
+    usb: UsbDebugState,
+    rootProbe: RootProbeResult?,
+    labels: ProbePresentation.DeepDiagnosticsLabels,
+) {
+    Eyebrow(text = stringResource(R.string.probe_deep_title), heading = true)
+    val deep = rootProbe?.deep
+    when {
+        rootProbe != null && deep != null -> {
+            SetupParagraph(text = rootProbe.message)
+            DeepRows(rows = ProbePresentation.deepRows(deep, root.rootManagerVersions, usb, labels))
+            // The SELinux consequence is one plain :core sentence; it explains the "Enforcing" row's meaning.
+            SetupParagraph(text = deep.selinux.consequence)
+            Layer3SubVerdict(verdict = OnDeviceLayer3.verdict(rootProbe, usb), usb = usb)
+        }
+        rootProbe != null -> {
+            SetupParagraph(text = rootProbe.message)
+            KeyValueRow(key = stringResource(R.string.probe_root_selinux), value = selinuxText(rootProbe.selinux), tabular = false)
+            KeyValueRow(key = stringResource(R.string.probe_root_diag_device), value = diagDeviceText(rootProbe.diagDevice), tabular = false)
+            KeyValueRow(key = stringResource(R.string.probe_root_kernel_diag), value = kernelDiagText(rootProbe.kernelDiag), tabular = false)
+            DeepRows(rows = ProbePresentation.deepPassiveRows(root.rootManagerVersions, usb, labels))
+            Layer3SubVerdict(verdict = OnDeviceLayer3.verdict(rootProbe, usb), usb = usb)
+        }
+        else -> {
+            SetupParagraph(text = stringResource(R.string.probe_deep_placeholder))
+            DeepRows(rows = ProbePresentation.deepPassiveRows(root.rootManagerVersions, usb, labels))
+            Layer3SubVerdict(verdict = OnDeviceLayer3.verdict(root, usb), usb = usb)
+        }
+    }
+}
+
+/** Renders each pure [ProbePresentation.DeepRow] as a labelled value; facts stay calm (no accent on a value). */
+@Composable
+private fun DeepRows(rows: List<ProbePresentation.DeepRow>) {
+    rows.forEach { row ->
+        KeyValueRow(key = row.label, value = row.value, tabular = false)
+    }
+}
+
+/**
+ * The single honest on-device layer-3 sub-verdict as its own emphasised [ChecklistRow]: a neutral or success
+ * mark (never red — "not viable" is a normal fact), the "Viable / Not viable / Unknown" status word, and the
+ * `:core` detail sentence (the reason plus, when not viable, the laptop-over-USB path and the USB-debugging line).
+ */
+@Composable
+private fun Layer3SubVerdict(verdict: OnDeviceLayer3Verdict, usb: UsbDebugState) {
+    ChecklistRow(
+        title = stringResource(R.string.probe_deep_verdict_title),
+        tone = ProbePresentation.layer3SubVerdictTone(verdict.outcome),
+        statusText = layer3VerdictStatusText(verdict.outcome),
+        detail = ProbePresentation.layer3SubVerdictDetail(verdict, usb),
+        icon = FieldTapIcons.Storage,
+    )
+}
+
+/** The Deep diagnostics structural labels and value words, resolved from resources for the pure mapping. */
+@Composable
+private fun deepDiagnosticsLabels(): ProbePresentation.DeepDiagnosticsLabels = ProbePresentation.DeepDiagnosticsLabels(
+    rootManager = stringResource(R.string.probe_deep_root_manager),
+    kernel = stringResource(R.string.probe_deep_kernel),
+    selinux = stringResource(R.string.probe_root_selinux),
+    diagDevice = stringResource(R.string.probe_root_diag_device),
+    kernelDiagConfig = stringResource(R.string.probe_root_kernel_diag),
+    modemInterfaces = stringResource(R.string.probe_deep_modem),
+    captureTooling = stringResource(R.string.probe_deep_capture),
+    radioLog = stringResource(R.string.probe_deep_radio_log),
+    usbDebugging = stringResource(R.string.probe_usb_adb),
+    rootManagerNone = stringResource(R.string.probe_deep_root_manager_none),
+    unknown = stringResource(R.string.probe_deep_unknown),
+    smp = stringResource(R.string.probe_deep_kernel_smp),
+    preempt = stringResource(R.string.probe_deep_kernel_preempt),
+    selinuxEnforcing = stringResource(R.string.probe_selinux_enforcing),
+    selinuxPermissive = stringResource(R.string.probe_selinux_permissive),
+    selinuxDisabled = stringResource(R.string.probe_selinux_disabled),
+    selinuxUnknown = stringResource(R.string.probe_selinux_unknown),
+    diagAbsent = stringResource(R.string.probe_diag_absent),
+    diagPresentMeta = stringResource(R.string.probe_deep_diag_present_meta),
+    diagPresentDenied = stringResource(R.string.probe_deep_diag_present_denied),
+    kernelDiagPresent = stringResource(R.string.probe_kernel_present),
+    kernelDiagAbsent = stringResource(R.string.probe_kernel_absent),
+    kernelDiagUnavailable = stringResource(R.string.probe_kernel_unavailable),
+    modemNone = stringResource(R.string.probe_deep_modem_none),
+    modemValue = stringResource(R.string.probe_deep_modem_value),
+    capturePresent = stringResource(R.string.probe_deep_capture_present),
+    captureNone = stringResource(R.string.probe_deep_capture_none),
+    radioReadable = stringResource(R.string.probe_deep_radio_readable),
+    radioNotReadable = stringResource(R.string.probe_deep_radio_not_readable),
+    usbOn = stringResource(R.string.probe_state_on),
+    usbOffDevOptions = stringResource(R.string.probe_deep_usb_off_dev),
+    usbOff = stringResource(R.string.probe_state_off),
+)
+
+@Composable
+private fun layer3VerdictStatusText(outcome: Layer3OnDevice): String = stringResource(
+    when (outcome) {
+        Layer3OnDevice.POSSIBLE -> R.string.probe_deep_verdict_viable
+        Layer3OnDevice.NOT_POSSIBLE -> R.string.probe_deep_verdict_not_viable
+        Layer3OnDevice.UNKNOWN -> R.string.probe_deep_verdict_unknown
+    },
+)
 
 /** Cell access: the permission/SIM/location facts that decide whether measurements return anything. */
 @Composable
@@ -744,7 +861,7 @@ private fun CellAccessCard(cellular: CellularReadout, modifier: Modifier) {
 }
 
 /**
- * The two JSON exports, shared through the system share sheet: `fieldtap-capability/1` (available once the
+ * The two JSON exports, shared through the system share sheet: `fieldtap-capability/2` (available once the
  * passive read has loaded) and `fieldtap-probe/1` (available once the telephony probe has a report). Each
  * confirms its saved file name once written.
  */
@@ -1100,6 +1217,7 @@ private fun previewSnapshot(): CapabilitySnapshot {
                 mockLocationAppSet = false,
                 buildAcceptsMockLocations = false,
             ),
+            rootManagerVersions = listOf(com.fieldtap.core.capability.RootManagerInfo("com.topjohnwu.magisk", "27.0")),
         ),
     )
     val usb = UsbDebugState(adbEnabled = true, wirelessDebugEnabled = false, developerOptionsEnabled = true)
@@ -1116,6 +1234,54 @@ private fun previewSnapshot(): CapabilitySnapshot {
         usb = usb,
         cellular = cellular,
         verdict = com.fieldtap.core.capability.CapabilityVerdict.snapshot(root, usb, cellular),
+    )
+}
+
+/** A folded "Check with root" result with a deep readout: the lead's OnePlus case (rooted, no /dev/diag). */
+private fun previewRootProbe(): RootProbeResult {
+    val deep = com.fieldtap.core.capability.DeepDiagnostics(
+        kernel = com.fieldtap.core.capability.KernelInfo(
+            release = "5.10.101-android12-9-g0",
+            architecture = "aarch64",
+            smp = true,
+            preempt = true,
+            redactedVersion = "Linux version 5.10.101 SMP PREEMPT",
+        ),
+        selinux = com.fieldtap.core.capability.SelinuxAssessment(
+            mode = SelinuxMode.ENFORCING,
+            blocksAppDiagPath = true,
+            consequence = CapabilityMessages.selinuxConsequence(SelinuxMode.ENFORCING, blocksAppDiagPath = true),
+        ),
+        diagNodes = com.fieldtap.core.capability.DiagNodes(
+            primary = com.fieldtap.core.capability.DiagNodeStat(
+                path = "/dev/diag",
+                exists = false,
+                charDevice = false,
+                octalMode = null,
+                ownerUser = null,
+                ownerGroup = null,
+            ),
+            others = emptyList(),
+        ),
+        kernelDiagConfig = KernelConfigProbe.DIAG_ABSENT,
+        modemInterfaces = com.fieldtap.core.capability.ModemInterfaces(count = 3, names = listOf("rmnet_data0", "rmnet_data1", "qmux0")),
+        captureTooling = com.fieldtap.core.capability.CaptureTooling(
+            tcpdumpPresent = false,
+            tcpdumpPaths = emptyList(),
+            pcapCapableInterfacePresent = true,
+        ),
+        radioLog = com.fieldtap.core.capability.RadioLogReadout(readable = true, lineCount = 5),
+    )
+    return RootProbeResult(
+        suStatus = com.fieldtap.core.capability.SuStatus.GRANTED,
+        isRoot = true,
+        selinux = SelinuxMode.ENFORCING,
+        diagDevice = DiagDevice.ABSENT,
+        kernelDiag = KernelConfigProbe.DIAG_ABSENT,
+        layer3 = Layer3OnDevice.NOT_POSSIBLE,
+        elapsedMs = 420,
+        message = "The root check confirmed working root on this phone.",
+        deep = deep,
     )
 }
 
@@ -1151,7 +1317,7 @@ private fun ProbeReportPreview() {
                 progress = null,
                 report = previewReport(),
                 exported = null,
-                capability = CapabilityUiState(snapshot = previewSnapshot()),
+                capability = CapabilityUiState(snapshot = previewSnapshot(), rootProbe = previewRootProbe()),
             ),
             problem = null,
             exporting = false,

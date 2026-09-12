@@ -1,14 +1,26 @@
 package com.fieldtap.ui.probe
 
+import com.fieldtap.core.capability.CapabilityMessages
 import com.fieldtap.core.capability.CaptureAnswer
 import com.fieldtap.core.capability.CaptureVerdict
 import com.fieldtap.core.capability.CapabilitySnapshot
 import com.fieldtap.core.capability.CapabilityVerdict
+import com.fieldtap.core.capability.CaptureTooling
 import com.fieldtap.core.capability.CellularReadout
+import com.fieldtap.core.capability.DeepDiagnostics
+import com.fieldtap.core.capability.DiagNodeStat
+import com.fieldtap.core.capability.KernelConfigProbe
+import com.fieldtap.core.capability.KernelInfo
 import com.fieldtap.core.capability.Layer3OnDevice
+import com.fieldtap.core.capability.ModemInterfaces
+import com.fieldtap.core.capability.OnDeviceLayer3Verdict
+import com.fieldtap.core.capability.RadioLogReadout
 import com.fieldtap.core.capability.RootConfidence
 import com.fieldtap.core.capability.RootDetector
+import com.fieldtap.core.capability.RootManagerInfo
 import com.fieldtap.core.capability.RootProbeResult
+import com.fieldtap.core.capability.SelinuxMode
+import com.fieldtap.core.capability.UsbDebugState
 import com.fieldtap.core.input.ListenerOutcome
 import com.fieldtap.core.input.RadioListener
 import com.fieldtap.core.probe.ProbeNotes
@@ -148,7 +160,7 @@ internal object ProbePresentation {
     fun tier2Detail(verdict: CaptureVerdict): String = verdict.lines.getOrNull(TIER_PUSH).orEmpty()
 
     /**
-     * The passive root confidence stays calm: HIGH/MEDIUM are informative (cobalt), LOW/NONE neutral. The
+     * The passive root confidence stays calm: HIGH/MEDIUM are informative (the accent), LOW/NONE neutral. The
      * confidence word is the cue, not a loud colour; the always-present caveat keeps "no root" from reading
      * as proof.
      */
@@ -156,6 +168,199 @@ internal object ProbePresentation {
         RootConfidence.HIGH, RootConfidence.MEDIUM -> StatusTone.INFO
         RootConfidence.LOW, RootConfidence.NONE -> StatusTone.NEUTRAL
     }
+
+    // ---- Deep diagnostics (deep-root-spec §5): the pure mapping from the :core model to labelled rows ----
+
+    /**
+     * One row of the Deep diagnostics readout: a sentence-case [label], its [value] (a fact — never a log
+     * line, packet byte, diag dump or identifier; see the privacy invariants), and the [tone] it carries.
+     * Every plain fact is [StatusTone.NEUTRAL]; only a found root manager is [StatusTone.INFO]. The
+     * not-possible on-device layer-3 verdict is a separate row and stays neutral grey ([layer3SubVerdictTone]).
+     */
+    internal data class DeepRow(val label: String, val value: String, val tone: StatusTone)
+
+    /**
+     * The structural labels and value words the Deep diagnostics rows need, resolved from the screen's string
+     * resources. This workstream adds only structural labels; every verdict/consequence sentence stays in
+     * `:core` [CapabilityMessages]. The bundle is built in the composable and passed to the pure [deepRows]
+     * mapping, so the mapping stays free of Android and is JVM-tested.
+     */
+    internal data class DeepDiagnosticsLabels(
+        val rootManager: String,
+        val kernel: String,
+        val selinux: String,
+        val diagDevice: String,
+        val kernelDiagConfig: String,
+        val modemInterfaces: String,
+        val captureTooling: String,
+        val radioLog: String,
+        val usbDebugging: String,
+        val rootManagerNone: String,
+        val unknown: String,
+        val smp: String,
+        val preempt: String,
+        val selinuxEnforcing: String,
+        val selinuxPermissive: String,
+        val selinuxDisabled: String,
+        val selinuxUnknown: String,
+        val diagAbsent: String,
+        /** "Present · %1$s", the %1$s being the node's mode and owner (e.g. "660 radio:radio"). */
+        val diagPresentMeta: String,
+        val diagPresentDenied: String,
+        val kernelDiagPresent: String,
+        val kernelDiagAbsent: String,
+        val kernelDiagUnavailable: String,
+        val modemNone: String,
+        /** "%1$d — %2$s", the count and the comma-joined interface names. */
+        val modemValue: String,
+        /** "tcpdump present (%1$s)", the %1$s being the path(s). */
+        val capturePresent: String,
+        val captureNone: String,
+        /** "Readable (%1$d lines sampled)". */
+        val radioReadable: String,
+        val radioNotReadable: String,
+        val usbOn: String,
+        val usbOffDevOptions: String,
+        val usbOff: String,
+    )
+
+    /**
+     * The nine Deep diagnostics rows in spec order (deep-root-spec §5), each a plain fact. Pure and
+     * JVM-tested. Every row is [StatusTone.NEUTRAL] except a found root manager ([StatusTone.INFO]); the
+     * on-device layer-3 verdict is rendered separately (see [layer3SubVerdictTone]). No row can carry a log
+     * line or diag byte — the [DeepDiagnostics] model has no such field.
+     */
+    internal fun deepRows(
+        deep: DeepDiagnostics,
+        rootManagerVersions: List<RootManagerInfo>,
+        usb: UsbDebugState,
+        labels: DeepDiagnosticsLabels,
+    ): List<DeepRow> = listOf(
+        rootManagerRow(rootManagerVersions, labels),
+        DeepRow(labels.kernel, kernelValue(deep.kernel, labels), StatusTone.NEUTRAL),
+        DeepRow(labels.selinux, selinuxWord(deep.selinux.mode, labels), StatusTone.NEUTRAL),
+        DeepRow(labels.diagDevice, diagNodeValue(deep.diagNodes.primary, labels), StatusTone.NEUTRAL),
+        DeepRow(labels.kernelDiagConfig, kernelDiagWord(deep.kernelDiagConfig, labels), StatusTone.NEUTRAL),
+        DeepRow(labels.modemInterfaces, modemValue(deep.modemInterfaces, labels), StatusTone.NEUTRAL),
+        DeepRow(labels.captureTooling, captureValue(deep.captureTooling, labels), StatusTone.NEUTRAL),
+        DeepRow(labels.radioLog, radioLogValue(deep.radioLog, labels), StatusTone.NEUTRAL),
+        usbRow(usb, labels),
+    )
+
+    /**
+     * The passive rows shown before "Check with root" (or when su was unavailable, so `deep` is null): the
+     * root manager and USB debugging, both readable with no su. Pure.
+     */
+    internal fun deepPassiveRows(
+        rootManagerVersions: List<RootManagerInfo>,
+        usb: UsbDebugState,
+        labels: DeepDiagnosticsLabels,
+    ): List<DeepRow> = listOf(rootManagerRow(rootManagerVersions, labels), usbRow(usb, labels))
+
+    private fun rootManagerRow(versions: List<RootManagerInfo>, labels: DeepDiagnosticsLabels): DeepRow =
+        DeepRow(
+            label = labels.rootManager,
+            value = rootManagerLine(versions, labels.rootManagerNone),
+            tone = if (versions.isEmpty()) StatusTone.NEUTRAL else StatusTone.INFO,
+        )
+
+    /**
+     * The root managers found as "Magisk 27.0, KernelSU 0.9.5", or [noneWord] when none. Display names come
+     * from the stable [RootDetector.ROOT_MANAGER_PACKAGES] ids; an unknown package shows its id verbatim, and
+     * a missing version drops the version. Pure.
+     */
+    fun rootManagerLine(versions: List<RootManagerInfo>, noneWord: String): String {
+        if (versions.isEmpty()) return noneWord
+        return versions.joinToString(", ") { info ->
+            val name = ROOT_MANAGER_NAMES[info.pkg] ?: info.pkg
+            val version = info.versionName?.takeIf { it.isNotBlank() }
+            if (version != null) "$name $version" else name
+        }
+    }
+
+    private fun kernelValue(kernel: KernelInfo, labels: DeepDiagnosticsLabels): String {
+        val release = kernel.release?.takeIf { it.isNotBlank() } ?: labels.unknown
+        val flags = listOfNotNull(labels.smp.takeIf { kernel.smp }, labels.preempt.takeIf { kernel.preempt })
+            .joinToString(" ")
+            .takeIf { it.isNotBlank() }
+        return listOfNotNull(release, kernel.architecture?.takeIf { it.isNotBlank() }, flags).joinToString(SEPARATOR)
+    }
+
+    private fun selinuxWord(mode: SelinuxMode, labels: DeepDiagnosticsLabels): String = when (mode) {
+        SelinuxMode.ENFORCING -> labels.selinuxEnforcing
+        SelinuxMode.PERMISSIVE -> labels.selinuxPermissive
+        SelinuxMode.DISABLED -> labels.selinuxDisabled
+        SelinuxMode.UNKNOWN -> labels.selinuxUnknown
+    }
+
+    private fun diagNodeValue(node: DiagNodeStat, labels: DeepDiagnosticsLabels): String = when {
+        !node.exists -> labels.diagAbsent
+        // Present but denied: the node exists yet its mode could not be read (SELinux hid it). Never a fault here.
+        node.octalMode == null -> labels.diagPresentDenied
+        else -> {
+            val owner = listOfNotNull(node.ownerUser, node.ownerGroup).joinToString(":").takeIf { it.isNotBlank() }
+            val meta = listOfNotNull(node.octalMode, owner).joinToString(" ")
+            String.format(labels.diagPresentMeta, meta)
+        }
+    }
+
+    private fun kernelDiagWord(config: KernelConfigProbe, labels: DeepDiagnosticsLabels): String = when (config) {
+        KernelConfigProbe.DIAG_PRESENT -> labels.kernelDiagPresent
+        KernelConfigProbe.DIAG_ABSENT -> labels.kernelDiagAbsent
+        KernelConfigProbe.CONFIG_UNAVAILABLE -> labels.kernelDiagUnavailable
+    }
+
+    private fun modemValue(interfaces: ModemInterfaces, labels: DeepDiagnosticsLabels): String =
+        if (interfaces.names.isEmpty()) {
+            labels.modemNone
+        } else {
+            String.format(labels.modemValue, interfaces.count, interfaces.names.joinToString(", "))
+        }
+
+    private fun captureValue(tooling: CaptureTooling, labels: DeepDiagnosticsLabels): String =
+        if (tooling.tcpdumpPresent) String.format(labels.capturePresent, tooling.tcpdumpPaths.joinToString(", ")) else labels.captureNone
+
+    private fun radioLogValue(radio: RadioLogReadout, labels: DeepDiagnosticsLabels): String =
+        if (radio.readable) String.format(labels.radioReadable, radio.lineCount ?: 0) else labels.radioNotReadable
+
+    private fun usbRow(usb: UsbDebugState, labels: DeepDiagnosticsLabels): DeepRow =
+        DeepRow(labels.usbDebugging, usbValue(usb, labels), StatusTone.NEUTRAL)
+
+    private fun usbValue(usb: UsbDebugState, labels: DeepDiagnosticsLabels): String = when {
+        usb.adbEnabled -> labels.usbOn
+        !usb.developerOptionsEnabled -> labels.usbOffDevOptions
+        else -> labels.usbOff
+    }
+
+    /**
+     * The on-device layer-3 sub-verdict's mark tone: SUCCESS when viable, otherwise **neutral grey** — a
+     * phone that cannot do on-device diag is a normal fact, never an error (deep-root-spec §5). Reuses
+     * [layer3Tone], so the sub-verdict and the tier row can never disagree.
+     */
+    fun layer3SubVerdictTone(outcome: Layer3OnDevice): StatusTone = layer3Tone(outcome)
+
+    /**
+     * The sub-verdict's detail sentence, assembled from the `:core` [OnDeviceLayer3Verdict] copy: the reason,
+     * and — when not viable — the laptop-over-USB path and the USB-debugging line (both `:core`). No verdict
+     * copy is authored here; only the leading capital and the joining are this screen's. Pure.
+     */
+    fun layer3SubVerdictDetail(verdict: OnDeviceLayer3Verdict, usb: UsbDebugState): String {
+        val reason = verdict.reason.replaceFirstChar { it.uppercaseChar() }
+        val reasonSentence = if (reason.endsWith('.')) reason else "$reason."
+        return if (verdict.viable) {
+            reasonSentence
+        } else {
+            listOf(reasonSentence, verdict.laptopPath, CapabilityMessages.laptopPath(usb)).joinToString(" ")
+        }
+    }
+
+    /** Short display names for the known root managers, keyed by [RootDetector.ROOT_MANAGER_PACKAGES] ids. */
+    private val ROOT_MANAGER_NAMES: Map<String, String> = mapOf(
+        "com.topjohnwu.magisk" to "Magisk",
+        "me.weishu.kernelsu" to "KernelSU",
+        "me.bmax.apatch" to "APatch",
+        "eu.chainfire.supersu" to "SuperSU",
+    )
 
     private const val TIER_PUBLIC_API = 0
     private const val TIER_PUSH = 1

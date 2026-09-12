@@ -17,15 +17,25 @@ import com.fieldtap.app.SettingsRepository
 import com.fieldtap.app.SoakControl
 import com.fieldtap.app.SoakState
 import com.fieldtap.app.StartResult
+import com.fieldtap.core.capability.CapabilityMessages
 import com.fieldtap.core.capability.CapabilitySnapshot
 import com.fieldtap.core.capability.CapabilityVerdict
+import com.fieldtap.core.capability.CaptureTooling
 import com.fieldtap.core.capability.CellularReadout
+import com.fieldtap.core.capability.DeepDiagnostics
 import com.fieldtap.core.capability.DiagDevice
+import com.fieldtap.core.capability.DiagNodeStat
+import com.fieldtap.core.capability.DiagNodes
 import com.fieldtap.core.capability.KernelConfigProbe
+import com.fieldtap.core.capability.KernelInfo
 import com.fieldtap.core.capability.Layer3OnDevice
+import com.fieldtap.core.capability.ModemInterfaces
 import com.fieldtap.core.capability.PassiveInputs
+import com.fieldtap.core.capability.RadioLogReadout
 import com.fieldtap.core.capability.RootDetector
+import com.fieldtap.core.capability.RootManagerInfo
 import com.fieldtap.core.capability.RootProbeResult
+import com.fieldtap.core.capability.SelinuxAssessment
 import com.fieldtap.core.capability.SelinuxMode
 import com.fieldtap.core.capability.SuStatus
 import com.fieldtap.core.capability.UsbDebugState
@@ -384,6 +394,7 @@ object SetupSamples {
         kernelDiag: KernelConfigProbe = KernelConfigProbe.DIAG_ABSENT,
         layer3: Layer3OnDevice = Layer3OnDevice.NOT_POSSIBLE,
         message: String = "Layer-3 capture is not possible on this phone.",
+        deep: DeepDiagnostics? = null,
     ): RootProbeResult = RootProbeResult(
         suStatus = suStatus,
         isRoot = isRoot,
@@ -393,7 +404,52 @@ object SetupSamples {
         layer3 = layer3,
         elapsedMs = 420,
         message = message,
+        deep = deep,
     )
+
+    /** A deep read-only readout; defaults to the OnePlus case (rooted, no /dev/diag, kernel reports no diag). */
+    fun deepDiagnostics(
+        kernelRelease: String? = "5.10.101-android12-9-g0",
+        architecture: String? = "aarch64",
+        smp: Boolean = true,
+        preempt: Boolean = true,
+        selinuxMode: SelinuxMode = SelinuxMode.ENFORCING,
+        diagPrimary: DiagNodeStat = DiagNodeStat(
+            path = "/dev/diag",
+            exists = false,
+            charDevice = false,
+            octalMode = null,
+            ownerUser = null,
+            ownerGroup = null,
+        ),
+        diagOthers: List<DiagNodeStat> = emptyList(),
+        kernelDiagConfig: KernelConfigProbe = KernelConfigProbe.DIAG_ABSENT,
+        modem: ModemInterfaces = ModemInterfaces(count = 3, names = listOf("rmnet_data0", "rmnet_data1", "qmux0")),
+        capture: CaptureTooling = CaptureTooling(tcpdumpPresent = false, tcpdumpPaths = emptyList(), pcapCapableInterfacePresent = true),
+        radioLog: RadioLogReadout = RadioLogReadout(readable = true, lineCount = 5),
+    ): DeepDiagnostics = DeepDiagnostics(
+        kernel = KernelInfo(
+            release = kernelRelease,
+            architecture = architecture,
+            smp = smp,
+            preempt = preempt,
+            redactedVersion = kernelRelease?.let { "Linux version $it SMP PREEMPT" },
+        ),
+        selinux = SelinuxAssessment(
+            mode = selinuxMode,
+            blocksAppDiagPath = selinuxMode == SelinuxMode.ENFORCING,
+            consequence = CapabilityMessages.selinuxConsequence(selinuxMode, selinuxMode == SelinuxMode.ENFORCING),
+        ),
+        diagNodes = DiagNodes(primary = diagPrimary, others = diagOthers),
+        kernelDiagConfig = kernelDiagConfig,
+        modemInterfaces = modem,
+        captureTooling = capture,
+        radioLog = radioLog,
+    )
+
+    /** A root manager and version, for the deep readout's "Root manager" row. */
+    fun rootManager(pkg: String = "com.topjohnwu.magisk", versionName: String? = "27.0"): RootManagerInfo =
+        RootManagerInfo(pkg = pkg, versionName = versionName)
 
     fun fix(elapsedMs: Long, lat: Double = 52.520008, lon: Double = 13.404954, accuracyM: Double? = 8.0): FixSample = FixSample(
         elapsedMs = elapsedMs,
