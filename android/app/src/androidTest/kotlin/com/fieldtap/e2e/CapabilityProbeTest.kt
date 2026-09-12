@@ -34,7 +34,7 @@ import org.junit.runner.RunWith
  *     `File` stat). When `su` grants root, `/dev/diag` is ABSENT and the layer-3 verdict is "not possible on this
  *     phone" with the laptop-over-USB path; when `su` is denied/absent/times out, the honest UNKNOWN/NOT_POSSIBLE
  *     path holds instead.
- *  3. The `fieldtap-capability/1` JSON export is written (via the same [CapabilityReports.build] +
+ *  3. The `fieldtap-capability/2` JSON export is written (via the same [CapabilityReports.build] +
  *     [CapabilityJson] path the screen uses) to `e2e/capability.json`, with a flat `e2e/capability-result.json`
  *     of the facts. Both are written before the assertions run, so the pulled artifacts diagnose any failure, and
  *     check_e2e.py asserts them independently.

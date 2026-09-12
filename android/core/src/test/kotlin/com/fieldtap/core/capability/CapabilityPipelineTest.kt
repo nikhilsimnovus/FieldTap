@@ -53,7 +53,7 @@ class CapabilityPipelineTest {
         assertTrue(message, message.contains("USB debugging"))
 
         val json = CapabilityJson.encode(report(root, usb, cellular, probe))
-        assertTrue(json, json.contains("\"format\": \"fieldtap-capability/1\""))
+        assertTrue(json, json.contains("\"format\": \"fieldtap-capability/2\""))
         assertTrue(json, json.contains("\"layer3_signalling\": \"NOT_POSSIBLE\""))
         assertTrue(json, json.contains("\"diag_device\": \"ABSENT\""))
         assertTrue(json, json.contains("\"public_api_measurements\": \"YES\""))

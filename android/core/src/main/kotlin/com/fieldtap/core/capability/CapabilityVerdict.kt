@@ -87,3 +87,40 @@ object CapabilityVerdict {
         )
     }
 }
+
+/**
+ * The single honest on-device layer-3 sub-verdict (deep-root-spec §3, §5). Pure; it **reuses the unchanged
+ * [CapabilityVerdict.layer3] rule** for the outcome and only adds a plain-language [OnDeviceLayer3Verdict.reason]
+ * plus the always-offered laptop-over-USB path and the USB-debugging state. Deep diagnostics supply evidence
+ * and a reason, never a new decision path.
+ *
+ * Owner: workstream `deep-root-core`.
+ */
+object OnDeviceLayer3 {
+    /**
+     * After a "Run diagnostics" run has folded a [probe] (its [RootProbeResult.layer3] already equals
+     * `CapabilityVerdict.layer3(root, probe)`). This is the form the `:app` inspector and the export use.
+     */
+    fun verdict(probe: RootProbeResult, usb: UsbDebugState): OnDeviceLayer3Verdict = OnDeviceLayer3Verdict(
+        outcome = probe.layer3,
+        viable = probe.layer3 == Layer3OnDevice.POSSIBLE,
+        reason = CapabilityMessages.onDeviceLayer3Reason(probe),
+        laptopPath = CapabilityMessages.laptopOverUsbPath(),
+        usbDebuggingOn = usb.adbEnabled,
+    )
+
+    /**
+     * Before any deep run (su not yet tapped): the outcome comes from the passive [root] confidence via the
+     * unchanged rule, and the reason reflects "looks rooted, not yet tested" or "no root path".
+     */
+    fun verdict(root: RootSignals, usb: UsbDebugState): OnDeviceLayer3Verdict {
+        val outcome = CapabilityVerdict.layer3(root, probe = null)
+        return OnDeviceLayer3Verdict(
+            outcome = outcome,
+            viable = outcome == Layer3OnDevice.POSSIBLE,
+            reason = CapabilityMessages.onDeviceLayer3ReasonPassive(root, outcome),
+            laptopPath = CapabilityMessages.laptopOverUsbPath(),
+            usbDebuggingOn = usb.adbEnabled,
+        )
+    }
+}

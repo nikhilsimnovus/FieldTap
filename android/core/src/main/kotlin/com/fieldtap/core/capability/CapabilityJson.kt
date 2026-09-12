@@ -15,12 +15,15 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * The capability export: `{"format": "fieldtap-capability/1", ...}` rendered with
+ * The capability export: `{"format": "fieldtap-capability/2", ...}` rendered with
  * `com.fieldtap.format.JsonText`, the same conventions as `com.fieldtap.core.probe.ProbeJson` — keys
- * snake_case in [CapabilityReport] field order, enums by name.
+ * snake_case in [CapabilityReport] field order, enums by name. `/2` is a strict superset of `/1`: every
+ * `/1` key keeps its name, order and meaning, and the deep block (`deep`), `root_manager_versions` and
+ * `on_device_layer3` are added, so a `/1`-era reader still parses a `/2` file (deep-root-spec §6).
  *
  * - `handset` leaves out keys with no value, as session.json does; other nullable values are `null`.
- * - `root_probe` is `null` when "Check with root" was never run.
+ * - `root_probe` is `null` when "Check with root" was never run; its nested `deep` is `null` when the deep
+ *   run did not happen (su unavailable).
  * - [fileName]: `capability-<manufacturer>-<model>-<yyyyMMdd-HHmmss of createdUtcMs, UTC>.json`, where each
  *   name keeps only `A-Z a-z 0-9 . _ -` (other runs become one `-`), is cut at 40 characters, and is
  *   `unknown` when nothing is left — exactly as `ProbeJson.fileName`.
@@ -50,6 +53,7 @@ object CapabilityJson {
         "usb" to usb(report.usb),
         "cellular" to cellular(report.cellular),
         "verdict" to verdict(report.verdict),
+        "on_device_layer3" to (report.onDeviceLayer3?.let { onDeviceLayer3(it) } ?: JsonNul),
         "notes" to JsonArr(report.notes.map { JsonStr(it) }),
     )
 
@@ -86,6 +90,12 @@ object CapabilityJson {
         "debuggable" to JsonBool(root.debuggable),
         "secure_off" to JsonBool(root.secureOff),
         "writable_system_paths" to JsonArr(root.writableSystemPaths.map { JsonStr(it) }),
+        "root_manager_versions" to JsonArr(root.rootManagerVersions.map { rootManagerInfo(it) }),
+    )
+
+    private fun rootManagerInfo(info: RootManagerInfo): JsonObj = obj(
+        "pkg" to JsonStr(info.pkg),
+        "version_name" to nullableStr(info.versionName),
     )
 
     private fun rootProbe(probe: RootProbeResult): JsonObj = obj(
@@ -96,6 +106,69 @@ object CapabilityJson {
         "kernel_diag" to JsonStr(probe.kernelDiag.name),
         "layer3" to JsonStr(probe.layer3.name),
         "elapsed_ms" to JsonInt(probe.elapsedMs),
+        "deep" to (probe.deep?.let { deep(it) } ?: JsonNul),
+    )
+
+    private fun deep(deep: DeepDiagnostics): JsonObj = obj(
+        "kernel" to kernel(deep.kernel),
+        "selinux" to selinuxAssessment(deep.selinux),
+        "diag_nodes" to diagNodes(deep.diagNodes),
+        "kernel_diag_config" to JsonStr(deep.kernelDiagConfig.name),
+        "modem_interfaces" to modemInterfaces(deep.modemInterfaces),
+        "capture_tooling" to captureTooling(deep.captureTooling),
+        "radio_log" to radioLog(deep.radioLog),
+    )
+
+    private fun kernel(kernel: KernelInfo): JsonObj = obj(
+        "release" to nullableStr(kernel.release),
+        "architecture" to nullableStr(kernel.architecture),
+        "smp" to JsonBool(kernel.smp),
+        "preempt" to JsonBool(kernel.preempt),
+        "redacted_version" to nullableStr(kernel.redactedVersion),
+    )
+
+    private fun selinuxAssessment(selinux: SelinuxAssessment): JsonObj = obj(
+        "mode" to JsonStr(selinux.mode.name),
+        "blocks_app_diag_path" to JsonBool(selinux.blocksAppDiagPath),
+        "consequence" to JsonStr(selinux.consequence),
+    )
+
+    private fun diagNodes(nodes: DiagNodes): JsonObj = obj(
+        "primary" to diagNodeStat(nodes.primary),
+        "others" to JsonArr(nodes.others.map { diagNodeStat(it) }),
+    )
+
+    private fun diagNodeStat(node: DiagNodeStat): JsonObj = obj(
+        "path" to JsonStr(node.path),
+        "exists" to JsonBool(node.exists),
+        "char_device" to JsonBool(node.charDevice),
+        "octal_mode" to nullableStr(node.octalMode),
+        "owner_user" to nullableStr(node.ownerUser),
+        "owner_group" to nullableStr(node.ownerGroup),
+    )
+
+    private fun modemInterfaces(modem: ModemInterfaces): JsonObj = obj(
+        "count" to JsonInt(modem.count.toLong()),
+        "names" to JsonArr(modem.names.map { JsonStr(it) }),
+    )
+
+    private fun captureTooling(tooling: CaptureTooling): JsonObj = obj(
+        "tcpdump_present" to JsonBool(tooling.tcpdumpPresent),
+        "tcpdump_paths" to JsonArr(tooling.tcpdumpPaths.map { JsonStr(it) }),
+        "pcap_capable_interface_present" to JsonBool(tooling.pcapCapableInterfacePresent),
+    )
+
+    private fun radioLog(radio: RadioLogReadout): JsonObj = obj(
+        "readable" to JsonBool(radio.readable),
+        "line_count" to (radio.lineCount?.let { JsonInt(it.toLong()) } ?: JsonNul),
+    )
+
+    private fun onDeviceLayer3(verdict: OnDeviceLayer3Verdict): JsonObj = obj(
+        "outcome" to JsonStr(verdict.outcome.name),
+        "viable" to JsonBool(verdict.viable),
+        "reason" to JsonStr(verdict.reason),
+        "laptop_path" to JsonStr(verdict.laptopPath),
+        "usb_debugging_on" to JsonBool(verdict.usbDebuggingOn),
     )
 
     private fun usb(usb: UsbDebugState): JsonObj = obj(
@@ -120,6 +193,8 @@ object CapabilityJson {
     )
 
     private fun obj(vararg members: Pair<String, JsonNode>): JsonObj = JsonObj(members.toList())
+
+    private fun nullableStr(value: String?): JsonNode = value?.let { JsonStr(it) } ?: JsonNul
 
     private fun namePart(text: String?): String =
         text.orEmpty()

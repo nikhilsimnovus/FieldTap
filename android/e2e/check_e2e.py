@@ -747,7 +747,7 @@ CAPABILITY_CAVEAT_MARK = "not proof"
 
 
 def check_capability(out: Path, r: Results) -> None:
-    """CapabilityProbeTest: the app's real capability/root/diag/USB-debugging detection and its fieldtap-capability/1 export."""
+    """CapabilityProbeTest: the app's real capability/root/diag/USB-debugging detection and its fieldtap-capability/2 export."""
     result_path = out / "device" / "capability-result.json"
     if not r.check("capability: the test wrote its result", result_path.is_file(), result_path):
         return
@@ -798,7 +798,7 @@ def check_capability(out: Path, r: Results) -> None:
     r.check("capability: the laptop-over-USB path is shown when layer-3 is not possible",
             bool(res.get("laptop_path")) and "USB debugging" in (res.get("laptop_path") or ""), res.get("laptop_path"))
 
-    # The fieldtap-capability/1 JSON export parses and carries the fields a pilot needs.
+    # The fieldtap-capability/2 JSON export parses and carries the fields a pilot needs.
     json_path = out / "device" / str(res.get("capability_json") or "capability.json")
     if not r.check("capability: the JSON export was written", json_path.is_file(), json_path):
         return
@@ -808,7 +808,7 @@ def check_capability(out: Path, r: Results) -> None:
         r.check("capability: the JSON export parses", False, str(error))
         return
     r.check("capability: the JSON export parses", True)
-    r.check("capability: format is fieldtap-capability/1", report.get("format") == "fieldtap-capability/1", report.get("format"))
+    r.check("capability: format is fieldtap-capability/2", report.get("format") == "fieldtap-capability/2", report.get("format"))
     top = ("app_version", "version_code", "sdk_int", "handset", "root", "root_probe", "usb", "cellular", "verdict", "notes")
     missing_top = [key for key in top if key not in report]
     r.check("capability: the export has every top-level field", not missing_top, missing_top)

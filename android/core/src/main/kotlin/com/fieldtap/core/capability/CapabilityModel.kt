@@ -43,6 +43,122 @@ enum class KernelConfigProbe { DIAG_PRESENT, DIAG_ABSENT, CONFIG_UNAVAILABLE }
 /** A tier's yes/no/unknown answer in the tiered verdict. */
 enum class CaptureAnswer { YES, NO, UNKNOWN }
 
+// ---------------------------------------------------------------------------------------------------------
+// Deep root & diagnostics (deep-root-spec.md). All additive; every new field defaults so existing callers,
+// tests and the `/1` types keep compiling and keep their meaning. Honesty and privacy are the product:
+// none of these types has a field that could hold a raw log line, a packet-capture byte, a diag dump, or a
+// third-party identifier — they carry only capability FACTS (booleans, counts, versions, permission modes,
+// interface names, device-node metadata). See §0 and §7 of the spec.
+// ---------------------------------------------------------------------------------------------------------
+
+/**
+ * Whether the radio logcat buffer is readable through su — a fact, never its content. The line count is
+ * produced in the device shell (`| wc -l`), so no log line ever crosses into the app process; this type has
+ * no field a log line could be stored in (§0.3, §7).
+ */
+data class RadioLogReadout(
+    /** Could `logcat -b radio -d` be read at all through su. */
+    val readable: Boolean,
+    /** A redacted count from `| wc -l`; `null` when not readable. Never a line, only an `Int`. */
+    val lineCount: Int?,
+)
+
+/**
+ * Kernel facts, identifier-free. Never carries the raw `/proc/version` build stamp (`user@host`, date or
+ * build path) — only [redactedVersion], produced by [KernelParser.redactProcVersion].
+ */
+data class KernelInfo(
+    /** `uname -r`, e.g. "5.10.101-android12-9-...". */
+    val release: String?,
+    /** `uname -m`, e.g. "aarch64". */
+    val architecture: String?,
+    /** `/proc/version` contains "SMP". */
+    val smp: Boolean,
+    /** `/proc/version` contains "PREEMPT". */
+    val preempt: Boolean,
+    /** `/proc/version` with the `user@host`, date tail and build path stripped; `null` when unavailable. */
+    val redactedVersion: String?,
+)
+
+/**
+ * Metadata of one diag-ish device node — never its content. [ownerUser]/[ownerGroup] are the node's own
+ * uid/gid (root/radio/system), device metadata, not a subscriber id.
+ */
+data class DiagNodeStat(
+    /** "/dev/diag", "/dev/ttyGS0", ... */
+    val path: String,
+    val exists: Boolean,
+    /** The first `ls`/`stat` type token is a character device (starts with `c`). */
+    val charDevice: Boolean,
+    /** "660" from `stat -c %a`, or from an `ls -l` symbolic mode; `null` when denied or unknown. */
+    val octalMode: String?,
+    /** "root"/"radio"/"system" from `%U` or `ls` column 3, or `null`. */
+    val ownerUser: String?,
+    /** From `%G` or `ls` column 4, or `null`. */
+    val ownerGroup: String?,
+)
+
+/** All diag-ish nodes probed: `/dev/diag` (the [primary]) plus `/dev/diag*`, `/dev/ttyGS*`, qcqmi. Metadata only. */
+data class DiagNodes(val primary: DiagNodeStat, val others: List<DiagNodeStat>)
+
+/** SELinux mode plus a plain-language consequence for an app path to diag. Nothing is changed. */
+data class SelinuxAssessment(
+    /** Reuses the existing [SelinuxMode] enum. */
+    val mode: SelinuxMode,
+    /** ENFORCING typically blocks an app-reachable diag path, unless the node was already proven readable. */
+    val blocksAppDiagPath: Boolean,
+    /** One plain sentence (copy from [CapabilityMessages]). */
+    val consequence: String,
+)
+
+/** rmnet/QMI modem interfaces by name only — never an address, MAC or route. */
+data class ModemInterfaces(val count: Int, val names: List<String>)
+
+/** Capture-tool availability. Presence only; the app never captures. */
+data class CaptureTooling(
+    val tcpdumpPresent: Boolean,
+    /** Which of the known paths / `which` hit. */
+    val tcpdumpPaths: List<String>,
+    /** A modem or wlan interface exists to capture on. */
+    val pcapCapableInterfacePresent: Boolean,
+)
+
+/** A root manager and its version, from `PackageManager` (passive) — cheaply available, no su needed. */
+data class RootManagerInfo(val pkg: String, val versionName: String?)
+
+/**
+ * The folded deep read-only result; `null` before the deep run or when su is unavailable. Every member is a
+ * fact type — none can hold raw log/packet/diag content or an identifier.
+ */
+data class DeepDiagnostics(
+    val kernel: KernelInfo,
+    val selinux: SelinuxAssessment,
+    val diagNodes: DiagNodes,
+    /** Reuses the existing `/proc/config.gz` result. */
+    val kernelDiagConfig: KernelConfigProbe,
+    val modemInterfaces: ModemInterfaces,
+    val captureTooling: CaptureTooling,
+    val radioLog: RadioLogReadout,
+)
+
+/**
+ * The single honest on-device layer-3 answer for the sub-verdict row and the export. [outcome] reuses the
+ * unchanged [CapabilityVerdict.layer3] rule; deep diagnostics add [reason] and evidence, never a new
+ * decision path. [laptopPath] is always offered when not viable.
+ */
+data class OnDeviceLayer3Verdict(
+    /** Reuses [Layer3OnDevice]: POSSIBLE / NOT_POSSIBLE / UNKNOWN. */
+    val outcome: Layer3OnDevice,
+    /** `outcome == POSSIBLE`. */
+    val viable: Boolean,
+    /** e.g. "it is rooted, but its kernel has no diag device (/dev/diag is absent, and the kernel config reports no diag support)". */
+    val reason: String,
+    /** The laptop-over-USB path, always offered when not viable. */
+    val laptopPath: String,
+    /** From [UsbDebugState.adbEnabled]. */
+    val usbDebuggingOn: Boolean,
+)
+
 /**
  * USB-debugging state, read with no permission and no identifier. It matters because FieldTap on a laptop
  * captures diag over ADB, so USB debugging must be on for that path.
@@ -86,6 +202,12 @@ data class PassiveInputs(
     val writableSystemPaths: List<String>,
     val usb: UsbDebugState,
     val cellular: CellularReadout,
+    /**
+     * Root managers found by `PackageManager` with their versions (passive). The [props] map now also
+     * carries the allow-listed, non-identifier modem props (`gsm.version.ril-impl`, `ro.baseband`,
+     * `ro.hardware`) besides the root-signal ones. Additive.
+     */
+    val rootManagerVersions: List<RootManagerInfo> = emptyList(),
 )
 
 /**
@@ -103,6 +225,30 @@ data class RootProbeRaw(
     /** Result of the `/proc/config.gz` diag check. */
     val kernelConfigDiag: KernelConfigProbe,
     val elapsedMs: Long,
+    // ---- Deep sections (additive; all defaulted so the `/1` positional constructions still compile). ----
+    /** `uname -r`. */
+    val unameOutput: String? = null,
+    /** `uname -m`. */
+    val unameMachineOutput: String? = null,
+    /**
+     * `cat /proc/version`. **Transient**: parsed and redacted into [KernelInfo.redactedVersion] immediately;
+     * it is never exported, logged, or otherwise persisted (§7).
+     */
+    val procVersionOutput: String? = null,
+    /** `stat -c '%a %U %G %F' /dev/diag` — metadata only, never a byte of node content. */
+    val diagStatOutput: String? = null,
+    /** `ls -l /dev/diag* /dev/ttyGS* /dev/qcqmi*` — metadata only. */
+    val diagNodesLsOutput: String? = null,
+    /** `ls /sys/class/net` — interface names only, never an address. */
+    val netListOutput: String? = null,
+    /** The combined `which tcpdump` + known-path echo section. */
+    val tcpdumpWhichOutput: String? = null,
+    /** Path lines the tcpdump section resolved (su-side `which`/known-path hits). */
+    val tcpdumpPathHits: List<String> = emptyList(),
+    /** `logcat -b radio -d` was readable through su (a fact, never its content). */
+    val radioLogReadable: Boolean = false,
+    /** A redacted line count from the shell-side `| wc -l`; `null` when not readable. */
+    val radioLogLineCount: Int? = null,
 )
 
 /**
@@ -121,6 +267,8 @@ data class RootSignals(
     val confidence: RootConfidence,
     /** Always the root-hiding caveat, so "no root detected" is never presented as proof. */
     val caveat: String,
+    /** Root managers found by `PackageManager` and their versions (passive; no su needed). Additive. */
+    val rootManagerVersions: List<RootManagerInfo> = emptyList(),
 )
 
 /** The folded result of one "Check with root" run. */
@@ -135,6 +283,8 @@ data class RootProbeResult(
     val elapsedMs: Long,
     /** One plain sentence, e.g. the OnePlus verdict. */
     val message: String,
+    /** The deep read-only diagnostics; `null` when su was absent/denied/timed-out (graceful degradation). Additive. */
+    val deep: DeepDiagnostics? = null,
 )
 
 /**
@@ -179,9 +329,19 @@ data class CapabilityReport(
     val usb: UsbDebugState,
     val cellular: CellularReadout,
     val verdict: CaptureVerdict,
+    /**
+     * The honest on-device layer-3 sub-verdict, beside [verdict]. Additive; `null` only on a directly
+     * constructed report that never set it — [CapabilityReports.build] always populates it.
+     */
+    val onDeviceLayer3: OnDeviceLayer3Verdict? = null,
     val notes: List<String>,
 ) {
     companion object {
-        const val FORMAT: String = "fieldtap-capability/1"
+        /**
+         * Bumped to `/2` because the shape grows (the `deep` block, `root_manager_versions` and
+         * `on_device_layer3`). Every `/1` key is kept with the same name, order and meaning — a strict
+         * superset — so a `/1`-era reader still finds every key it knew.
+         */
+        const val FORMAT: String = "fieldtap-capability/2"
     }
 }

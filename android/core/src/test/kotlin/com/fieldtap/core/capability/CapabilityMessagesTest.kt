@@ -144,6 +144,73 @@ class CapabilityMessagesTest {
         }
     }
 
+    // ---- Deep diagnostics copy (deep-root-spec §3, §5) ----
+
+    @Test
+    fun selinuxConsequenceReadsPlainlyPerMode() {
+        assertTrue(CapabilityMessages.selinuxConsequence(SelinuxMode.ENFORCING, blocksAppDiagPath = true).contains("enforcing"))
+        assertTrue(CapabilityMessages.selinuxConsequence(SelinuxMode.ENFORCING, blocksAppDiagPath = false).contains("readable as root"))
+        assertTrue(CapabilityMessages.selinuxConsequence(SelinuxMode.PERMISSIVE, blocksAppDiagPath = false).contains("permissive"))
+        assertTrue(CapabilityMessages.selinuxConsequence(SelinuxMode.DISABLED, blocksAppDiagPath = false).contains("disabled"))
+        assertTrue(CapabilityMessages.selinuxConsequence(SelinuxMode.UNKNOWN, blocksAppDiagPath = false).contains("unknown"))
+    }
+
+    @Test
+    fun onDeviceLayer3ReasonMatchesTheRootedNotPossibleSentenceForTheOnePlusCase() {
+        val probe = RootProbeResult(
+            suStatus = SuStatus.GRANTED,
+            isRoot = true,
+            selinux = SelinuxMode.ENFORCING,
+            diagDevice = DiagDevice.ABSENT,
+            kernelDiag = KernelConfigProbe.DIAG_ABSENT,
+            layer3 = Layer3OnDevice.NOT_POSSIBLE,
+            elapsedMs = 420,
+            message = "",
+        )
+        val reason = CapabilityMessages.onDeviceLayer3Reason(probe)
+
+        assertEquals(
+            "it is rooted, but its kernel has no diag device (/dev/diag is absent, and the kernel config reports no diag support)",
+            reason,
+        )
+        // The reason clause is the same fragment the full rooted-not-possible sentence embeds (no drift).
+        val root = RootDetector.assess(passive(managers = listOf("com.topjohnwu.magisk")))
+        assertTrue(CapabilityMessages.rootProbeMessage(root, probe, usb()).contains(reason))
+    }
+
+    @Test
+    fun deepReasonSentencesNeverNameRrcNasOrSib() {
+        val root = RootDetector.assess(passive(managers = listOf("com.topjohnwu.magisk")))
+        val messages = buildList {
+            add(CapabilityMessages.laptopOverUsbPath())
+            for (mode in SelinuxMode.entries) {
+                add(CapabilityMessages.selinuxConsequence(mode, blocksAppDiagPath = true))
+                add(CapabilityMessages.selinuxConsequence(mode, blocksAppDiagPath = false))
+            }
+            for (outcome in Layer3OnDevice.entries) {
+                add(CapabilityMessages.onDeviceLayer3ReasonPassive(root, outcome))
+            }
+            for (status in SuStatus.entries) {
+                val layer3 = when (status) {
+                    SuStatus.GRANTED -> Layer3OnDevice.NOT_POSSIBLE
+                    SuStatus.NOT_PRESENT -> Layer3OnDevice.NOT_POSSIBLE
+                    else -> Layer3OnDevice.UNKNOWN
+                }
+                add(
+                    CapabilityMessages.onDeviceLayer3Reason(
+                        RootProbeResult(status, isRoot = status == SuStatus.GRANTED, selinux = SelinuxMode.ENFORCING, diagDevice = DiagDevice.ABSENT, kernelDiag = KernelConfigProbe.DIAG_ABSENT, layer3 = layer3, elapsedMs = 1, message = ""),
+                    ),
+                )
+            }
+        }
+        for (message in messages) {
+            assertTrue("must not name RRC: $message", !message.contains("RRC"))
+            assertTrue("must not name NAS: $message", !message.contains("NAS"))
+            assertTrue("must not name SIB: $message", !message.contains("SIB"))
+            assertTrue("must not claim the app decodes: $message", !message.contains("decode"))
+        }
+    }
+
     private fun report(rootConfidence: RootConfidence, rootProbe: RootProbeResult?): CapabilityReport {
         val root = RootDetector.assess(
             passive(managers = if (rootConfidence == RootConfidence.HIGH) listOf("com.topjohnwu.magisk") else emptyList()),

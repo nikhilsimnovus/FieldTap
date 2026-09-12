@@ -34,6 +34,7 @@ object RootDetector {
     val ROOT_MANAGER_PACKAGES: List<String> = listOf(
         "com.topjohnwu.magisk", // Magisk
         "me.weishu.kernelsu", // KernelSU
+        "me.bmax.apatch", // APatch
         "eu.chainfire.supersu", // SuperSU
         "com.noshufou.android.su",
         "com.noshufou.android.su.elite",
@@ -55,13 +56,21 @@ object RootDetector {
         "/data/local",
     )
 
-    /** The only `getprop` keys the assessment reads. */
+    /**
+     * The only `getprop` keys read — an allow-list of **non-identifier** props. The root-signal keys, plus
+     * the modem/RIL surface props for the deep readout (`gsm.version.ril-impl`, `ro.baseband`,
+     * `ro.hardware`). No identifier prop (IMEI/IMSI/ICCID/phone number/serial/`ANDROID_ID`/ad id) is ever
+     * added here (deep-root-spec §0.5, §2).
+     */
     val PropKeys: List<String> = listOf(
         "ro.debuggable",
         "ro.secure",
         "ro.build.type",
         "ro.build.tags",
         "ro.build.selinux",
+        "gsm.version.ril-impl",
+        "ro.baseband",
+        "ro.hardware",
     )
 
     /** Always attached to the passive assessment; a no-root result ships it so it is never read as proof. */
@@ -93,6 +102,7 @@ object RootDetector {
             writableSystemPaths = input.writableSystemPaths,
             confidence = confidence,
             caveat = CAVEAT,
+            rootManagerVersions = input.rootManagerVersions,
         )
     }
 }

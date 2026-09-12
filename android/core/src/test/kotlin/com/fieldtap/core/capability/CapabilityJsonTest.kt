@@ -6,6 +6,7 @@ import com.fieldtap.format.JsonStr
 import com.fieldtap.format.JsonText
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CapabilityJsonTest {
@@ -17,11 +18,31 @@ class CapabilityJsonTest {
         assertEquals(
             listOf(
                 "format", "created_utc_ms", "app_version", "version_code", "sdk_int", "handset",
-                "root", "root_probe", "usb", "cellular", "verdict", "notes",
+                "root", "root_probe", "usb", "cellular", "verdict", "on_device_layer3", "notes",
             ),
             tree.members.map { it.first },
         )
-        assertEquals(JsonStr("fieldtap-capability/1"), member(tree, "format"))
+        assertEquals(JsonStr("fieldtap-capability/2"), member(tree, "format"))
+    }
+
+    @Test
+    fun everyV1KeyIsStillPresentWithTheSameName() {
+        // /2 is a strict superset of /1: a reader that keyed the /1 names still finds every one of them.
+        val text = CapabilityJson.encode(report())
+        val v1Keys = listOf(
+            "\"format\"", "\"created_utc_ms\"", "\"app_version\"", "\"version_code\"", "\"sdk_int\"",
+            "\"handset\"", "\"root\"", "\"confidence\"", "\"su_binaries_present\"", "\"root_manager_packages\"",
+            "\"build_tags_test_keys\"", "\"debuggable\"", "\"secure_off\"", "\"writable_system_paths\"",
+            "\"root_probe\"", "\"su_status\"", "\"is_root\"", "\"selinux\"", "\"diag_device\"", "\"kernel_diag\"",
+            "\"layer3\"", "\"elapsed_ms\"", "\"usb\"", "\"adb_enabled\"", "\"wireless_debug_enabled\"",
+            "\"developer_options_enabled\"", "\"cellular\"", "\"read_phone_state_granted\"",
+            "\"precise_location_granted\"", "\"location_services_enabled\"", "\"sim_ready\"",
+            "\"mock_location_app_set\"", "\"build_accepts_mock_locations\"", "\"verdict\"",
+            "\"public_api_measurements\"", "\"push_cell_updates\"", "\"layer3_signalling\"", "\"notes\"",
+        )
+        for (key in v1Keys) {
+            assertTrue("missing /1 key $key", text.contains(key))
+        }
     }
 
     @Test
@@ -51,7 +72,7 @@ class CapabilityJsonTest {
     fun theExportIsExactlyThisDocument() {
         val expected = listOf(
             "{",
-            "  \"format\": \"fieldtap-capability/1\",",
+            "  \"format\": \"fieldtap-capability/2\",",
             "  \"created_utc_ms\": 1789050630000,",
             "  \"app_version\": \"1.0.0\",",
             "  \"version_code\": 2,",
@@ -72,7 +93,13 @@ class CapabilityJsonTest {
             "    \"build_tags_test_keys\": false,",
             "    \"debuggable\": false,",
             "    \"secure_off\": false,",
-            "    \"writable_system_paths\": []",
+            "    \"writable_system_paths\": [],",
+            "    \"root_manager_versions\": [",
+            "      {",
+            "        \"pkg\": \"com.topjohnwu.magisk\",",
+            "        \"version_name\": \"27.0\"",
+            "      }",
+            "    ]",
             "  },",
             "  \"root_probe\": {",
             "    \"su_status\": \"GRANTED\",",
@@ -81,7 +108,8 @@ class CapabilityJsonTest {
             "    \"diag_device\": \"ABSENT\",",
             "    \"kernel_diag\": \"DIAG_ABSENT\",",
             "    \"layer3\": \"NOT_POSSIBLE\",",
-            "    \"elapsed_ms\": 420",
+            "    \"elapsed_ms\": 420,",
+            "    \"deep\": null",
             "  },",
             "  \"usb\": {",
             "    \"adb_enabled\": false,",
@@ -101,6 +129,13 @@ class CapabilityJsonTest {
             "    \"push_cell_updates\": \"NO\",",
             "    \"layer3_signalling\": \"NOT_POSSIBLE\"",
             "  },",
+            "  \"on_device_layer3\": {",
+            "    \"outcome\": \"NOT_POSSIBLE\",",
+            "    \"viable\": false,",
+            "    \"reason\": \"it is rooted, but its kernel has no diag device (/dev/diag is absent, and the kernel config reports no diag support)\",",
+            "    \"laptop_path\": \"Use 5gto6G FieldTap on a laptop with this phone connected over USB.\",",
+            "    \"usb_debugging_on\": false",
+            "  },",
             "  \"notes\": [",
             "    \"A note.\"",
             "  ]",
@@ -108,6 +143,65 @@ class CapabilityJsonTest {
         ).joinToString(separator = "\n", postfix = "\n")
 
         assertEquals(expected, CapabilityJson.encode(report()))
+    }
+
+    @Test
+    fun theDeepBlockIsRenderedWithSnakeCaseKeysAndNoContent() {
+        val text = CapabilityJson.encode(report(rootProbe = sampleProbe.copy(deep = sampleDeep)))
+
+        // The nested deep members render, keyed snake_case, enums by name.
+        for (fragment in listOf(
+            "\"deep\": {",
+            "\"kernel\": {",
+            "\"release\": \"5.10.101-android12-9\"",
+            "\"architecture\": \"aarch64\"",
+            "\"smp\": true",
+            "\"preempt\": true",
+            "\"redacted_version\": \"Linux version 5.10.101-android12-9 SMP PREEMPT\"",
+            "\"selinux\": {",
+            "\"mode\": \"ENFORCING\"",
+            "\"blocks_app_diag_path\": true",
+            "\"diag_nodes\": {",
+            "\"primary\": {",
+            "\"path\": \"/dev/diag\"",
+            "\"exists\": false",
+            "\"char_device\": false",
+            "\"octal_mode\": null",
+            "\"others\": []",
+            "\"kernel_diag_config\": \"DIAG_ABSENT\"",
+            "\"modem_interfaces\": {",
+            "\"count\": 3",
+            "\"rmnet_data0\"",
+            "\"capture_tooling\": {",
+            "\"tcpdump_present\": false",
+            "\"pcap_capable_interface_present\": true",
+            "\"radio_log\": {",
+            "\"readable\": true",
+            "\"line_count\": 5",
+        )) {
+            assertTrue(fragment, text.contains(fragment))
+        }
+    }
+
+    @Test
+    fun theDeepExportCarriesNoIdentifierNoRawLogAndNoDiagContent() {
+        val text = CapabilityJson.encode(report(rootProbe = sampleProbe.copy(deep = sampleDeep)))
+
+        // No identifier keys or values.
+        for (key in listOf("imei", "imsi", "iccid", "serial", "android_id", "phone_number", "tmsi", "lat", "lon")) {
+            assertFalse(key, text.contains("\"$key\""))
+        }
+        // No raw radio-log line ever reaches the export — only the readable flag and an integer count.
+        assertFalse("no logcat line marker", text.contains("logcat"))
+        // The redacted kernel version never carries a build stamp (user@host) or a build path.
+        assertFalse("no build-host stamp", text.contains("@"))
+    }
+
+    @Test
+    fun rootManagerVersionsIsAnEmptyArrayWhenNoneAreFound() {
+        val text = CapabilityJson.encode(report(root = sampleRoot.copy(rootManagerVersions = emptyList())))
+
+        assertTrue(text, text.contains("\"root_manager_versions\": []"))
     }
 
     @Test
@@ -154,6 +248,7 @@ class CapabilityJsonTest {
         writableSystemPaths = emptyList(),
         confidence = RootConfidence.HIGH,
         caveat = RootDetector.CAVEAT,
+        rootManagerVersions = listOf(RootManagerInfo("com.topjohnwu.magisk", "27.0")),
     )
 
     private val sampleProbe = RootProbeResult(
@@ -165,6 +260,37 @@ class CapabilityJsonTest {
         layer3 = Layer3OnDevice.NOT_POSSIBLE,
         elapsedMs = 420,
         message = "Layer-3 capture is not possible on this phone.",
+    )
+
+    private val sampleDeep = DeepDiagnostics(
+        kernel = KernelInfo(
+            release = "5.10.101-android12-9",
+            architecture = "aarch64",
+            smp = true,
+            preempt = true,
+            redactedVersion = "Linux version 5.10.101-android12-9 SMP PREEMPT",
+        ),
+        selinux = SelinuxAssessment(
+            mode = SelinuxMode.ENFORCING,
+            blocksAppDiagPath = true,
+            consequence = "SELinux is enforcing, which normally blocks an app's own path to the diag device even on a rooted phone.",
+        ),
+        diagNodes = DiagNodes(
+            primary = DiagNodeStat("/dev/diag", exists = false, charDevice = false, octalMode = null, ownerUser = null, ownerGroup = null),
+            others = emptyList(),
+        ),
+        kernelDiagConfig = KernelConfigProbe.DIAG_ABSENT,
+        modemInterfaces = ModemInterfaces(count = 3, names = listOf("rmnet_data0", "rmnet_data1", "qmux0")),
+        captureTooling = CaptureTooling(tcpdumpPresent = false, tcpdumpPaths = emptyList(), pcapCapableInterfacePresent = true),
+        radioLog = RadioLogReadout(readable = true, lineCount = 5),
+    )
+
+    private val sampleOnDeviceLayer3 = OnDeviceLayer3Verdict(
+        outcome = Layer3OnDevice.NOT_POSSIBLE,
+        viable = false,
+        reason = "it is rooted, but its kernel has no diag device (/dev/diag is absent, and the kernel config reports no diag support)",
+        laptopPath = "Use 5gto6G FieldTap on a laptop with this phone connected over USB.",
+        usbDebuggingOn = false,
     )
 
     private val sampleUsb = UsbDebugState(adbEnabled = false, wirelessDebugEnabled = false, developerOptionsEnabled = true)
@@ -189,17 +315,19 @@ class CapabilityJsonTest {
     private fun report(
         handset: HandsetMeta = HandsetMeta(manufacturer = "OnePlus", model = "CPH2581", androidVersion = "14"),
         rootProbe: RootProbeResult? = sampleProbe,
+        root: RootSignals = sampleRoot,
     ): CapabilityReport = CapabilityReport(
         createdUtcMs = 1_789_050_630_000L,
         appVersion = "1.0.0",
         versionCode = 2L,
         sdkInt = 34,
         handset = handset,
-        root = sampleRoot,
+        root = root,
         rootProbe = rootProbe,
         usb = sampleUsb,
         cellular = sampleCellular,
         verdict = sampleVerdict,
+        onDeviceLayer3 = sampleOnDeviceLayer3,
         notes = listOf("A note."),
     )
 }

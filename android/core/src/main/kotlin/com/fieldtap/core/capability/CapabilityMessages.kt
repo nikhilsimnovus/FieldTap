@@ -114,15 +114,71 @@ object CapabilityMessages {
     }
 
     private fun rootedNotPossibleSentence(probe: RootProbeResult): String =
+        "Layer-3 capture is not possible on this phone: ${noDiagReasonClause(probe)}. $CAPTURE_ON_LAPTOP"
+
+    /**
+     * The shared reason clause for a rooted phone that still cannot do on-device layer-3, reused by both
+     * [rootedNotPossibleSentence] and [onDeviceLayer3Reason] so their wording can never drift.
+     */
+    private fun noDiagReasonClause(probe: RootProbeResult): String =
         if (probe.diagDevice == DiagDevice.PERMISSION_DENIED) {
-            "Layer-3 capture is not possible on this phone: it is rooted and has a /dev/diag node, but " +
-                "SELinux blocks access to it. $CAPTURE_ON_LAPTOP"
+            "it is rooted and has a /dev/diag node, but SELinux blocks access to it"
         } else {
             val kernelClause =
                 if (probe.kernelDiag == KernelConfigProbe.DIAG_ABSENT) ", and the kernel config reports no diag support" else ""
-            "Layer-3 capture is not possible on this phone: it is rooted, but its kernel has no diag " +
-                "device (/dev/diag is absent$kernelClause). $CAPTURE_ON_LAPTOP"
+            "it is rooted, but its kernel has no diag device (/dev/diag is absent$kernelClause)"
         }
+
+    // ---- Deep diagnostics copy (deep-root-spec §3, §5). Kept in :core so it is tested. ----
+
+    /**
+     * The `<reason>` for the on-device layer-3 sub-verdict, after a "Run diagnostics" run folded [probe].
+     * Reuses [noDiagReasonClause] for the rooted-but-no-diag case, so it stays verbatim-compatible with
+     * [rootedNotPossibleSentence]. Never names RRC/NAS/SIB and never implies this app decodes signalling.
+     */
+    fun onDeviceLayer3Reason(probe: RootProbeResult): String = when (probe.layer3) {
+        Layer3OnDevice.POSSIBLE -> "it is rooted and has a usable diag device (/dev/diag)"
+        Layer3OnDevice.NOT_POSSIBLE ->
+            if (probe.suStatus == SuStatus.GRANTED && probe.isRoot) {
+                noDiagReasonClause(probe)
+            } else {
+                "no working root was found on this phone, so on-device diag is not available"
+            }
+        Layer3OnDevice.UNKNOWN -> when (probe.suStatus) {
+            SuStatus.DENIED -> "root access was not granted, so the diag device could not be tested"
+            SuStatus.TIMED_OUT -> "the superuser prompt was not answered in time, so the diag device was not tested"
+            SuStatus.ERROR -> "the root check could not be completed, so the diag device was not tested"
+            SuStatus.GRANTED -> "it is rooted, but whether it has a usable diag device could not be confirmed"
+            SuStatus.NOT_PRESENT -> "no su was found to run, so this phone has no working root"
+        }
+    }
+
+    /** The `<reason>` before any deep run: from the passive confidence and the unchanged rule's [outcome]. */
+    fun onDeviceLayer3ReasonPassive(root: RootSignals, outcome: Layer3OnDevice): String = when (outcome) {
+        Layer3OnDevice.UNKNOWN ->
+            "this phone looks rooted (${strongestSignal(root)}), but its diag device has not been tested yet — tap Run diagnostics"
+        Layer3OnDevice.NOT_POSSIBLE -> "no root path was found, so on-device diag is not available on this phone"
+        Layer3OnDevice.POSSIBLE -> "it is rooted and has a usable diag device (/dev/diag)"
+    }
+
+    /** The laptop-over-USB path offered whenever on-device layer-3 is not viable. */
+    fun laptopOverUsbPath(): String = "Use 5gto6G FieldTap on a laptop with this phone connected over USB."
+
+    /**
+     * The one plain-language consequence sentence for a [SelinuxAssessment]: what the SELinux [mode] means
+     * for an app's own path to the diag device. Nothing is ever changed — this only describes.
+     */
+    fun selinuxConsequence(mode: SelinuxMode, blocksAppDiagPath: Boolean): String = when (mode) {
+        SelinuxMode.ENFORCING ->
+            if (blocksAppDiagPath) {
+                "SELinux is enforcing, which normally blocks an app's own path to the diag device even on a rooted phone."
+            } else {
+                "SELinux is enforcing, but the diag device was readable as root, so access is not blocked here."
+            }
+        SelinuxMode.PERMISSIVE -> "SELinux is permissive, so it does not block an app's path to the diag device."
+        SelinuxMode.DISABLED -> "SELinux is disabled, so it does not block an app's path to the diag device."
+        SelinuxMode.UNKNOWN -> "The SELinux mode could not be read, so its effect on a diag path is unknown."
+    }
 
     private fun looksRootedSentence(root: RootSignals): String =
         "This phone looks rooted (${strongestSignal(root)}). Tap Check with root to test whether it has a " +

@@ -6,13 +6,17 @@ import com.fieldtap.core.capability.RootDetector
 import java.io.IOException
 
 /**
- * Reads system properties for the passive root assessment. Runs `getprop` once (no su — reading
- * properties needs no root) and parses its `[key]: [value]` lines, keeping only [RootDetector.PropKeys].
- * `Build.TAGS` is read directly. An [IOException] from `exec` yields an empty prop map.
+ * Reads system properties for the passive root assessment and the deep modem readout. Runs `getprop` once
+ * (no su — reading properties needs no root) and parses its `[key]: [value]` lines, keeping **only**
+ * [RootDetector.PropKeys] — an allow-list of non-identifier keys (the root-signal props plus the modem/RIL
+ * surface props `gsm.version.ril-impl`, `ro.baseband`, `ro.hardware`). Any key outside the allow-list — in
+ * particular any identifier (IMEI/IMSI/ICCID/phone number/serial/`ANDROID_ID`/ad id) — is dropped, so no
+ * identifier can enter the map even if `getprop` reports one (deep-root-spec §0.5, §7). `Build.TAGS` is read
+ * directly. An [IOException] from `exec` yields an empty prop map.
  *
  * The parse is factored into the pure [parse], JVM-tested; only [readProps] touches the platform.
  *
- * Owner: workstream `capability-core`.
+ * Owner: workstream `deep-root-core`.
  */
 class PropReader {
     /** `getprop` output parsed to only [RootDetector.PropKeys], plus `Build.TAGS`. */

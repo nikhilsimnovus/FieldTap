@@ -3,6 +3,7 @@ package com.fieldtap.platform.capability
 import com.fieldtap.core.capability.KernelConfigProbe
 import com.fieldtap.core.capability.SuStatus
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -116,6 +117,115 @@ class SuperuserRunnerTest {
         assertEquals(SuStatus.GRANTED, raw.suStatus)
         assertEquals("Enforcing", raw.getenforceOutput)
         assertEquals(KernelConfigProbe.DIAG_ABSENT, raw.kernelConfigDiag)
+    }
+
+    // ---- Deep sections (deep-root-spec §4) ----
+
+    @Test
+    fun deepSectionsAreParsedAfterTheV1Sections() {
+        val stdout = listOf(
+            "uid=0(root)", "---",
+            "Enforcing", "---",
+            "ls: /dev/diag: No such file or directory", "---",
+            "CFGOK", "---",
+            "5.10.101-android12-9", "---",
+            "aarch64", "---",
+            "Linux version 5.10.101-android12-9 (u@h) #1 SMP PREEMPT 2025", "---",
+            "stat: '/dev/diag': No such file or directory", "---",
+            "crw-rw---- 1 radio radio 10, 61 2026-09-11 /dev/diag_router", "---",
+            "lo\nrmnet_data0\nqmux0\nwlan0", "---",
+            "/system/bin/tcpdump", "---",
+            "RLOGOK",
+            "5",
+            "---END",
+        ).joinToString("\n")
+
+        val raw = SuperuserRunner.parseSuOutput(stdout, 0, timedOut = false, threwIoException = false)
+
+        assertEquals(SuStatus.GRANTED, raw.suStatus)
+        assertEquals("5.10.101-android12-9", raw.unameOutput)
+        assertEquals("aarch64", raw.unameMachineOutput)
+        assertTrue(raw.procVersionOutput, raw.procVersionOutput!!.contains("Linux version"))
+        assertTrue(raw.diagStatOutput, raw.diagStatOutput!!.contains("No such file"))
+        assertTrue(raw.diagNodesLsOutput, raw.diagNodesLsOutput!!.contains("/dev/diag_router"))
+        assertTrue(raw.netListOutput, raw.netListOutput!!.contains("rmnet_data0"))
+        assertTrue(raw.tcpdumpWhichOutput, raw.tcpdumpWhichOutput!!.contains("tcpdump"))
+        assertEquals(listOf("/system/bin/tcpdump"), raw.tcpdumpPathHits)
+        assertTrue(raw.radioLogReadable)
+        assertEquals(5, raw.radioLogLineCount)
+    }
+
+    @Test
+    fun v1OnlyOutputLeavesTheDeepFieldsAtTheirDefaults() {
+        val stdout = sections(
+            id = "uid=0(root)",
+            getenforce = "Enforcing",
+            diagLs = "crw-rw-rw- 1 root root 10, 60 /dev/diag",
+            kernel = "CFGOK\nCONFIG_DIAG_CHAR=y",
+        )
+
+        val raw = SuperuserRunner.parseSuOutput(stdout, 0, timedOut = false, threwIoException = false)
+
+        assertEquals(SuStatus.GRANTED, raw.suStatus)
+        assertNull(raw.unameOutput)
+        assertNull(raw.unameMachineOutput)
+        assertNull(raw.procVersionOutput)
+        assertNull(raw.diagStatOutput)
+        assertNull(raw.netListOutput)
+        assertNull(raw.tcpdumpWhichOutput)
+        assertEquals(emptyList<String>(), raw.tcpdumpPathHits)
+        assertFalse(raw.radioLogReadable)
+        assertNull(raw.radioLogLineCount)
+    }
+
+    @Test
+    fun radioLogYieldsOnlyAFlagAndACountNoLineEverReachesAField() {
+        // A sentinel "log line" placed in the radio-log section must never land in any parsed field: only
+        // RLOGOK/RLOGNO and the integer count are read. In production `| wc -l` runs shell-side, so no line
+        // even arrives — this proves the parser cannot capture one either (deep-root-spec §0.3, §7).
+        val sentinel = "07-11 12:00:00.000 1234 5678 D RILJ: a TMSI paging record 0xdeadbeef"
+        val stdout = listOf(
+            "uid=0(root)", "---",
+            "Enforcing", "---",
+            "ls: /dev/diag: No such file or directory", "---",
+            "CFGNONE", "---",
+            "5.10.101", "---",
+            "aarch64", "---",
+            "Linux version 5.10.101 #1 SMP PREEMPT", "---",
+            "stat: '/dev/diag': No such file or directory", "---",
+            "", "---",
+            "lo\nrmnet_data0", "---",
+            "", "---",
+            "RLOGOK",
+            "3",
+            sentinel,
+            "---END",
+        ).joinToString("\n")
+
+        val raw = SuperuserRunner.parseSuOutput(stdout, 0, timedOut = false, threwIoException = false)
+
+        assertTrue(raw.radioLogReadable)
+        assertEquals(3, raw.radioLogLineCount)
+        val stringFields = listOf(
+            raw.idOutput, raw.getenforceOutput, raw.diagLsOutput, raw.unameOutput, raw.unameMachineOutput,
+            raw.procVersionOutput, raw.diagStatOutput, raw.diagNodesLsOutput, raw.netListOutput, raw.tcpdumpWhichOutput,
+        )
+        for (field in stringFields) {
+            assertFalse("no radio-log line may reach a field: $field", field?.contains("paging record") ?: false)
+        }
+        assertFalse(raw.tcpdumpPathHits.any { it.contains("paging") })
+    }
+
+    @Test
+    fun timeoutAndNotPresentLeaveDeepFieldsDefaulted() {
+        val timedOut = SuperuserRunner.parseSuOutput(partialGranted(), SuperuserRunner.EXIT_UNSET, timedOut = true, threwIoException = false)
+        assertFalse(timedOut.radioLogReadable)
+        assertNull(timedOut.unameOutput)
+        assertEquals(emptyList<String>(), timedOut.tcpdumpPathHits)
+
+        val notPresent = SuperuserRunner.parseSuOutput("", SuperuserRunner.EXIT_UNSET, timedOut = false, threwIoException = true)
+        assertFalse(notPresent.radioLogReadable)
+        assertNull(notPresent.procVersionOutput)
     }
 
     private fun sections(id: String, getenforce: String, diagLs: String, kernel: String): String =

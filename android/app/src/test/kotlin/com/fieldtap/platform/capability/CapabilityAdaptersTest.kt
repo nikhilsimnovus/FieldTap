@@ -1,6 +1,7 @@
 package com.fieldtap.platform.capability
 
 import com.fieldtap.core.capability.RootDetector
+import com.fieldtap.core.capability.RootManagerInfo
 import com.fieldtap.core.capability.UsbDebugState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -95,5 +96,67 @@ class CapabilityAdaptersTest {
 
         assertEquals(listOf("/data/local"), WritablePathProbe.scan(candidates) { it in writable })
         assertEquals(emptyList<String>(), WritablePathProbe.scan(candidates) { false })
+    }
+
+    // ---- TcpdumpScanner.scan (deep-root-spec §4) ----
+
+    @Test
+    fun tcpdumpScanKeepsExistingPathsInOrder() {
+        val present = setOf("/system/bin/tcpdump", "/data/local/tmp/tcpdump")
+
+        assertEquals(
+            listOf("/system/bin/tcpdump", "/data/local/tmp/tcpdump"),
+            TcpdumpScanner.scan(TcpdumpScanner.KNOWN_PATHS) { it in present },
+        )
+        assertEquals(emptyList<String>(), TcpdumpScanner.scan(TcpdumpScanner.KNOWN_PATHS) { false })
+    }
+
+    // ---- PackageScanner.scanVersions (root-manager versions, deep-root-spec §2) ----
+
+    @Test
+    fun packageScanVersionsDropsAbsentPackagesAndKeepsVersionNames() {
+        val installed = mapOf<String, String?>("com.topjohnwu.magisk" to "27.0", "me.weishu.kernelsu" to null)
+
+        val result = PackageScanner.scanVersions(listOf("com.topjohnwu.magisk", "me.weishu.kernelsu", "me.bmax.apatch")) { pkg ->
+            if (pkg in installed) RootManagerInfo(pkg, installed[pkg]) else null
+        }
+
+        assertEquals(
+            listOf(RootManagerInfo("com.topjohnwu.magisk", "27.0"), RootManagerInfo("me.weishu.kernelsu", null)),
+            result,
+        )
+    }
+
+    // ---- PropReader allow-list: modem props kept, identifiers dropped ----
+
+    @Test
+    fun propReaderKeepsAllowListedModemPropsButDropsIdentifiersAndOthers() {
+        val raw = listOf(
+            "[gsm.version.ril-impl]: [Qualcomm RIL 1.0]",
+            "[ro.baseband]: [msm]",
+            "[ro.hardware]: [qcom]",
+            "[ril.serialnumber]: [ABCDEF0123456]", // identifier -> must never be kept
+            "[gsm.sim.operator.numeric]: [310260]", // not allow-listed -> dropped
+        ).joinToString("\n")
+
+        val props = PropReader.parse(raw, RootDetector.PropKeys)
+
+        assertEquals("Qualcomm RIL 1.0", props["gsm.version.ril-impl"])
+        assertEquals("msm", props["ro.baseband"])
+        assertEquals("qcom", props["ro.hardware"])
+        assertFalse("an identifier prop is never kept", props.containsKey("ril.serialnumber"))
+        assertFalse(props.containsKey("gsm.sim.operator.numeric"))
+    }
+
+    // ---- The allow-list itself carries no identifier key ----
+
+    @Test
+    fun thePropAllowListNeverNamesAnIdentifier() {
+        val banned = listOf("imei", "imsi", "iccid", "serial", "meid", "android_id", "phone", "subscriber")
+        for (key in RootDetector.PropKeys) {
+            for (bad in banned) {
+                assertFalse("$key must not be an identifier prop", key.lowercase().contains(bad))
+            }
+        }
     }
 }

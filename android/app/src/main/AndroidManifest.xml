@@ -39,6 +39,7 @@
     <queries>
         <package android:name="com.topjohnwu.magisk" />
         <package android:name="me.weishu.kernelsu" />
+        <package android:name="me.bmax.apatch" />
         <package android:name="eu.chainfire.supersu" />
         <package android:name="com.noshufou.android.su" />
         <package android:name="com.noshufou.android.su.elite" />

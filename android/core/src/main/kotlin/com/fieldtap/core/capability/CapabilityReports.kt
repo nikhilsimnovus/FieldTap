@@ -24,6 +24,13 @@ object CapabilityReports {
         } else {
             CapabilityVerdict.withRootProbe(snapshot.root, snapshot.usb, snapshot.cellular, rootProbe)
         }
+        // The honest on-device layer-3 sub-verdict: from the folded probe once one ran, else from the
+        // passive confidence via the unchanged rule. Always present in a built report.
+        val onDeviceLayer3 = if (rootProbe == null) {
+            OnDeviceLayer3.verdict(snapshot.root, snapshot.usb)
+        } else {
+            OnDeviceLayer3.verdict(rootProbe, snapshot.usb)
+        }
         val base = CapabilityReport(
             createdUtcMs = createdUtcMs,
             appVersion = appVersion,
@@ -35,6 +42,7 @@ object CapabilityReports {
             usb = snapshot.usb,
             cellular = snapshot.cellular,
             verdict = verdict,
+            onDeviceLayer3 = onDeviceLayer3,
             notes = emptyList(),
         )
         return base.copy(notes = CapabilityMessages.notes(base))
