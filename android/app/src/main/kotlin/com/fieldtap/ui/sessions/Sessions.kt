@@ -1064,6 +1064,7 @@ private fun ShareCard(
                     KeyValueRow(key = stringResource(R.string.detail_row_sha256), value = result.sha256, stacked = true, selectable = true)
                     Button(
                         onClick = { onShare(result, shareText) },
+                        shape = ShapeRoles.Control,
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = Sizes.MinTouchTarget),
@@ -1078,6 +1079,7 @@ private fun ShareCard(
                 StatusBanner(message = stringResource(exportFailureRes(export.reason)), tone = StatusTone.ERROR)
                 OutlinedButton(
                     onClick = onBuild,
+                    shape = ShapeRoles.Control,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = Sizes.MinTouchTarget),
@@ -1096,6 +1098,7 @@ private fun ShareCard(
 private fun BuildButton(onBuild: () -> Unit) {
     Button(
         onClick = onBuild,
+        shape = ShapeRoles.Control,
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = Sizes.MinTouchTarget),

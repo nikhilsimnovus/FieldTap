@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -122,6 +121,7 @@ import com.fieldtap.ui.common.screenGutter
 import com.fieldtap.ui.common.signalQualityLabels
 import com.fieldtap.ui.components.CellSignalRow
 import com.fieldtap.ui.components.ChartMath
+import com.fieldtap.ui.components.FieldTapFloatingActionBar
 import com.fieldtap.ui.components.FieldTapPreviews
 import com.fieldtap.ui.components.FieldTapTopBar
 import com.fieldtap.ui.components.KeyValueRow
@@ -130,14 +130,15 @@ import com.fieldtap.ui.components.MetricEmphasis
 import com.fieldtap.ui.components.MetricTile
 import com.fieldtap.ui.components.ReadinessProblem
 import com.fieldtap.ui.components.ReadinessSheet
+import com.fieldtap.ui.components.RecordingDot
 import com.fieldtap.ui.components.SecondaryMetricTile
 import com.fieldtap.ui.components.SectionCard
 import com.fieldtap.ui.components.SectionDivider
 import com.fieldtap.ui.components.SessionButton
 import com.fieldtap.ui.components.SessionButtonState
-import com.fieldtap.ui.components.SignalBar
 import com.fieldtap.ui.components.SignalChartLabels
 import com.fieldtap.ui.components.SignalHistoryChart
+import com.fieldtap.ui.components.SignalMeter
 import com.fieldtap.ui.components.SignalQualityLabels
 import com.fieldtap.ui.components.StatusBanner
 import com.fieldtap.ui.components.StatusChip
@@ -150,6 +151,7 @@ import com.fieldtap.ui.settings.TestSettingsRules
 import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.FieldTapIcons
 import com.fieldtap.ui.theme.Formats
+import com.fieldtap.ui.theme.ShapeRoles
 import com.fieldtap.ui.theme.SignalMetric
 import com.fieldtap.ui.theme.SignalScale
 import com.fieldtap.ui.theme.Sizes
@@ -1203,7 +1205,7 @@ private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, ageInHead
             ageInHeader = ageInHeader,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            SignalBar(metric = SignalMetric.RSRP, value = serving?.rsrp, stateDescription = labels.of(rsrpQuality))
+            SignalMeter(metric = SignalMetric.RSRP, value = serving?.rsrp, stateDescription = labels.of(rsrpQuality))
         }
         if (neitherReported) return@Column
         // One row, whatever the width or font scale: two stacked tiles pushed the trend and the cadence off the first screen.
@@ -1428,7 +1430,7 @@ private fun StatusChips(live: LiveState, modifier: Modifier = Modifier) {
 /**
  * Calms a steady-state chip to neutral, so colour is reserved for the one or two chips that signal a problem
  * (out of service, mobile data off, GPS lost): the row parses as a glanceable status line, not a swatch sampler of
- * green, cobalt and grey. A WARNING or ERROR keeps its colour; the reassuring "in service" / "GPS fix" states go grey.
+ * green, blue and grey. A WARNING or ERROR keeps its colour; the reassuring "in service" / "GPS fix" states go grey.
  */
 private fun calmChipTone(tone: StatusTone): StatusTone =
     if (tone == StatusTone.WARNING || tone == StatusTone.ERROR) tone else StatusTone.NEUTRAL
@@ -1472,24 +1474,13 @@ private fun LiveActionBar(
     onStop: () -> Unit,
     onMark: () -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = screenGutter(), vertical = Spacing.Md),
-            contentAlignment = Alignment.Center,
-        ) {
-            Row(
-                modifier = Modifier.contentWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                LiveSessionButton(state, buttonState, onStart, onStop, modifier = Modifier.weight(1f))
-                if (buttonState == SessionButtonState.RECORDING) {
-                    LiveMarkButton(state, onMark, modifier = Modifier.heightIn(min = Sizes.PrimaryButtonHeight))
-                }
-            }
+    // The one dominant primary action per screen lives in the design system's inset floating action bar (clean-design
+    // §5, §8.1): a raised surfaceContainerLow card with a hairline, over the navigation bar. Mark joins it, tonal, while
+    // recording; Stop is the dominant filled action then (SessionButton, recording tone).
+    FieldTapFloatingActionBar {
+        LiveSessionButton(state, buttonState, onStart, onStop, modifier = Modifier.weight(1f))
+        if (buttonState == SessionButtonState.RECORDING) {
+            LiveMarkButton(state, onMark, modifier = Modifier.heightIn(min = Sizes.PrimaryButtonHeight))
         }
     }
 }
@@ -1568,6 +1559,8 @@ private fun LiveMarkButton(state: LiveUiState, onMark: () -> Unit, modifier: Mod
     val unavailable = stringResource(R.string.live_mark_unavailable)
     FilledTonalButton(
         onClick = onMark,
+        // Match the accent Start/Stop button's 12 dp control, not Material's stadium (clean-design §5).
+        shape = ShapeRoles.Control,
         enabled = state.markEnabled,
         modifier = modifier.then(if (state.markEnabled) Modifier else Modifier.semantics { contentDescription = unavailable }),
     ) {
@@ -2115,12 +2108,16 @@ private fun testsTargetsText(tests: TestSettings): String {
  */
 @Composable
 internal fun RecordingStatusStrip(strip: RecordingStrip, modifier: Modifier = Modifier) {
-    val tone = when (strip.state) {
-        RecordingState.RECORDING -> StatusTone.SUCCESS
+    // The running-state fill is the recording crimson family — the one place a tonal running-state fill appears
+    // (clean-design §2.4, §8.2). A running session is never `error`, so recording has its own family; a problem state
+    // (location off, paused, waiting, saving) keeps its own tone.
+    val recording = strip.state == RecordingState.RECORDING
+    val problemTone = when (strip.state) {
         RecordingState.LOCATION_OFF -> StatusTone.ERROR
         RecordingState.PAUSED_IN_ZONE, RecordingState.WAITING_FOR_LOCATION, RecordingState.SAVING -> StatusTone.INFO
+        RecordingState.RECORDING -> StatusTone.NEUTRAL // unused: recording uses the crimson family and the dot below
     }
-    val family = FieldTapDesign.colors.status(tone)
+    val family = if (recording) FieldTapDesign.colors.recording else FieldTapDesign.colors.status(problemTone)
     val stateText = when (strip.state) {
         RecordingState.RECORDING -> pluralStringResource(
             R.plurals.live_strip_recording,
@@ -2160,7 +2157,15 @@ internal fun RecordingStatusStrip(strip: RecordingStrip, modifier: Modifier = Mo
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
             ) {
-                Icon(imageVector = statusIcon(tone), contentDescription = null, modifier = Modifier.size(Sizes.IconSmall))
+                // While collecting, the steady recording dot; a problem state shows its tone icon. Both are decorative:
+                // the state word carries the meaning for TalkBack (the row merges its descendants).
+                Box(modifier = Modifier.size(Sizes.IconSmall), contentAlignment = Alignment.Center) {
+                    if (recording) {
+                        RecordingDot(color = family.onContainer)
+                    } else {
+                        Icon(imageVector = statusIcon(problemTone), contentDescription = null, modifier = Modifier.size(Sizes.IconSmall))
+                    }
+                }
                 Text(
                     text = stateText,
                     style = stateStyle,
