@@ -25,7 +25,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
@@ -61,6 +60,8 @@ fun SectionCard(
         modifier = modifier.fillMaxWidth(),
         shape = ShapeRoles.Card,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shadowElevation = cardShadowElevation(),
+        border = cardHairline(),
     ) {
         Column(
             modifier = Modifier.padding(contentPadding),
@@ -69,23 +70,18 @@ fun SectionCard(
             if (title != null) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.Md),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
                 ) {
                     if (icon != null) {
                         Icon(
                             imageVector = icon,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(Sizes.Icon),
+                            modifier = Modifier.size(Sizes.IconSmall),
                         )
                     }
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = title,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.semantics { heading() },
-                        )
+                        Eyebrow(text = title, heading = true)
                         if (subtitle != null) {
                             Text(
                                 text = subtitle,

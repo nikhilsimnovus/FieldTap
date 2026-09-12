@@ -17,6 +17,8 @@ import com.fieldtap.ui.theme.FieldTapShapes
 import com.fieldtap.ui.theme.FieldTapTypography
 import com.fieldtap.ui.theme.LocalFieldTapColors
 import com.fieldtap.ui.theme.LocalNumericStyles
+import com.fieldtap.ui.theme.LocalReducedMotion
+import com.fieldtap.ui.theme.rememberReducedMotion
 
 /**
  * The app's only theme entry point: the 5gto6G colour schemes, the type scale, the shapes, and the
@@ -28,6 +30,15 @@ import com.fieldtap.ui.theme.LocalNumericStyles
  * - [darkTheme] follows the system. Walk mode passes `true` to force the dark surface; the status and
  *   navigation bar icons follow it, and are restored when the forced theme leaves composition.
  *
+ * Motion: FieldTap's own components take their springs and cross-fades from [com.fieldtap.ui.theme.Motion]
+ * and collapse to `snap()` when the user has removed animations ([rememberReducedMotion] →
+ * [LocalReducedMotion]), so their behaviour is testable and independent of Material internals. Material 3
+ * 1.4.0's `MotionScheme` interface and the `MaterialTheme(colorScheme, motionScheme, …)` overload are
+ * `internal` to the material3 module (the JVM bytecode is `public`, but the Kotlin metadata is `internal`,
+ * so they cannot be referenced from here), so the theme uses the public, non-experimental
+ * `MaterialTheme(colorScheme, shapes, typography, content)` overload and bare Material components keep
+ * Material's own default motion.
+ *
  * See `ui/theme/DESIGN.md`.
  */
 @Composable
@@ -36,9 +47,11 @@ fun FieldTapTheme(
     content: @Composable () -> Unit,
 ) {
     SystemBarAppearance(darkTheme = darkTheme)
+    val reduced = rememberReducedMotion()
     CompositionLocalProvider(
         LocalFieldTapColors provides FieldTapColors.of(darkTheme),
         LocalNumericStyles provides FieldTapNumeric,
+        LocalReducedMotion provides reduced,
     ) {
         MaterialTheme(
             colorScheme = FieldTapColorSchemes.of(darkTheme),

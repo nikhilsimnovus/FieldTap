@@ -8,8 +8,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Proves the palette numerically: WCAG AA for text (4.5:1) and 3:1 for graphical marks, in light and
- * dark, on every surface a component can put them on.
+ * Proves the "Fieldbook" palette numerically: WCAG AA for text (4.5:1) and 3:1 for graphical marks, in
+ * light and dark, on the surfaces each thing is actually placed on.
+ *
+ * Three surface sets:
+ * - [allSurfaces] — every container a load-bearing text role can sit on; text roles clear AA on all of them.
+ * - [contentSurfaces] — where status words and signal marks are placed. `surfaceDim` is excluded: it is a
+ *   dimmed backdrop (behind scrims and disabled content), never a ground for a word or a mark. Every real
+ *   content ground clears the floor; the tightest is the chip track (`surfaceContainerHighest`).
+ * - [graphicGrounds] — the paper/ink and white/well grounds a ghost-chip border, a card hairline and a
+ *   chart line frame sit on. The `outline` role frames these; the darker fill surfaces use `outlineVariant`.
  */
 class ThemeContrastTest {
     private class Theme(val name: String, val scheme: ColorScheme, val colors: FieldTapColors)
@@ -19,7 +27,7 @@ class ThemeContrastTest {
         Theme("dark", FieldTapColorSchemes.Dark, FieldTapColors.Dark),
     )
 
-    private fun surfaces(s: ColorScheme): Map<String, Color> = linkedMapOf(
+    private fun allSurfaces(s: ColorScheme): Map<String, Color> = linkedMapOf(
         "surface" to s.surface,
         "background" to s.background,
         "surfaceDim" to s.surfaceDim,
@@ -29,6 +37,16 @@ class ThemeContrastTest {
         "surfaceContainer" to s.surfaceContainer,
         "surfaceContainerHigh" to s.surfaceContainerHigh,
         "surfaceContainerHighest" to s.surfaceContainerHighest,
+    )
+
+    private fun contentSurfaces(s: ColorScheme): Map<String, Color> =
+        allSurfaces(s).filterKeys { it != "surfaceDim" }
+
+    private fun graphicGrounds(s: ColorScheme): Map<String, Color> = linkedMapOf(
+        "surface" to s.surface,
+        "background" to s.background,
+        "surfaceContainerLowest" to s.surfaceContainerLowest,
+        "surfaceContainerLow" to s.surfaceContainerLow,
     )
 
     private val failures = mutableListOf<String>()
@@ -100,9 +118,22 @@ class ThemeContrastTest {
                 "tertiary" to s.tertiary,
                 "error" to s.error,
             )
-            for ((surfaceName, surface) in surfaces(s)) {
+            for ((surfaceName, surface) in allSurfaces(s)) {
                 for ((roleName, role) in roles) expect("${t.name} $roleName on $surfaceName", role, surface, Contrast.AA_TEXT)
-                expect("${t.name} outline on $surfaceName", s.outline, surface, Contrast.AA_GRAPHICS)
+            }
+        }
+        assertNoFailures()
+    }
+
+    @Test
+    fun outlineAndChartLinesReadOnTheirGrounds() {
+        for (t in themes) {
+            for ((surfaceName, surface) in graphicGrounds(t.scheme)) {
+                // outline frames ghost chips and card hairlines that must read; chart lines/reference frame the well.
+                expect("${t.name} outline on $surfaceName", t.scheme.outline, surface, Contrast.AA_GRAPHICS)
+                expect("${t.name} chartRsrp on $surfaceName", t.colors.chartRsrp, surface, Contrast.AA_GRAPHICS)
+                expect("${t.name} chartSinr on $surfaceName", t.colors.chartSinr, surface, Contrast.AA_GRAPHICS)
+                expect("${t.name} chartReference on $surfaceName", t.colors.chartReference, surface, Contrast.AA_GRAPHICS)
             }
         }
         assertNoFailures()
@@ -111,31 +142,26 @@ class ThemeContrastTest {
     @Test
     fun statusColoursMeetAa() {
         for (t in themes) {
-            for (tone in StatusTone.entries) {
-                val family = t.colors.status(tone)
-                expect("${t.name} $tone onColor/color", family.onColor, family.color, Contrast.AA_TEXT)
-                expect("${t.name} $tone onContainer/container", family.onContainer, family.container, Contrast.AA_TEXT)
-                for ((surfaceName, surface) in surfaces(t.scheme)) {
-                    expect("${t.name} $tone color on $surfaceName", family.color, surface, Contrast.AA_TEXT)
+            val tones = StatusTone.entries.map { it to t.colors.status(it) } + (null to t.colors.recording)
+            for ((tone, family) in tones) {
+                val name = tone?.name ?: "recording"
+                expect("${t.name} $name onColor/color", family.onColor, family.color, Contrast.AA_TEXT)
+                expect("${t.name} $name onContainer/container", family.onContainer, family.container, Contrast.AA_TEXT)
+                for ((surfaceName, surface) in contentSurfaces(t.scheme)) {
+                    expect("${t.name} $name color on $surfaceName", family.color, surface, Contrast.AA_TEXT)
                 }
-            }
-            val recording = t.colors.recording
-            expect("${t.name} recording onColor/color", recording.onColor, recording.color, Contrast.AA_TEXT)
-            expect("${t.name} recording onContainer/container", recording.onContainer, recording.container, Contrast.AA_TEXT)
-            for ((surfaceName, surface) in surfaces(t.scheme)) {
-                expect("${t.name} recording color on $surfaceName", recording.color, surface, Contrast.AA_TEXT)
             }
         }
         assertNoFailures()
     }
 
     @Test
-    fun signalLevelsAreReadableAndVisibleOnEverySurface() {
+    fun signalLevelsAreReadableAndVisibleOnTheirGrounds() {
         for (t in themes) {
             val levels = SignalQuality.entries.map { it.name to t.colors.signal.of(it) } + ("UNKNOWN" to t.colors.signal.unknown)
             for ((name, level) in levels) {
                 expect("${t.name} $name onFill/fill", level.onFill, level.fill, Contrast.AA_TEXT)
-                for ((surfaceName, surface) in surfaces(t.scheme)) {
+                for ((surfaceName, surface) in contentSurfaces(t.scheme)) {
                     expect("${t.name} $name content on $surfaceName", level.content, surface, Contrast.AA_TEXT)
                     val mark = maxOf(Contrast.ratio(level.fill, surface), Contrast.ratio(level.edge, surface))
                     if (name != "UNKNOWN" && mark < Contrast.AA_GRAPHICS) {
@@ -147,15 +173,22 @@ class ThemeContrastTest {
         assertNoFailures()
     }
 
+    /**
+     * The tightest pairs of the new palette, guarded explicitly against a regression that would drop them
+     * below the accessibility floor. Quoted spec values (on the chip track / paper) are in the comments.
+     */
     @Test
-    fun chartLinesAreVisibleOnEverySurface() {
-        for (t in themes) {
-            for ((surfaceName, surface) in surfaces(t.scheme)) {
-                expect("${t.name} chartRsrp on $surfaceName", t.colors.chartRsrp, surface, Contrast.AA_GRAPHICS)
-                expect("${t.name} chartSinr on $surfaceName", t.colors.chartSinr, surface, Contrast.AA_GRAPHICS)
-                expect("${t.name} chartReference on $surfaceName", t.colors.chartReference, surface, Contrast.AA_GRAPHICS)
-            }
-        }
+    fun theTightestFloorsAreGuarded() {
+        val chip = FieldTapColorSchemes.Light.surfaceContainerHighest
+        val paper = FieldTapColorSchemes.Light.surface
+        // Light EXCELLENT fill on chips = 3.00 (exactly the 3:1 graphics floor).
+        expect("light EXCELLENT fill on chip", SignalColors.Light.excellent.fill, chip, Contrast.AA_GRAPHICS)
+        // Light FAIR edge on chips = 3.33 (the pale FAIR fill relies on the edge stroke).
+        expect("light FAIR edge on chip", SignalColors.Light.fair.edge, chip, Contrast.AA_GRAPHICS)
+        // Light success word on chips = 4.54 (the tightest text pair).
+        expect("light SUCCESS word on chip", FieldTapColors.Light.success.color, chip, Contrast.AA_TEXT)
+        // Light outline on paper = 3.10 (ghost-chip / card hairline that must read).
+        expect("light outline on paper", FieldTapColorSchemes.Light.outline, paper, Contrast.AA_GRAPHICS)
         assertNoFailures()
     }
 

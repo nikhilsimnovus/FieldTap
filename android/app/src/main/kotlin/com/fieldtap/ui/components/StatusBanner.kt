@@ -1,5 +1,6 @@
 package com.fieldtap.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -71,6 +72,7 @@ fun StatusBanner(
         shape = ShapeRoles.Card,
         color = family.container,
         contentColor = family.onContainer,
+        border = BorderStroke(Sizes.HairlineWidth, family.color),
     ) {
         Column(
             modifier = Modifier.padding(

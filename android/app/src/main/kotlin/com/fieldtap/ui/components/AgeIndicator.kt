@@ -1,7 +1,6 @@
 package com.fieldtap.ui.components
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
@@ -20,9 +19,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import com.fieldtap.core.live.AgeBadge
-import com.fieldtap.ui.theme.Durations
 import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.FieldTapIcons
+import com.fieldtap.ui.theme.LocalReducedMotion
+import com.fieldtap.ui.theme.Motion
 import com.fieldtap.ui.theme.ShapeRoles
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
@@ -48,8 +48,9 @@ fun AgeIndicator(
     contentDescription: String? = null,
 ) {
     val family = FieldTapDesign.colors.status(ageTone(badge))
-    val container by animateColorAsState(family.container, tween(Durations.MEDIUM), label = "ageContainer")
-    val content by animateColorAsState(family.onContainer, tween(Durations.MEDIUM), label = "ageContent")
+    val reduced = LocalReducedMotion.current
+    val container by animateColorAsState(family.container, Motion.effect(reduced), label = "ageContainer")
+    val content by animateColorAsState(family.onContainer, Motion.effect(reduced), label = "ageContent")
     val icon: ImageVector? = when (badge) {
         AgeBadge.NONE, AgeBadge.FRESH -> null
         AgeBadge.AGING -> FieldTapIcons.Timer

@@ -78,6 +78,8 @@ fun PermissionRationale(
         modifier = modifier.fillMaxWidth(),
         shape = ShapeRoles.Card,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shadowElevation = cardShadowElevation(),
+        border = cardHairline(),
     ) {
         Row(
             modifier = Modifier.padding(Spacing.CardPadding),
@@ -129,12 +131,13 @@ fun PermissionRationale(
                         .padding(top = Spacing.Xs)
                         .heightIn(min = Sizes.MinTouchTarget)
                     if (status == PermissionStatus.NOT_REQUESTED) {
-                        FilledTonalButton(onClick = onAction, modifier = buttonModifier) {
+                        FilledTonalButton(onClick = onAction, shape = ShapeRoles.Control, modifier = buttonModifier) {
                             Text(text = actionLabel)
                         }
                     } else {
                         OutlinedButton(
                             onClick = onAction,
+                            shape = ShapeRoles.Control,
                             modifier = buttonModifier,
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                             contentPadding = ButtonDefaults.ButtonWithIconContentPadding,

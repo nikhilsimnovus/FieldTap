@@ -98,6 +98,8 @@ fun SessionListRow(
             .semantics(mergeDescendants = true) { if (contentDescription != null) this.contentDescription = contentDescription },
         shape = ShapeRoles.Tile,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shadowElevation = cardShadowElevation(),
+        border = cardHairline(),
     ) {
         Row(
             modifier = Modifier

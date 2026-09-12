@@ -25,6 +25,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.FieldTapIcons
+import com.fieldtap.ui.theme.ShapeRoles
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
 import com.fieldtap.ui.theme.StatusTone
@@ -86,6 +87,7 @@ fun EmptyState(
         if (actionLabel != null && onAction != null) {
             Button(
                 onClick = onAction,
+                shape = ShapeRoles.Control,
                 modifier = Modifier
                     .padding(top = Spacing.Sm)
                     .heightIn(min = Sizes.MinTouchTarget),

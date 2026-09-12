@@ -1,5 +1,6 @@
 package com.fieldtap.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -13,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -27,13 +29,14 @@ import com.fieldtap.ui.theme.StatusTone
 import com.fieldtap.ui.theme.tabular
 
 /**
- * Android's cell-info refresh interval right now, with the reason: "2 s" (screen on, Wi-Fi off or
- * charging) or "10 s" with "Wi-Fi on while not charging" or "Screen off". Pocket mode is labelled
- * "10 s cadence" by the same component.
+ * Android's cell-info refresh interval right now, with the reason, as a **ghost chip**: "2 s" (screen on,
+ * Wi-Fi off or charging) or "10 s" with "Wi-Fi on while not charging" or "Screen off". Pocket mode is
+ * labelled "10 s cadence" by the same component.
  *
  * [shortInterval] is `LiveState.shortInterval`: true tints it green (success), false amber (warning,
  * because logging works but is sparser), null neutral before the first answer ([cadenceTone]). The
- * interval text is always shown, so the tint is never the only cue.
+ * transparent fill + tone-coloured timer icon, interval and reason mean the tint is never the only cue,
+ * and the interval text is always shown.
  *
  * @param intervalText "2 s" or "10 s"; [label] for example "Cadence"; [reason] one short phrase.
  * @param onClick optional, for example to open walk-mode help; the whole indicator is then a 48 dp button.
@@ -61,6 +64,7 @@ fun CadenceIndicator(
         }
     }
     val shape = if (reason == null) ShapeRoles.Pill else ShapeRoles.Tile
+    val border = BorderStroke(Sizes.HairlineWidth, MaterialTheme.colorScheme.outline)
     val body: @Composable () -> Unit = {
         // The reason sits beside the interval when it fits, and wraps under it when not: squeezed beside it in a narrow
         // pane it shrank to a letter a line.
@@ -89,16 +93,18 @@ fun CadenceIndicator(
             onClick = onClick,
             modifier = modifier.then(semantics),
             shape = shape,
-            color = family.container,
-            contentColor = family.onContainer,
+            color = Color.Transparent,
+            contentColor = family.color,
+            border = border,
             content = body,
         )
     } else {
         Surface(
             modifier = modifier.then(semantics),
             shape = shape,
-            color = family.container,
-            contentColor = family.onContainer,
+            color = Color.Transparent,
+            contentColor = family.color,
+            border = border,
             content = body,
         )
     }

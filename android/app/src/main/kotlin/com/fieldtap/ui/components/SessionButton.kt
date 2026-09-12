@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.sp
 import com.fieldtap.ui.theme.Durations
 import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.FieldTapIcons
+import com.fieldtap.ui.theme.LocalReducedMotion
+import com.fieldtap.ui.theme.Motion
 import com.fieldtap.ui.theme.ShapeRoles
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
@@ -92,14 +94,15 @@ fun SessionButton(
     val colors = FieldTapDesign.colors
     val recording = state == SessionButtonState.RECORDING
     val busy = state == SessionButtonState.STARTING || state == SessionButtonState.STOPPING
+    val reduced = LocalReducedMotion.current
     val container by animateColorAsState(
         targetValue = if (recording) colors.recording.color else MaterialTheme.colorScheme.primary,
-        animationSpec = tween(Durations.MEDIUM),
+        animationSpec = Motion.effect(reduced),
         label = "sessionButtonContainer",
     )
     val content by animateColorAsState(
         targetValue = if (recording) colors.recording.onColor else MaterialTheme.colorScheme.onPrimary,
-        animationSpec = tween(Durations.MEDIUM),
+        animationSpec = Motion.effect(reduced),
         label = "sessionButtonContent",
     )
     Button(
@@ -116,7 +119,7 @@ fun SessionButton(
                     else -> Modifier
                 },
             ),
-        shape = ShapeRoles.Pill,
+        shape = ShapeRoles.Control,
         colors = ButtonDefaults.buttonColors(
             containerColor = container,
             contentColor = content,
@@ -218,17 +221,23 @@ fun RecordingDot(
     modifier: Modifier = Modifier,
     size: Dp = Sizes.RecordingDot,
 ) {
-    val transition = rememberInfiniteTransition(label = "recordingDot")
-    val alpha by transition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0.35f,
-        animationSpec = infiniteRepeatable(animation = tween(Durations.PULSE), repeatMode = RepeatMode.Reverse),
-        label = "recordingDotAlpha",
-    )
+    val dotAlpha = if (LocalReducedMotion.current) {
+        // Reduced motion: a steady (non-pulsing) dot; the "Recording" label still says it is live.
+        1f
+    } else {
+        val transition = rememberInfiniteTransition(label = "recordingDot")
+        val alpha by transition.animateFloat(
+            initialValue = 1f,
+            targetValue = 0.35f,
+            animationSpec = infiniteRepeatable(animation = tween(Durations.PULSE), repeatMode = RepeatMode.Reverse),
+            label = "recordingDotAlpha",
+        )
+        alpha
+    }
     Box(
         modifier = modifier
             .size(size)
-            .graphicsLayer { this.alpha = alpha }
+            .graphicsLayer { this.alpha = dotAlpha }
             .background(color, CircleShape),
     )
 }

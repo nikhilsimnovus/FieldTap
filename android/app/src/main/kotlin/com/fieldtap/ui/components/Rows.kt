@@ -220,6 +220,7 @@ fun ChecklistRow(
             if (actionLabel != null && onAction != null) {
                 OutlinedButton(
                     onClick = onAction,
+                    shape = ShapeRoles.Control,
                     modifier = Modifier
                         .padding(top = Spacing.Xs)
                         .heightIn(min = Sizes.MinTouchTarget),

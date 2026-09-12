@@ -1,5 +1,6 @@
 package com.fieldtap.ui.components
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -13,14 +14,20 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import com.fieldtap.ui.theme.FieldTapIcons
+import com.fieldtap.ui.theme.LocalReducedMotion
+import com.fieldtap.ui.theme.Motion
+import com.fieldtap.ui.theme.Sizes
 
 /**
  * How a [FieldTapTopBar] follows the content scrolled under it: pinned, its container turns `surfaceContainer` once the
@@ -62,9 +69,29 @@ fun FieldTapTopBar(
     navigationIcon: ImageVector = FieldTapIcons.ArrowBack,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
+    // The bar is the paper/ink ground; once content scrolls under it a 1 px hairline fades in to keep the
+    // bar and the cards moving beneath it apart (a shadow does not read on the bright ground; the hairline does).
+    val overlapped = (scroll?.behavior?.state?.overlappedFraction ?: 0f) > 0.01f
+    val hairlineAlpha by animateFloatAsState(
+        targetValue = if (overlapped) 1f else 0f,
+        animationSpec = Motion.effect(LocalReducedMotion.current),
+        label = "topBarHairline",
+    )
+    val hairlineColor = MaterialTheme.colorScheme.outlineVariant
     TopAppBar(
         title = { Text(text = title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        modifier = modifier,
+        modifier = modifier.drawBehind {
+            if (hairlineAlpha > 0f) {
+                val stroke = Sizes.HairlineWidth.toPx()
+                val y = size.height - stroke / 2f
+                drawLine(
+                    color = hairlineColor.copy(alpha = hairlineAlpha),
+                    start = Offset(0f, y),
+                    end = Offset(size.width, y),
+                    strokeWidth = stroke,
+                )
+            }
+        },
         scrollBehavior = scroll?.behavior,
         navigationIcon = {
             if (onNavigateUp != null && navigateUpContentDescription != null) {
@@ -76,7 +103,7 @@ fun FieldTapTopBar(
         actions = actions,
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.surface,
-            scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+            scrolledContainerColor = MaterialTheme.colorScheme.surface,
             navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
             titleContentColor = MaterialTheme.colorScheme.onSurface,
             actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -119,8 +146,8 @@ fun TopBarToggleAction(
         modifier = modifier.semantics { this.stateDescription = stateDescription },
         enabled = enabled,
         colors = IconButtonDefaults.iconToggleButtonColors(
-            checkedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-            checkedContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            checkedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+            checkedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         ),
     ) {
         Icon(imageVector = icon, contentDescription = contentDescription)

@@ -191,7 +191,7 @@ fun ReadinessSheetContent(
                 Text(text = cancelLabel)
             }
             if (canStartAnyway) {
-                Button(onClick = onStartAnyway, modifier = Modifier.heightIn(min = Sizes.MinTouchTarget)) {
+                Button(onClick = onStartAnyway, shape = ShapeRoles.Control, modifier = Modifier.heightIn(min = Sizes.MinTouchTarget)) {
                     Text(text = startAnywayLabel)
                 }
             }

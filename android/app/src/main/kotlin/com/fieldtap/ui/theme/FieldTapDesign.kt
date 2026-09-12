@@ -37,4 +37,10 @@ object FieldTapDesign {
         @Composable
         @ReadOnlyComposable
         get() = LocalNumericStyles.current
+
+    /** Whether the user has removed animations; pass to the [Motion] specs. */
+    val reducedMotion: Boolean
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalReducedMotion.current
 }

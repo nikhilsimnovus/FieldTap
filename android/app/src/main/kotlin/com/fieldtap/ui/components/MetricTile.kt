@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -23,7 +24,6 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.em
@@ -120,23 +120,18 @@ fun MetricTile(
             }
         }
     }
+    val isHero = emphasis == MetricEmphasis.HERO
+    val contentPad = if (isHero) PaddingValues(vertical = Spacing.Xs) else PaddingValues(Spacing.CardPadding)
     val body: @Composable () -> Unit = {
         Column(
-            modifier = Modifier.padding(Spacing.CardPadding),
-            verticalArrangement = Arrangement.spacedBy(Spacing.Xs),
+            modifier = Modifier.padding(contentPad),
+            verticalArrangement = Arrangement.spacedBy(Spacing.EyebrowGap),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
             ) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
+                Eyebrow(text = label, modifier = Modifier.weight(1f))
                 if (ageInHeader && ageText != null) {
                     AgeIndicator(text = ageText, badge = badge)
                 }
@@ -202,10 +197,12 @@ fun MetricTile(
         }
     }
     val container = MaterialTheme.colorScheme.surfaceContainerLow
-    if (onClick != null) {
-        Surface(onClick = onClick, modifier = modifier.then(semantics), shape = ShapeRoles.Tile, color = container, content = body)
-    } else {
-        Surface(modifier = modifier.then(semantics), shape = ShapeRoles.Tile, color = container, content = body)
+    when {
+        // The hero is an open editorial block on the paper ground, not a card.
+        isHero -> Box(modifier = modifier.then(semantics)) { body() }
+        // Non-hero tiles are bordered wells: a 1 px hairline, no shadow.
+        onClick != null -> Surface(onClick = onClick, modifier = modifier.then(semantics), shape = ShapeRoles.Tile, color = container, border = cardHairline(), content = body)
+        else -> Surface(modifier = modifier.then(semantics), shape = ShapeRoles.Tile, color = container, border = cardHairline(), content = body)
     }
 }
 
@@ -245,6 +242,7 @@ fun SecondaryMetricTile(
         modifier = modifier.clearAndSetSemantics { contentDescription = description },
         shape = ShapeRoles.Tile,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = cardHairline(),
     ) {
         if (notReported) {
             // Only why there is no number: a reserved value line and a dash filled 77 dp of the first screen with nothing.
@@ -258,13 +256,7 @@ fun SecondaryMetricTile(
                     horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
                     itemVerticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Eyebrow(text = label)
                     Text(text = qualityLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -272,15 +264,9 @@ fun SecondaryMetricTile(
         }
         Column(
             modifier = Modifier.padding(horizontal = Spacing.Md, vertical = Spacing.Sm),
-            verticalArrangement = Arrangement.spacedBy(Spacing.Xxs),
+            verticalArrangement = Arrangement.spacedBy(Spacing.EyebrowGap),
         ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Eyebrow(text = label)
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     text = value ?: placeholder,
@@ -390,7 +376,7 @@ private fun MetricTilePreview() {
             supportingText = "NR · PCI 555 · n41",
             modifier = Modifier.fillMaxWidth(),
         ) {
-            SignalBar(metric = SignalMetric.RSRP, value = -92)
+            SignalMeter(metric = SignalMetric.RSRP, value = -92)
         }
         MetricGrid {
             MetricTile(label = "RSRQ", value = "-11", unit = "dB", quality = SignalQuality.GOOD, qualityLabel = "Good")
