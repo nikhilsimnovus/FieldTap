@@ -77,7 +77,7 @@ class ScreenTourTest {
         screens.awaitLive()
 
         visit(screens, R.string.live_menu_readiness, R.string.readiness_checks_title, "06-readiness")
-        visit(screens, R.string.live_menu_probe, R.string.probe_run, "07-probe")
+        visitProbe(screens)
         visitSettings(screens)
         visit(screens, R.string.live_menu_about, R.string.about_account_title, "09-about")
     }
@@ -87,6 +87,28 @@ class ScreenTourTest {
         screens.openMenuItem(menuItem)
         screens.awaitText(shows)
         screens.shotFull(shot)
+        screens.back()
+        screens.awaitLive()
+    }
+
+    /**
+     * The Capability screen at every scroll position, then its explicit read-only "Check with root" run. The check
+     * gains no root and never hangs (a hard timeout in the runner); on the CI emulator it settles quickly, and the
+     * SELinux/`/dev/diag`/kernel-config rows it fills in appear whatever `su` allowed. Both looks are captured full
+     * length, so the artifact shows the honest per-phone verdict the panel reaches.
+     */
+    private fun visitProbe(screens: Screens) {
+        screens.openMenuItem(R.string.live_menu_probe)
+        screens.awaitText(R.string.probe_run)
+        // The Root & diagnostics card is present once the passive read has loaded; its button sits inside it.
+        screens.awaitText(R.string.probe_root_title)
+        screens.shotFull("07-probe")
+        val checkRoot = hasText(E2e.string(R.string.probe_check_root)) and hasClickAction()
+        screens.scrollTo(checkRoot)
+        screens.click(checkRoot)
+        // The result rows (SELinux, Diag device, Kernel diag support) render once the check has settled.
+        screens.awaitText(R.string.probe_root_selinux, timeoutMs = ROOT_CHECK_MS)
+        screens.shotFull("07c-probe-root-check")
         screens.back()
         screens.awaitLive()
     }
@@ -105,5 +127,10 @@ class ScreenTourTest {
         screens.awaitText(R.string.settings_title)
         screens.back()
         screens.awaitLive()
+    }
+
+    private companion object {
+        /** Room for the root check to settle: the runner's own su timeout is 6 s, plus slack on a busy emulator. */
+        const val ROOT_CHECK_MS: Long = 30_000
     }
 }

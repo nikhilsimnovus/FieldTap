@@ -70,7 +70,8 @@ HEARTBEAT_SLACK_MS = 7_000
 
 # Screens taken at every scroll position: NAME-p1.png, NAME-p2.png and so on (Screens.shotFull).
 FIRST_RUN_PAGED = ("01-disclosure", "01b-disclosure-notice", "02-permissions")
-TOUR_PAGED = ("03-live", "04-sessions", "05-session-detail", "06-readiness", "07-probe", "08-settings", "08b-test-targets", "09-about")
+TOUR_PAGED = ("03-live", "04-sessions", "05-session-detail", "06-readiness", "07-probe", "07c-probe-root-check",
+              "08-settings", "08b-test-targets", "09-about")
 # Taken once: the Start dialog.
 TOUR_SINGLE = ("03b-start-dialog",)
 # Upright variants also turn the phone for Live; the landscape variant takes every screen turned.
@@ -738,6 +739,109 @@ def check_location_off(out: Path, r: Results) -> None:
     r.check("location off: Session detail says a marker was not saved", result.get("detail_markers_dropped_banner") is True, result)
 
 
+# The capability export's honest values. Layer-3 is never POSSIBLE on the emulator (it has no /dev/diag); the
+# diag node is never PRESENT. su either grants root (then diag is ABSENT and layer-3 NOT_POSSIBLE), is absent
+# (NOT_POSSIBLE), or is denied/timed out/errored (honestly UNKNOWN).
+SU_STATUSES = {"GRANTED", "DENIED", "TIMED_OUT", "NOT_PRESENT", "ERROR"}
+CAPABILITY_CAVEAT_MARK = "not proof"
+
+
+def check_capability(out: Path, r: Results) -> None:
+    """CapabilityProbeTest: the app's real capability/root/diag/USB-debugging detection and its fieldtap-capability/1 export."""
+    result_path = out / "device" / "capability-result.json"
+    if not r.check("capability: the test wrote its result", result_path.is_file(), result_path):
+        return
+    res = read_json(result_path)
+
+    # USB debugging is reported on, and the developer-options state was read.
+    r.check("capability: USB debugging (adb_enabled) is reported ON",
+            res.get("adb_enabled") is True and res.get("adb_enabled_setting") == "1",
+            "adb_enabled=%s, Settings adb_enabled=%s" % (res.get("adb_enabled"), res.get("adb_enabled_setting")))
+    r.check("capability: developer-options state was read and matches Settings",
+            isinstance(res.get("developer_options_enabled"), bool)
+            and res.get("developer_options_enabled") == (res.get("developer_options_setting") == "1"),
+            "reported %s, Settings %s" % (res.get("developer_options_enabled"), res.get("developer_options_setting")))
+
+    # The passive root signals carry the always-present root-hiding caveat.
+    r.check("capability: the passive root signals carry the root-hiding caveat",
+            res.get("caveat_matches") is True and CAPABILITY_CAVEAT_MARK in (res.get("root_caveat") or ""),
+            res.get("root_caveat"))
+    r.check("capability: a root confidence was assessed", res.get("root_confidence") in {"NONE", "LOW", "MEDIUM", "HIGH"},
+            res.get("root_confidence"))
+
+    # The tiered verdict: public-API measurements always yes; push updates need the Phone permission.
+    r.check("capability: tier 1 (public-API measurements) is YES", res.get("public_api") == "YES", res.get("public_api"))
+    r.check("capability: tier 2 (push cell updates) needs the Phone permission",
+            res.get("push_updates") == "NO" and res.get("read_phone_state_granted") is False,
+            "push_updates=%s, READ_PHONE_STATE granted=%s" % (res.get("push_updates"), res.get("read_phone_state_granted")))
+
+    # The "Check with root" outcome is honest and self-consistent for a device that genuinely has no /dev/diag.
+    su_status = res.get("su_status")
+    layer3 = res.get("layer3")
+    r.check("capability: Check with root ran with an honest su status", su_status in SU_STATUSES, su_status)
+    r.check("capability: the emulator genuinely has no /dev/diag",
+            res.get("diag_absent_on_device") is True, res.get("device_diag_ls"))
+    r.check("capability: the diag node is never PRESENT and layer-3 is never POSSIBLE",
+            res.get("diag_device") != "PRESENT" and layer3 != "POSSIBLE",
+            "diag_device=%s, layer3=%s" % (res.get("diag_device"), layer3))
+    if su_status == "GRANTED" and res.get("is_root") is True:
+        ok = res.get("diag_device") == "ABSENT" and layer3 == "NOT_POSSIBLE"
+        detail = "rooted with no /dev/diag must read ABSENT/NOT_POSSIBLE: diag=%s, layer3=%s" % (res.get("diag_device"), layer3)
+    elif su_status in ("DENIED", "TIMED_OUT", "ERROR"):
+        ok, detail = layer3 == "UNKNOWN", "an untested device is honestly UNKNOWN: layer3=%s" % layer3
+    else:  # NOT_PRESENT, or GRANTED-but-not-root
+        ok, detail = layer3 == "NOT_POSSIBLE", "no working root means NOT_POSSIBLE: layer3=%s" % layer3
+    r.check("capability: the layer-3 verdict matches the honest %s outcome" % su_status, ok, detail)
+    r.check("capability: layer-3 verdict agrees with the folded report", layer3 == res.get("layer3_verdict"),
+            "probe %s, verdict %s" % (layer3, res.get("layer3_verdict")))
+    # Layer-3 is not definitively possible here, so the laptop-over-USB path is shown.
+    r.check("capability: the laptop-over-USB path is shown when layer-3 is not possible",
+            bool(res.get("laptop_path")) and "USB debugging" in (res.get("laptop_path") or ""), res.get("laptop_path"))
+
+    # The fieldtap-capability/1 JSON export parses and carries the fields a pilot needs.
+    json_path = out / "device" / str(res.get("capability_json") or "capability.json")
+    if not r.check("capability: the JSON export was written", json_path.is_file(), json_path):
+        return
+    try:
+        report = read_json(json_path)
+    except (OSError, ValueError) as error:
+        r.check("capability: the JSON export parses", False, str(error))
+        return
+    r.check("capability: the JSON export parses", True)
+    r.check("capability: format is fieldtap-capability/1", report.get("format") == "fieldtap-capability/1", report.get("format"))
+    top = ("app_version", "version_code", "sdk_int", "handset", "root", "root_probe", "usb", "cellular", "verdict", "notes")
+    missing_top = [key for key in top if key not in report]
+    r.check("capability: the export has every top-level field", not missing_top, missing_top)
+    root = report.get("root") or {}
+    root_fields = ("confidence", "su_binaries_present", "root_manager_packages", "build_tags_test_keys",
+                   "debuggable", "secure_off", "writable_system_paths")
+    r.check("capability: root carries the passive signals", all(key in root for key in root_fields),
+            [key for key in root_fields if key not in root])
+    probe = report.get("root_probe")
+    probe_fields = ("su_status", "is_root", "selinux", "diag_device", "kernel_diag", "layer3", "elapsed_ms")
+    r.check("capability: root_probe is present after Check with root",
+            isinstance(probe, dict) and all(key in probe for key in probe_fields),
+            probe if not isinstance(probe, dict) else [key for key in probe_fields if key not in probe])
+    usb = report.get("usb") or {}
+    r.check("capability: usb.adb_enabled is true and developer_options_enabled is present",
+            usb.get("adb_enabled") is True and "developer_options_enabled" in usb, usb)
+    cellular = report.get("cellular") or {}
+    r.check("capability: cellular.read_phone_state_granted is false", cellular.get("read_phone_state_granted") is False, cellular)
+    verdict = report.get("verdict") or {}
+    r.check("capability: verdict tiers match (public YES, push NO, layer-3 %s)" % layer3,
+            verdict.get("public_api_measurements") == "YES" and verdict.get("push_cell_updates") == "NO"
+            and verdict.get("layer3_signalling") == layer3, verdict)
+    notes = report.get("notes") or []
+    caveat_in_notes = any(CAPABILITY_CAVEAT_MARK in note for note in notes)
+    r.check("capability: notes carry the root-hiding caveat (or the check confirmed working root)",
+            caveat_in_notes or (su_status == "GRANTED" and probe and probe.get("is_root") is True), notes[:2])
+    for key in ("sdk_int", "version_code", "elapsed_ms"):
+        source = report if key != "elapsed_ms" else probe
+        r.check("capability: %s is an integer" % key,
+                isinstance((source or {}).get(key), int) and not isinstance((source or {}).get(key), bool),
+                (source or {}).get(key))
+
+
 def is_png(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 1_000 and path.read_bytes()[:8] == PNG_SIGNATURE
 
@@ -797,6 +901,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     variants = args.variants.split()
     print("variants: %s" % " ".join(variants))
     check_walk(out, repo, args.walk_seconds, expect_lte_nr, r)
+    check_capability(out, r)
     check_location_off(out, r)
     check_recovered(out, repo, r)
     check_screenshots(out, variants, r)

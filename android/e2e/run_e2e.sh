@@ -14,7 +14,11 @@
 #      The LTE and NR checks (a serving cell on Live, kpi rows, serving_cell events) apply when the modem reports an
 #      LTE or NR cell, which API 36 must. A modem reporting only other cells, like the API 31 emulator's single GSM
 #      cell, instead gets a session checked to hold no kpi row and Live checked to say so.
-#   3. Every screen in each variant of VARIANTS (ScreenTourTest), each at every scroll position.
+#   3. Every screen in each variant of VARIANTS (ScreenTourTest), each at every scroll position; the Capability
+#      screen's tour also taps its read-only "Check with root" and captures the SELinux/diag/kernel result rows.
+#   3b. Capability/root/diag/USB-debugging detection (CapabilityProbeTest), through the real AppGraph.capability:
+#      USB debugging reported on, the passive root signals with the hiding caveat, and the "Check with root" outcome
+#      folded into an honest tiered verdict; capability.json and capability-result.json are written for the host.
 #   4. Location services switched off mid-session (LocationOffTest), with a privacy zone far from the walk: the files
 #      say so with gps_lost, a marker that waits for a fix is dropped when the wait outlasts its limit and the Session
 #      detail screen says so, and gps_restored follows once location is back on.
@@ -471,6 +475,24 @@ tour() {
   set_variant light
 }
 
+# capability  CapabilityProbeTest: the app's real capability/root/diag/USB-debugging detection, exercised through
+# AppGraph.capability. pm clear first, so no runtime permission is granted (READ_PHONE_STATE off => push updates =
+# needs Phone). The device's own SELinux mode and /dev/diag state are recorded from the shell for the record; the
+# test writes capability.json and capability-result.json, which the host pulls and check_e2e.py asserts.
+capability() {
+  log "== capability, root, diag and USB-debugging detection"
+  dsh pm clear "$PKG" > /dev/null || fail "pm clear $PKG failed"
+  set_variant light
+  {
+    echo "## adb_enabled";                    dsh settings get global adb_enabled
+    echo "## development_settings_enabled";   dsh settings get global development_settings_enabled
+    echo "## getenforce";                     dsh getenforce
+    echo "## ls -l /dev/diag";                dsh ls -l /dev/diag
+    echo "## which su";                       dsh 'command -v su || echo "su: not found"'
+  } 2>&1 | redact > "$OUT/checks/capability-device.txt"
+  instrument capability CapabilityProbeTest || true
+}
+
 # location_off  LocationOffTest: a session with a privacy zone 10 km from the walk, location services switched off and
 # on again while it records, then its Session detail; the session is pulled for check_e2e.py.
 location_off() {
@@ -649,6 +671,7 @@ main() {
   instrument recording-strip RecordingStripTest || true
   walk || true
   tour || true
+  capability || true
   location_off || true
   recovery force_stop || true
   recovery kill_9 || true
