@@ -20,10 +20,11 @@ import org.junit.runner.RunWith
 /**
  * Every screen after the walk, at every scroll position ([Screens.shotFull]), in the variant `-e variant` names: Live with
  * its serving cell, the Start dialog, Sessions, the walk's detail, Readiness, Probe, Settings, its Test targets and About.
- * An upright variant also turns the phone for Live, the screen a car mount holds; the landscape variant takes every screen
- * turned. On a phone-sized screen upright at font scale 1.0, Live's 5-minute chart must lie wholly on the first screen.
- * The disclosure and Permissions screens are taken on a first run by [FirstRunScreensTest]. `-e dir_name` is the walk's
- * session.
+ * It also proves the four-tab navigation: each tab tap is checked to move the bottom bar's selection to that tab, and the
+ * bar is captured with Live selected (`10-nav-live`) and with another tab selected (`10b-nav-diagnostics`). An upright
+ * variant also turns the phone for Live, the screen a car mount holds; the landscape variant takes every screen turned. On
+ * a phone-sized screen upright at font scale 1.0, Live's 5-minute chart must lie wholly on the first screen. The disclosure
+ * and Permissions screens are taken on a first run by [FirstRunScreensTest]. `-e dir_name` is the walk's session.
  */
 @RunWith(AndroidJUnit4::class)
 class ScreenTourTest {
@@ -47,6 +48,10 @@ class ScreenTourTest {
             screens.assertChartOnFirstScreen()
         }
         screens.shotFull("03-live")
+        // The bottom navigation bar with Live selected: the tab tap that opened this screen is reflected in the bar.
+        screens.assertTabSelected(R.string.nav_live, selected = true)
+        screens.assertTabSelected(R.string.nav_sessions, selected = false)
+        screens.shot("10-nav-live")
         if (!variant.landscape) {
             // A phone in landscape: two panes, with the session buttons beside them instead of under them.
             screens.inLandscape {
@@ -64,8 +69,10 @@ class ScreenTourTest {
         val cancel = E2e.string(R.string.action_cancel)
         screens.click((hasText(cancel) or hasContentDescription(cancel)) and hasClickAction() and hasAnyAncestor(isDialog()))
 
-        // Sessions tab: the recorded walk and its detail.
+        // Sessions tab: the recorded walk and its detail. The tap moves the bar's selection off Live and onto Sessions.
         screens.openTab(R.string.nav_sessions)
+        screens.assertTabSelected(R.string.nav_sessions, selected = true)
+        screens.assertTabSelected(R.string.nav_live, selected = false)
         val row = hasText(sessionName) and hasClickAction()
         screens.await(row)
         screens.shotFull("04-sessions")
@@ -79,14 +86,19 @@ class ScreenTourTest {
 
         // Settings tab, and every screen it reaches: the readiness check, the test targets and About.
         screens.openTab(R.string.nav_settings)
+        screens.assertTabSelected(R.string.nav_settings, selected = true)
         screens.awaitText(R.string.settings_section_measurement)
         screens.shotFull("08-settings")
         visitFromSettings(screens, R.string.settings_readiness, R.string.readiness_checks_title, "06-readiness")
         visitFromSettings(screens, R.string.settings_test_targets, R.string.settings_ping_heading, "08b-test-targets")
         visitFromSettings(screens, R.string.settings_about, R.string.about_account_title, "09-about")
 
-        // Diagnostics tab: the capability probe and its root check.
+        // Diagnostics tab: the capability probe and its root check. The bar now shows a tab other than Live selected,
+        // the counterpart to the Live-selected shot above.
         screens.openTab(R.string.nav_diagnostics)
+        screens.assertTabSelected(R.string.nav_diagnostics, selected = true)
+        screens.assertTabSelected(R.string.nav_live, selected = false)
+        screens.shot("10b-nav-diagnostics")
         visitProbe(screens)
     }
 

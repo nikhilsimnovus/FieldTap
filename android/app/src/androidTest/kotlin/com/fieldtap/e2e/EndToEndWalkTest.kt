@@ -346,10 +346,32 @@ class EndToEndWalkTest {
             if (!midwayShot && elapsedMs >= walkMs / 2) {
                 screens.awaitLiveRadio(expectLteNr)
                 screens.shot("10-recording")
+                assertRecordingControlsAboveNavBar()
                 midwayShot = true
             }
             SystemClock.sleep(minOf(POLL_MS, walkMs - elapsedMs))
         }
+    }
+
+    /**
+     * While recording, Live's floating action bar holds Stop (the dominant action) and Mark, docked over the app's
+     * bottom navigation bar. Both must lie wholly above the bar: were they to overlap it, a tap meant for Stop or Mark
+     * could land on a tab. Checked on the phone-sized API 36 screen, upright, where the floating bar (not the landscape
+     * rail) carries the controls; the "10-recording" shot is the evidence.
+     */
+    private fun assertRecordingControlsAboveNavBar() {
+        val notInDialog = !hasAnyAncestor(isDialog())
+        val stop = screens.bounds(hasContentDescription(E2e.string(R.string.live_stop), substring = true) and hasClickAction() and notInDialog)
+        val mark = screens.bounds(hasText(E2e.string(R.string.live_mark)) and hasClickAction() and notInDialog)
+        val navTop = screens.navBarTopPx()
+        val controlsBottom = maxOf(stop.bottom, mark.bottom)
+        val gap = navTop - controlsBottom
+        val message = "recording controls reach %.0f px; the bottom navigation bar starts at %.0f px (gap %.0f px)"
+            .format(controlsBottom, navTop, gap)
+        assertTrue(message, controlsBottom <= navTop)
+        result["recording_controls_clear"] = true
+        result["recording_controls_gap_px"] = gap.toInt()
+        save()
     }
 
     private fun stopSession(dirName: String, recordingSinceMs: Long) {

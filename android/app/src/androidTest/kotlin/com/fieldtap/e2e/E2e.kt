@@ -14,6 +14,7 @@ import androidx.annotation.StringRes
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.SemanticsMatcher
@@ -544,8 +545,36 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
 
     /** Taps a bottom-navigation tab by its label (Live, Sessions, Diagnostics, Settings). */
     fun openTab(@StringRes label: Int) {
-        click(hasText(E2e.string(label)) and hasClickAction())
+        click(navTab(label))
     }
+
+    /**
+     * A bottom-navigation tab by its [label]. A tab's merged node carries a `Selected` state and a click action; a
+     * top bar's title, which can read the same word (Live's top bar says "Live"), carries neither, so this matches the
+     * tab and not the title.
+     */
+    private fun navTab(@StringRes label: Int): SemanticsMatcher =
+        hasText(E2e.string(label)) and hasClickAction() and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)
+
+    /** Fails unless the bottom-navigation tab labelled [label] reports [selected]: the proof that a tab tap switched tabs. */
+    fun assertTabSelected(@StringRes label: Int, selected: Boolean) {
+        val node = await(navTab(label)).fetchSemanticsNode()
+        val isSelected = node.config.getOrNull(SemanticsProperties.Selected) == true
+        assertEquals("bottom-navigation tab \"${E2e.string(label)}\" selected", selected, isSelected)
+    }
+
+    /** The top edge, in root pixels, of the bottom navigation bar: the highest of its four tab items' tops. */
+    fun navBarTopPx(): Float {
+        val labels = listOf(R.string.nav_live, R.string.nav_sessions, R.string.nav_diagnostics, R.string.nav_settings)
+        val anyLabel = labels.map { hasText(E2e.string(it)) }.reduce { a, b -> a or b }
+        val tabs = anyLabel and hasClickAction() and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)
+        val nodes = compose.onAllNodes(tabs).fetchSemanticsNodes()
+        assertTrue("the bottom navigation bar shows no tabs", nodes.isNotEmpty())
+        return nodes.minOf { it.boundsInRoot.top }
+    }
+
+    /** The bounds, in root pixels, of the first node matching [matcher]. */
+    fun bounds(matcher: SemanticsMatcher): Rect = await(matcher).fetchSemanticsNode().boundsInRoot
 
     /**
      * Waits until Live shows a serving cell: the hero tile, at the top whatever the font scale, names the cell's PCI and

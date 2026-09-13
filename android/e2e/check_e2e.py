@@ -72,8 +72,9 @@ HEARTBEAT_SLACK_MS = 7_000
 FIRST_RUN_PAGED = ("01-disclosure", "01b-disclosure-notice", "02-permissions")
 TOUR_PAGED = ("03-live", "04-sessions", "05-session-detail", "06-readiness", "07-probe", "07c-probe-root-check",
               "08-settings", "08b-test-targets", "09-about")
-# Taken once: the Start dialog.
-TOUR_SINGLE = ("03b-start-dialog",)
+# Taken once: the Start dialog, and the bottom navigation bar with Live selected (10-nav-live) and with another tab
+# selected (10b-nav-diagnostics) — the tab-navigation evidence, in every variant.
+TOUR_SINGLE = ("03b-start-dialog", "10-nav-live", "10b-nav-diagnostics")
 # Upright variants also turn the phone for Live; the landscape variant takes every screen turned.
 LIVE_TURNED = "03e-live-landscape"
 WALK_SCREENS = (
@@ -501,6 +502,9 @@ def check_walk(out: Path, repo: Path, walk_seconds: int, expect_lte_nr: bool, r:
             and result.get("walk_mode_clears_keep_screen_on") is True,
             "keep screen on %s, brightness override %s, cleared %s" % (result.get("walk_mode_keeps_screen_on"),
             result.get("walk_mode_brightness_override"), result.get("walk_mode_clears_keep_screen_on")))
+    r.check("walk: the recording Stop and Mark controls sit wholly above the bottom navigation bar",
+            result.get("recording_controls_clear") is True,
+            "clear %s, gap %s px" % (result.get("recording_controls_clear"), result.get("recording_controls_gap_px")))
     privacy = meta.get("privacy") or {}
     version = consent_version(repo)
     r.check("session.json: privacy", privacy.get("data_class") == "kpi" and privacy.get("location_precision") == "full"
