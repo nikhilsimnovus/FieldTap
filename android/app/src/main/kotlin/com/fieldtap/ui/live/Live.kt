@@ -1222,16 +1222,27 @@ private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, modifier:
                 ageBadge = live.badge,
                 modifier = Modifier.fillMaxWidth(),
             )
-            val identity = supportingText?.takeIf { it.isNotEmpty() }
-            if (identity != null) {
-                Text(
-                    text = identity,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+            // The identity is several logical lines (the cell, then "operator · PLMN", plus any "not reported"/ageing note),
+            // each rendered as its own Text. One Text with maxLines = 2 truncated the two-line identity as soon as the cell
+            // line wrapped, pushing the operator and its PLMN behind an ellipsis ("T-Mobile · 310260…"); giving each line its
+            // own Text keeps every number readable. The outer Column owns the one TalkBack phrase (heroDescription), so these
+            // still read once, not line by line.
+            val identityLines = supportingText?.split("\n").orEmpty().filter { it.isNotEmpty() }
+            if (identityLines.isNotEmpty()) {
+                Column(
                     modifier = Modifier.padding(horizontal = Spacing.Xs),
-                )
+                    verticalArrangement = Arrangement.spacedBy(Spacing.Xxs),
+                ) {
+                    identityLines.forEach { line ->
+                        Text(
+                            text = line,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
         }
         if (neitherReported) return@Column
