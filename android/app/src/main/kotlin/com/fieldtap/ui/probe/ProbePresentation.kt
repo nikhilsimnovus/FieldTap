@@ -56,7 +56,7 @@ internal enum class ProbePermissionLabel { PRECISE_LOCATION, APPROXIMATE_LOCATIO
  * optional root-check result. Honesty is the feature: layer-3 being "not possible" on a phone is a normal,
  * neutral fact (grey), never an error, and this screen never implies the app decodes signalling.
  *
- * Owner: workstream `screens-setup`.
+ * Owner: workstream `ui-setup`.
  */
 internal object ProbePresentation {
     fun listenerWord(listener: RadioListener, outcome: ListenerOutcome): ListenerWord {

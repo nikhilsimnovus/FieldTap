@@ -168,7 +168,7 @@ enum class ProbeProblem {
  *   for the telephony `fieldtap-probe/1`.
  * - [run]/[stop]/[interrupt] drive the telephony probe exactly as before; a cancelled run's updates are ignored.
  *
- * Owner: workstream `screens-setup`.
+ * Owner: workstream `ui-setup`.
  */
 class ProbeViewModel(private val graph: AppGraph) : ViewModel() {
     private val mutableState = MutableStateFlow(
@@ -361,7 +361,7 @@ class ProbeViewModel(private val graph: AppGraph) : ViewModel() {
  * kept on (`View.keepScreenOn`, no wake lock). Leaving the screen cancels both, except across a configuration
  * change such as a rotation.
  *
- * Owner: workstream `screens-setup`.
+ * Owner: workstream `ui-setup`.
  */
 @Composable
 fun ProbeScreen(
@@ -744,7 +744,8 @@ private fun RootDiagnosticsCard(
  *
  * The rows are mapped by the pure [ProbePresentation.deepRows]; the screen adds only the structural labels. The
  * value tones are carried in the model (and unit-tested) but not painted on the values here: the accent stays off
- * data rows (design §2.3), and the only interpreted mark is the sub-verdict's, which is neutral grey unless viable.
+ * data rows (Momentum keeps the indigo accent for the primary action, selection and focus only), and the only
+ * interpreted mark is the sub-verdict's, which is neutral grey unless viable.
  */
 @Composable
 private fun DeepDiagnosticsSection(

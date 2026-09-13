@@ -28,7 +28,7 @@ import kotlinx.coroutines.withContext
  * it with `CapabilityJson`, and writes the JSON to a shareable file — the same conventions the telephony
  * `CapabilityProbe.export` follows. Every call does its work off the main thread.
  *
- * Owner: workstream `screens-setup`.
+ * Owner: workstream `ui-setup`.
  */
 internal interface CapabilitySource {
     /** Read-only, no su call; safe to run when the screen opens. */
@@ -56,7 +56,7 @@ internal interface CapabilitySource {
  * It reads the handset metadata with [HandsetInfoReader] (already identifier-free) and the app/SDK from
  * [appInfo] and `Build.VERSION.SDK_INT`; the report carries no identifier and no location.
  *
- * Owner: workstream `screens-setup`.
+ * Owner: workstream `ui-setup`.
  */
 internal class AndroidCapabilitySource(
     context: Context,

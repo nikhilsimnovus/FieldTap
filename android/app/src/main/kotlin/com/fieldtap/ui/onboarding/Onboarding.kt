@@ -77,6 +77,8 @@ import com.fieldtap.ui.components.PermissionStatus
 import com.fieldtap.ui.components.PreviewSurface
 import com.fieldtap.ui.components.SectionCard
 import com.fieldtap.ui.components.StatusBanner
+import com.fieldtap.ui.components.cardHairline
+import com.fieldtap.ui.components.cardShadowElevation
 import com.fieldtap.ui.setup.ButtonProgress
 import com.fieldtap.ui.setup.PermissionAction
 import com.fieldtap.ui.setup.PermissionRules
@@ -418,8 +420,8 @@ private fun SummaryPoint(topic: SummaryTopic, point: ConsentPoint) {
         horizontalArrangement = Arrangement.spacedBy(Spacing.Lg),
     ) {
         Surface(
-            // A neutral tonal circle, not an accent-tinted one: Clearsheet keeps the accent for the primary
-            // action, selection and focus only (design §2.3); a disclosure point's icon is neutral.
+            // A neutral tonal circle, not an accent-tinted one: Momentum keeps the indigo accent for the
+            // primary action, selection and focus only; a disclosure point's icon is neutral.
             shape = CircleShape,
             color = MaterialTheme.colorScheme.secondaryContainer,
             contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -449,7 +451,15 @@ private fun FullNotice(paragraphs: List<String>, expanded: Boolean, onToggle: ()
         animationSpec = tween(Durations.SHORT),
         label = "notice chevron",
     )
-    Surface(modifier = modifier.fillMaxWidth(), shape = ShapeRoles.Card, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = ShapeRoles.Card,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        // The same soft depth every Momentum card carries, so the notice sits beside the summary and limits
+        // cards as an equal (a real shadow in light, the hairline and lift in dark) rather than reading flat.
+        shadowElevation = cardShadowElevation(),
+        border = cardHairline(),
+    ) {
         Column {
             Row(
                 modifier = Modifier
@@ -464,7 +474,8 @@ private fun FullNotice(paragraphs: List<String>, expanded: Boolean, onToggle: ()
                 Icon(
                     imageVector = FieldTapIcons.File,
                     contentDescription = null,
-                    // Neutral: the accent stays off decorative icons (design §2.3).
+                    // Neutral: the indigo accent stays off decorative icons (Momentum reserves it for the
+                    // primary action, selection and focus).
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(Sizes.Icon),
                 )
@@ -546,7 +557,8 @@ private fun NoticeParagraph(topic: ConsentTopic, text: String) {
                 ConsentTopic.GENERAL -> FieldTapIcons.Info
             },
             contentDescription = null,
-            // Neutral: the accent stays off decorative icons (design §2.3).
+            // Neutral: the indigo accent stays off decorative icons (Momentum reserves it for the primary
+            // action, selection and focus).
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .padding(top = Spacing.Xxs)
