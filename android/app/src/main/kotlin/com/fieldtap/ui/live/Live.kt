@@ -73,6 +73,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
@@ -126,8 +127,6 @@ import com.fieldtap.ui.components.FieldTapPreviews
 import com.fieldtap.ui.components.FieldTapTopBar
 import com.fieldtap.ui.components.KeyValueRow
 import com.fieldtap.ui.components.LimitsStatementCard
-import com.fieldtap.ui.components.MetricEmphasis
-import com.fieldtap.ui.components.MetricTile
 import com.fieldtap.ui.components.ReadinessProblem
 import com.fieldtap.ui.components.ReadinessSheet
 import com.fieldtap.ui.components.RecordingDot
@@ -137,8 +136,8 @@ import com.fieldtap.ui.components.SectionDivider
 import com.fieldtap.ui.components.SessionButton
 import com.fieldtap.ui.components.SessionButtonState
 import com.fieldtap.ui.components.SignalChartLabels
+import com.fieldtap.ui.components.SignalDonutHero
 import com.fieldtap.ui.components.SignalHistoryChart
-import com.fieldtap.ui.components.SignalMeter
 import com.fieldtap.ui.components.SignalQualityLabels
 import com.fieldtap.ui.components.StatusBanner
 import com.fieldtap.ui.components.StatusChip
@@ -1108,7 +1107,7 @@ private fun LazyListScope.bannerItems(parts: LiveParts) {
 
 private fun LazyListScope.servingTilesItem(parts: LiveParts) {
     item(key = "serving-tiles") {
-        ServingTiles(live = parts.state.live, labels = parts.labels, ageInHeader = parts.compact, modifier = Modifier.contentWidth())
+        ServingTiles(live = parts.state.live, labels = parts.labels, modifier = Modifier.contentWidth())
     }
 }
 
@@ -1167,7 +1166,7 @@ private fun LazyListScope.limitsItem(parts: LiveParts) {
 }
 
 @Composable
-private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, ageInHeader: Boolean, modifier: Modifier = Modifier) {
+private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, modifier: Modifier = Modifier) {
     val serving = live.serving
     val rsrpQuality = SignalScale.quality(SignalMetric.RSRP, serving?.rsrp)
     val rsrqQuality = SignalScale.quality(SignalMetric.RSRQ, serving?.rsrq)
@@ -1176,8 +1175,10 @@ private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, ageInHead
     val absence = LivePresentation.servingAbsence(live)
     val problem = LivePresentation.servingProblem(live)
     val ageText = if (ageMs != null) stringResource(R.string.age_old, Formats.ageSeconds(ageMs)) else absenceBadge(absence)
+    val rsrpLabel = stringResource(rsrpLabelRes(serving?.rat))
     val rsrqLabel = stringResource(rsrqLabelRes(serving?.rat))
     val sinrLabel = stringResource(sinrLabelRes(serving?.rat))
+    val dbm = stringResource(R.string.unit_dbm)
     // A cell that reports neither gets one line in the hero, not a row of two tiles that only say so.
     val neitherReported = serving != null && serving.rsrq == null && serving.sinr == null
     // With a cell: its identity, its operator, what it does not report, then why it may be ageing. Without: why there is none.
@@ -1190,22 +1191,48 @@ private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, ageInHead
     } else {
         absenceDetail(absence)
     }
+    // TalkBack (and the e2e serving-cell wait) reads the whole hero as one phrase — the value, its level, the freshness and
+    // the identity — so the donut, the quality pill, the age pill and the identity line below read once, not four times.
+    val heroDescription = listOfNotNull(
+        rsrpLabel,
+        serving?.rsrp?.let { "$it $dbm" } ?: UNKNOWN_VALUE,
+        if (serving != null) labels.of(rsrpQuality) else null,
+        ageText,
+        supportingText?.takeIf { it.isNotEmpty() },
+    ).joinToString(", ")
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(Spacing.Md)) {
-        MetricTile(
-            label = stringResource(rsrpLabelRes(serving?.rat)),
-            value = serving?.rsrp?.toString(),
-            unit = stringResource(R.string.unit_dbm),
-            emphasis = MetricEmphasis.HERO,
-            quality = rsrpQuality,
-            qualityLabel = if (serving != null) labels.of(rsrpQuality) else null,
-            ageText = ageText,
-            badge = live.badge,
-            supportingText = supportingText,
-            placeholder = UNKNOWN_VALUE,
-            ageInHeader = ageInHeader,
-            modifier = Modifier.fillMaxWidth(),
+        // The Momentum signature: the serving RSRP as the donut/ring gauge hero card (its label, a soft quality pill and the
+        // age), with the cell's identity on the line beneath. The whole block is one TalkBack phrase.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clearAndSetSemantics { this.contentDescription = heroDescription },
+            verticalArrangement = Arrangement.spacedBy(Spacing.Sm),
         ) {
-            SignalMeter(metric = SignalMetric.RSRP, value = serving?.rsrp, stateDescription = labels.of(rsrpQuality))
+            SignalDonutHero(
+                label = rsrpLabel,
+                value = serving?.rsrp,
+                quality = rsrpQuality,
+                unit = dbm,
+                qualityLabel = labels.of(rsrpQuality),
+                donutContentDescription = heroDescription,
+                metric = SignalMetric.RSRP,
+                stale = live.badge == AgeBadge.STALE,
+                ageText = ageText,
+                ageBadge = live.badge,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            val identity = supportingText?.takeIf { it.isNotEmpty() }
+            if (identity != null) {
+                Text(
+                    text = identity,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = Spacing.Xs),
+                )
+            }
         }
         if (neitherReported) return@Column
         // One row, whatever the width or font scale: two stacked tiles pushed the trend and the cadence off the first screen.
