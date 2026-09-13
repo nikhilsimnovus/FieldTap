@@ -70,7 +70,9 @@ class ScreenTourTest {
         screens.await(row)
         screens.shotFull("04-sessions")
         screens.click(row)
-        screens.awaitText(R.string.detail_section_overview)
+        // Session detail is a lazy list; in landscape the bottom bar shortens it, so the Overview card starts below the
+        // tall headline block and is not composed until scrolled to.
+        screens.awaitTextInList(R.string.detail_section_overview)
         screens.shotFull("05-session-detail")
         screens.back()
         screens.await(row)
@@ -93,7 +95,9 @@ class ScreenTourTest {
         val row = hasText(E2e.string(rowLabel)) and hasClickAction()
         screens.scrollTo(row)
         screens.click(row)
-        screens.awaitText(shows)
+        // The opened screen is a lazy list; its awaited section can start below the fold in landscape (the bottom bar
+        // shortens the viewport), so scroll to it rather than only awaiting a composed node.
+        screens.awaitTextInList(shows)
         screens.shotFull(shot)
         screens.back()
         screens.awaitText(R.string.settings_title)
@@ -107,7 +111,8 @@ class ScreenTourTest {
      * is already open.
      */
     private fun visitProbe(screens: Screens) {
-        screens.awaitText(R.string.probe_run)
+        // The Run button sits in the verdict block; in landscape the bottom bar can push it below the fold.
+        screens.awaitTextInList(R.string.probe_run)
         // Wait for the passive capability read at the top of the screen (its verdict chip replaces "Reading this
         // phone…"), so the Root & diagnostics card below the fold is composed by the time we scroll to it.
         screens.await(
@@ -118,8 +123,9 @@ class ScreenTourTest {
         val checkRoot = hasText(E2e.string(R.string.probe_check_root)) and hasClickAction()
         screens.scrollTo(checkRoot)
         screens.click(checkRoot)
-        // The result rows (SELinux, Diag device, Kernel diag support) render once the check has settled.
-        screens.awaitText(R.string.probe_root_selinux, timeoutMs = ROOT_CHECK_MS)
+        // The result rows (SELinux, Diag device, Kernel diag support) render once the check has settled; scroll to them
+        // since in landscape the expanded card can push them below the fold.
+        screens.awaitTextInList(R.string.probe_root_selinux, timeoutMs = ROOT_CHECK_MS)
         screens.shotFull("07c-probe-root-check")
     }
 

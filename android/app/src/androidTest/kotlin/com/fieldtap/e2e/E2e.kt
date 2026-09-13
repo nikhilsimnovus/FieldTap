@@ -371,6 +371,31 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
 
     fun awaitText(@StringRes id: Int, timeoutMs: Long = WAIT_MS): SemanticsNodeInteraction = await(hasLabel(E2e.string(id)), timeoutMs)
 
+    /**
+     * Waits for [matcher], scrolling the screen's first lazy list toward it while it is not yet composed, and returns the
+     * node once it is. A section can begin below the fold in landscape, where the bottom navigation bar shortens the
+     * viewport, and a lazy list composes such an item only once it is scrolled near; this also waits out a screen's
+     * initial load, before its list exists. Like [await] it asserts the node is reachable — it only makes an off-screen
+     * item compose. Fails, naming [matcher], if it is not reached within [timeoutMs].
+     */
+    fun awaitInList(matcher: SemanticsMatcher, timeoutMs: Long = WAIT_MS): SemanticsNodeInteraction {
+        waitFor("in the list: ${matcher.description}", timeoutMs) {
+            if (exists(matcher)) return@waitFor true
+            val lists = compose.onAllNodes(hasScrollToIndexAction())
+            if (lists.fetchSemanticsNodes().isEmpty()) return@waitFor false
+            try {
+                lists.onFirst().performScrollToNode(matcher)
+                true
+            } catch (e: AssertionError) {
+                // The item is not in the list yet (the screen is still loading); try again.
+                false
+            }
+        }
+        return compose.onAllNodes(matcher).onFirst()
+    }
+
+    fun awaitTextInList(@StringRes id: Int, timeoutMs: Long = WAIT_MS): SemanticsNodeInteraction = awaitInList(hasLabel(E2e.string(id)), timeoutMs)
+
     fun click(matcher: SemanticsMatcher, timeoutMs: Long = WAIT_MS) {
         await(matcher, timeoutMs).performClick()
         compose.waitForIdle()
