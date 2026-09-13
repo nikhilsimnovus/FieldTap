@@ -12,7 +12,8 @@
 #      debuggable, no debug automation hook.
 #   2. First run: the disclosure and "Accept and continue", then Live ("Continue" first if the Permissions screen
 #      shows). From API 36, whose emulator modem reports NR, Live must show a serving cell.
-#   3. About shows "Version <name> (<code>)".
+#   3. The Settings tab, its About row, and About showing "Version <name> (<code>)"; Back returns to Settings and the
+#      Live tab returns to Live.
 #   4. A session with ping and download tests: Start session, tick the tests, Start, and "Start anyway" when the
 #      pre-start sheet shows. It records RECORD_SECONDS while a GPS walk is fed with "adb emu geo fix" once a second,
 #      then Stop is confirmed.
@@ -115,8 +116,9 @@ load_strings() {
   S_ACCEPT=$(app_string disclosure_accept)
   S_CONTINUE=$(app_string permissions_continue)
   S_START_SESSION=$(app_string live_start)
-  S_MORE=$(app_string live_action_more)
-  S_ABOUT=$(app_string live_menu_about)
+  S_LIVE=$(app_string nav_live)
+  S_SETTINGS=$(app_string nav_settings)
+  S_ABOUT=$(app_string settings_about)
   S_VERSION=$(app_string about_version "$VERSION_NAME" "$VERSION_CODE")
   S_START_TITLE=$(app_string live_start_dialog_title)
   S_TESTS=$(app_string live_tests_title)
@@ -242,6 +244,37 @@ tap_on() {
     return 1
   fi
   tap_matched "$name"
+}
+
+# swipe_up  one upward swipe over the content area, to bring rows below the fold into view. The screen size comes from
+# "wm size", so it works on both the Pixel 7 and the small default emulator; a fallback covers a size that cannot be read.
+swipe_up() {
+  local size w h
+  size=$(dsh wm size 2> /dev/null | sed -n 's/.*: *\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' | tail -n 1)
+  read -r w h <<< "$size"
+  [ -n "${w:-}" ] && [ -n "${h:-}" ] || { w=1080; h=2000; }
+  dsh input swipe "$((w / 2))" "$((h * 65 / 100))" "$((w / 2))" "$((h * 30 / 100))" 400 > /dev/null || true
+  sleep 1
+}
+
+# scroll_to NAME SECONDS MODE PATTERN [MODE PATTERN]...  like wait_for, but swipes up between dumps until an alternative
+# matches or the list stops moving. Sets MATCHED, TAP_X and TAP_Y like wait_for. Returns 1 on the deadline or once two
+# dumps in a row are identical (the list can go no further and nothing matched).
+scroll_to() {
+  local name=$1 seconds=$2 deadline found previous="" current
+  shift 2
+  deadline=$(($(date +%s) + seconds))
+  while :; do
+    if dump_window "$name" && found=$(find_node "$OUT/windows/$name.xml" "$@"); then
+      read -r MATCHED TAP_X TAP_Y <<< "$found"
+      return 0
+    fi
+    current=$(cksum "$OUT/windows/$name.xml" 2> /dev/null | awk '{print $1}')
+    if [ -n "$previous" ] && [ "$current" = "$previous" ]; then return 1; fi
+    previous=$current
+    swipe_up
+    [ "$(date +%s)" -lt "$deadline" ] || return 1
+  done
 }
 
 remember_pid() { dsh pidof "$PKG" >> "$raw/pids.txt" 2> /dev/null || true; }
@@ -392,8 +425,15 @@ first_run() {
 }
 
 about() {
-  tap_on 04-menu 30 desc "$S_MORE" || return 1
-  tap_on 04-menu-open 20 text "$S_ABOUT" || return 1
+  # About lives on the Settings tab now (a row at the foot of the list), not Live's overflow. Open the tab, scroll to the
+  # About row, open it, then Back to the Settings root and the Live tab back to Live.
+  tap_on 04-settings 30 text "$S_SETTINGS" || return 1
+  if ! scroll_to 04-settings-list 30 has "$S_ABOUT"; then
+    shot 04-settings-list
+    fail "the Settings tab did not show the About row, see windows/04-settings-list.xml"
+    return 1
+  fi
+  tap_matched 04-settings-list
   if wait_for 04-about 30 text "$S_VERSION"; then
     ok "About shows \"$S_VERSION\""
   else
@@ -402,9 +442,15 @@ about() {
   shot 04-about
   dsh input keyevent KEYCODE_BACK > /dev/null || true
   sleep 2
+  if ! wait_for 04-settings-back 30 has "$S_ABOUT"; then
+    shot 04-settings-back
+    fail "Back from About did not return to the Settings tab"
+    return 1
+  fi
+  tap_on 04-live 30 text "$S_LIVE" || return 1
   if ! wait_for 04-back 30 text "$S_START_SESSION"; then
     shot 04-back
-    fail "Back from About did not return to Live"
+    fail "the Live tab did not return to Live"
     return 1
   fi
 }
