@@ -400,8 +400,8 @@ private val LabelGap: Dp = Spacing.Xxs
 /** The zones sit behind the line as a hint of the scale, never as strong as the line or a level's swatch. */
 private const val ZONE_ALPHA: Float = 0.12f
 
-/** The accent RSRP line's area fill: a faint wash of the line colour under it. */
-private const val AREA_FILL_ALPHA: Float = 0.08f
+/** The accent RSRP line's area fill: a soft indigo wash under the line (the Momentum trend fill). */
+private const val AREA_FILL_ALPHA: Float = 0.14f
 
 /** Before a trend exists (0–1 samples) the bands are barely tinted, so the panel does not read as a full pastel wash. */
 private const val ZONE_ALPHA_IDLE: Float = 0.05f

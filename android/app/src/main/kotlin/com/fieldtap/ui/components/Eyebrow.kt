@@ -7,7 +7,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -20,14 +19,14 @@ import com.fieldtap.ui.theme.Spacing
 import com.fieldtap.ui.theme.StatusTone
 
 /**
- * The calm **section label** above a metric or a section ("Serving cell · NR SA", "Last 5 min",
- * "Median NR RSRP"). Clearsheet renders it **verbatim, sentence case** — no uppercase, no letter-spacing,
- * nothing shouting — in `onSurfaceVariant`, replacing heavy title rows while staying quiet.
+ * The Momentum **mini-label** above a metric or a section ("Serving cell · NR SA", "Last 5 min",
+ * "Median NR RSRP"). It is rendered **uppercase and letter-spaced** in `onSurfaceVariant` (see
+ * [SectionLabel]) — the small-caps overline of the mockup — so callers pass ordinary sentence-case strings
+ * and the component does the uppercasing; TalkBack still hears the natural-case text.
  *
  * Pass [heading] `= true` when it leads a section, so it becomes a TalkBack heading users can jump
  * between; leave it false when it labels a value inline (the hosting tile/row already reads the whole
  * phrase). [tone] colours the label for a section that carries a state; the default is `onSurfaceVariant`.
- * The [text] is shown exactly as given, so a caller writes it in the case it should appear.
  */
 @Composable
 fun Eyebrow(
@@ -38,7 +37,8 @@ fun Eyebrow(
 ) {
     val color = tone?.let { FieldTapDesign.colors.status(it).color } ?: MaterialTheme.colorScheme.onSurfaceVariant
     Text(
-        text = text,
+        // The Momentum mini-label is uppercase + tracked (see SectionLabel); TalkBack still hears natural case.
+        text = text.uppercase(),
         style = SectionLabel,
         color = color,
         maxLines = 2,
@@ -68,11 +68,11 @@ fun EyebrowTag(
 ) {
     val family = tone?.let { FieldTapDesign.colors.status(it) }
     val content = family?.color ?: MaterialTheme.colorScheme.onSurfaceVariant
-    val border = family?.color ?: MaterialTheme.colorScheme.outline
+    val border = family?.color ?: MaterialTheme.colorScheme.outlineVariant
     Surface(
         modifier = modifier,
         shape = ShapeRoles.Pill,
-        color = Color.Transparent,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         contentColor = content,
         border = BorderStroke(Sizes.HairlineWidth, border),
     ) {

@@ -8,7 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Proves the "Clearsheet" palette numerically: WCAG AA for text (4.5:1) and 3:1 for graphical marks, in
+ * Proves the "Momentum" palette numerically: WCAG AA for text (4.5:1) and 3:1 for graphical marks, in
  * light and dark, on the surfaces each thing is actually placed on.
  *
  * Three surface sets:
@@ -174,10 +174,10 @@ class ThemeContrastTest {
     }
 
     /**
-     * The tightest pairs of the Clearsheet palette (DESIGN.md §2.6), guarded explicitly against a
-     * regression that would drop them below the accessibility floor. The signal fills, edges and content
-     * are kept verbatim from the report route; the surfaces changed, so these are the pairs to watch. The
-     * comment on each line is the computed WCAG ratio.
+     * The tightest pairs of the Momentum palette (DESIGN.md §2.6), guarded explicitly against a regression
+     * that would drop them below the accessibility floor. The signal fills, edges and content are kept
+     * verbatim from the report route; the surfaces are Momentum's white cards on a cool ground, so these
+     * are the pairs to watch. The comment on each line is the computed WCAG ratio.
      */
     @Test
     fun theTightestFloorsAreGuarded() {
@@ -187,20 +187,36 @@ class ThemeContrastTest {
         val well = FieldTapColorSchemes.Light.surfaceContainerHigh
         val darkCard = FieldTapColorSchemes.Dark.surfaceContainerLow
         val darkChip = FieldTapColorSchemes.Dark.surfaceContainerHighest
-        // outline #74777E on the light canvas = 4.22 (ghost-chip / card hairline / focus ring that must read).
+        // outline #737B8B on the cool light ground = 3.76 (card hairline / focus ring / chip border that must read).
         expect("light outline on background", FieldTapColorSchemes.Light.outline, background, Contrast.AA_GRAPHICS)
-        // Signal FAIR edge #B8660B on a light card = 4.25 (the pale FAIR fill relies on the edge stroke).
+        // Signal FAIR edge #B8660B on a white card = 4.25 (the pale FAIR fill relies on the edge stroke).
         expect("light FAIR edge on card", SignalColors.Light.fair.edge, card, Contrast.AA_GRAPHICS)
-        // Signal POOR edge #F0443E on a dark card = 4.40 (the lifted dark red keeps its meter boundary).
+        // Signal POOR edge #F0443E on a dark card = 4.64 (the lifted dark red keeps its meter boundary).
         expect("dark POOR edge on card", SignalColors.Dark.poor.edge, darkCard, Contrast.AA_GRAPHICS)
-        // Chart SINR line #6D53B5 on the light well = 5.18 (the muted violet reads on the chart recess).
+        // Chart SINR line #674EAD on the light well = 5.63 (the muted violet reads on the chart recess).
         expect("light chart SINR on well", FieldTapColors.Light.chartSinr, well, Contrast.AA_GRAPHICS)
-        // Signal GOOD content #46691A on the light chip track = 5.49 (the tightest signal text pair).
+        // Signal GOOD content #46691A on the light chip track = 5.25 (the tightest signal text pair).
         expect("light GOOD content on chip", SignalColors.Light.good.content, chip, Contrast.AA_TEXT)
-        // Signal POOR content #FF8A80 on the dark chip track = 6.05.
+        // Signal POOR content #FF8A80 on the dark chip track = 6.21.
         expect("dark POOR content on chip", SignalColors.Dark.poor.content, darkChip, Contrast.AA_TEXT)
-        // onSurfaceVariant on the light chip track = 7.41 (the label/secondary-text floor).
+        // onSurfaceVariant #565E70 on the light chip track = 5.36 (the label/secondary-text floor).
         expect("light onSurfaceVariant on chip", FieldTapColorSchemes.Light.onSurfaceVariant, chip, Contrast.AA_TEXT)
+        // Momentum quality pills, the tightest soft-fill text pairs:
+        // EXCELLENT #15803D on #DCFCE7 = 4.57, GOOD #4D7C0F on #ECFCCB = 4.60.
+        expect("light EXCELLENT pill text", SignalColors.Light.excellent.onPillContainer, SignalColors.Light.excellent.pillContainer, Contrast.AA_TEXT)
+        expect("light GOOD pill text", SignalColors.Light.good.onPillContainer, SignalColors.Light.good.pillContainer, Contrast.AA_TEXT)
+        assertNoFailures()
+    }
+
+    /** Every quality pill's text meets AA on its own soft fill, in both themes (the Momentum quality chip / hero pill). */
+    @Test
+    fun qualityPillsMeetAa() {
+        for (t in themes) {
+            val levels = SignalQuality.entries.map { it.name to t.colors.signal.of(it) } + ("UNKNOWN" to t.colors.signal.unknown)
+            for ((name, level) in levels) {
+                expect("${t.name} $name pill text/fill", level.onPillContainer, level.pillContainer, Contrast.AA_TEXT)
+            }
+        }
         assertNoFailures()
     }
 

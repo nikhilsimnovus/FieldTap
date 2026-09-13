@@ -201,8 +201,8 @@ fun MetricTile(
         // The hero is an open block on the canvas, not a card.
         isHero -> Box(modifier = modifier.then(semantics)) { body() }
         // Non-hero tiles are bordered wells: a 1 px hairline, no shadow.
-        onClick != null -> Surface(onClick = onClick, modifier = modifier.then(semantics), shape = ShapeRoles.Tile, color = container, border = cardHairline(), content = body)
-        else -> Surface(modifier = modifier.then(semantics), shape = ShapeRoles.Tile, color = container, border = cardHairline(), content = body)
+        onClick != null -> Surface(onClick = onClick, modifier = modifier.then(semantics), shape = ShapeRoles.Tile, color = container, shadowElevation = tileShadowElevation(), border = cardHairline(), content = body)
+        else -> Surface(modifier = modifier.then(semantics), shape = ShapeRoles.Tile, color = container, shadowElevation = tileShadowElevation(), border = cardHairline(), content = body)
     }
 }
 
@@ -242,6 +242,7 @@ fun SecondaryMetricTile(
         modifier = modifier.clearAndSetSemantics { contentDescription = description },
         shape = ShapeRoles.Tile,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shadowElevation = tileShadowElevation(),
         border = cardHairline(),
     ) {
         if (notReported) {

@@ -1,7 +1,6 @@
 package com.fieldtap.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,7 +24,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
@@ -76,10 +74,11 @@ data class SignalQualityLabels(
 }
 
 /**
- * A quality level as a **ghost chip**: a transparent pill with a 1 px `outline` border, a leading signal
- * swatch and its word ("Good"). Colour lives in the swatch and the word, never a filled background, so a
- * chip stays calm on a busy screen and colour is never the only cue. [quality] null shows the neutral
- * swatch (for "No value").
+ * A quality level as the Momentum **quality pill**: a soft tinted fill in the level's hue
+ * ([SignalLevelColors] `pillContainer` / `onPillContainer`, AA), a leading signal dot (the exact report
+ * `fill` over its `edge`) and the level word ("Excellent"). The soft fill is the friendly, glanceable
+ * Momentum look; the word and the dot mean colour is never the only cue. [quality] null shows the neutral
+ * tint (for "No value").
  *
  * @param label the level's word, see [SignalQualityLabels]; a list row may add the value ("Good −92").
  */
@@ -93,14 +92,13 @@ fun SignalQualityChip(
     Surface(
         modifier = modifier,
         shape = ShapeRoles.Pill,
-        color = Color.Transparent,
-        contentColor = level.content,
-        border = BorderStroke(Sizes.HairlineWidth, MaterialTheme.colorScheme.outline),
+        color = level.pillContainer,
+        contentColor = level.onPillContainer,
     ) {
         Row(
             modifier = Modifier
-                .heightIn(min = Sizes.BadgeMinHeight)
-                .padding(start = Spacing.Sm, end = Spacing.Sm + Spacing.Xxs),
+                .heightIn(min = Sizes.BadgeMinHeight + Spacing.Xs)
+                .padding(start = Spacing.Sm + Spacing.Xxs, top = Spacing.Xxs, end = Spacing.Md, bottom = Spacing.Xxs),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.Xs + Spacing.Xxs),
         ) {
@@ -112,8 +110,8 @@ fun SignalQualityChip(
             )
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = level.content,
+                style = MaterialTheme.typography.labelLarge,
+                color = level.onPillContainer,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

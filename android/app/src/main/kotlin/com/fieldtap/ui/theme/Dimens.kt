@@ -82,6 +82,13 @@ object Sizes {
     val TileCompactMinWidth: Dp = 120.dp
 
     val PrimaryButtonHeight: Dp = 64.dp
+
+    /** The serving-RSRP donut hero (the ring gauge on Live). The centred value auto-sizes to fit its hole. */
+    val DonutHero: Dp = 132.dp
+
+    /** A smaller donut for a session-detail summary or a dense header. */
+    val DonutCompact: Dp = 96.dp
+
     val ChartPanelHeight: Dp = 128.dp
 
     /** The RSRP panel when the SINR panel folds to one line, so the trend takes the room SINR leaves. */
@@ -154,16 +161,20 @@ object Sizes {
 }
 
 /**
- * Depth tokens. `tonalElevation` is always **0**; depth is hairline-led — a 1 px hairline plus a whisper
- * of shadow in light, and the hairline plus the lift of `surfaceContainerLow` over the canvas in dark (no
- * shadow), see the card recipes in `DESIGN.md`. Read as `Elevation.Card`.
+ * Depth tokens. `tonalElevation` is always **0**; Momentum depth is **shadow-led in light** — a real but
+ * soft shadow lifts white cards off the cool ground (never flat) — and **lift-led in dark**, where the
+ * card's own colour over the near-black ground plus a 1 px hairline carries the edge (shadows do not read
+ * on a true-dark canvas). See the card recipes in `DESIGN.md`. Read as `Elevation.Card`.
  */
 object Elevation {
-    /** Resting cards, tiles, rows. */
-    val Card: Dp = 2.dp
+    /** Resting cards and the hero card: a visible, soft shadow in light. */
+    val Card: Dp = 6.dp
 
     /** Sheets, dialogs, menus, the floating action bar, the top bar once content scrolls under it. */
-    val Raised: Dp = 8.dp
+    val Raised: Dp = 12.dp
+
+    /** Metric tiles and wells: a gentler lift than a full card, so a tile inside a card does not shout. */
+    val Tile: Dp = 3.dp
 
     /** No shadow (chart wells, dark surfaces where shadow does not read). */
     val Flat: Dp = 0.dp

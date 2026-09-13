@@ -17,7 +17,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -32,10 +31,10 @@ import com.fieldtap.ui.theme.StatusTone
 import com.fieldtap.ui.theme.tabular
 
 /**
- * A short state as a **ghost chip**: transparent fill, a 1 px `outline` border, and the tone carried by a
- * leading mark and the word — "In service" (SUCCESS), "Mobile data off" (WARNING), "GPS lost" (ERROR),
- * "5G icon on" (INFO), "Paused in a privacy zone" (INFO). The filled background is reserved for the
- * recording state, so a screen of ghost chips stays calm and colour is never the only cue.
+ * A short state as a Momentum **soft pill**: a white (dark: elevated) fill with a 1 px `outlineVariant`
+ * hairline, the tone carried by a leading mark and the word — "In service" (SUCCESS), "Mobile data off"
+ * (WARNING), "GPS lost" (ERROR), "5G icon on" (INFO), "Paused in a privacy zone" (INFO). The pill stays
+ * calm on the ground or on a card, and colour is never the only cue (there is always a mark and a word).
  *
  * For states shown side by side: the Live screen's service, data, 5G icon and GPS line (in a `FlowRow`
  * with [Spacing.Sm] gaps), or a check's level on the Readiness screen. It is not clickable; a state with a
@@ -61,9 +60,9 @@ fun StatusChip(
     Surface(
         modifier = modifier.then(semantics),
         shape = ShapeRoles.Pill,
-        color = Color.Transparent,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         contentColor = family.color,
-        border = BorderStroke(Sizes.HairlineWidth, MaterialTheme.colorScheme.outline),
+        border = BorderStroke(Sizes.HairlineWidth, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Row(
             modifier = Modifier

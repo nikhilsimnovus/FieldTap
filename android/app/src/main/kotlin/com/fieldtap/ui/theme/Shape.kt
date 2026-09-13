@@ -7,15 +7,16 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
 
 /**
- * Material 3 shapes, tightened for the crisp "analytics document" feel: cards are 16 dp, tiles and
- * controls 12 dp, sheets 24 dp.
+ * Material 3 shapes for the **Momentum** feel: generously rounded. Section cards are 24 dp, tiles and
+ * wells 18 dp, controls 16 dp, sheets 28 dp, small controls and fields 14 dp. Rounder than the old
+ * analytics-document scale — the calm scroll of soft rounded cards is a signature of the look.
  */
 val FieldTapShapes: Shapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(14.dp),
-    large = RoundedCornerShape(16.dp),
-    extraLarge = RoundedCornerShape(24.dp),
+    extraSmall = RoundedCornerShape(10.dp),
+    small = RoundedCornerShape(14.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(28.dp),
 )
 
 /**
@@ -24,9 +25,9 @@ val FieldTapShapes: Shapes = Shapes(
  */
 object ShapeRoles {
     /** Metric tiles / wells, list rows with a background, chart panels. */
-    val Tile: Shape = FieldTapShapes.small
+    val Tile: Shape = FieldTapShapes.medium
 
-    /** Section cards, banners, the limits statement, the floating action bar. */
+    /** Section cards, banners, the limits statement, the floating action bar, the hero card. */
     val Card: Shape = FieldTapShapes.large
 
     /** Dialogs and the top of bottom sheets. */
@@ -36,12 +37,12 @@ object ShapeRoles {
      * Text fields and menus. It is Material's own default for text fields, so `OutlinedTextField` needs
      * no shape argument.
      */
-    val Field: Shape = FieldTapShapes.extraSmall
+    val Field: Shape = FieldTapShapes.small
 
-    /** Buttons: 12 dp rounded rectangles, not pills, for the confident analytics look. */
-    val Control: Shape = RoundedCornerShape(12.dp)
+    /** Buttons: 16 dp friendly rounded rectangles, the big primary button included. */
+    val Control: Shape = RoundedCornerShape(16.dp)
 
-    /** Age badges, quality chips, ghost chips, the cadence pill, identity tags. */
+    /** Age badges, quality pills, ghost chips, the cadence pill, identity tags. */
     val Pill: Shape = CircleShape
 
     /** Signal-meter zones, bar tracks and the spectrum strip — squared, meter-like. */
