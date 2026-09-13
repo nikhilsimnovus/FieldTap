@@ -376,7 +376,9 @@ class EndToEndWalkTest {
         screens.await(row)
         screens.shot("12-sessions")
         screens.click(row)
-        screens.awaitText(R.string.detail_section_overview)
+        // Scroll to the Overview section: on a small screen the tall headline can push it below the fold, where a lazy
+        // list has not composed it (a no-op scroll when it is already on screen).
+        screens.awaitTextInList(R.string.detail_section_overview)
         screens.shot("13-session-detail")
 
         val build = hasText(E2e.string(R.string.detail_build_zip)) and hasClickAction()

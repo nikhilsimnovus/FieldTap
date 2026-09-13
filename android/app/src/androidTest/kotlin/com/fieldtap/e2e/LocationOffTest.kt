@@ -145,10 +145,12 @@ class LocationOffTest {
         val row = hasText(SESSION_NAME) and hasClickAction()
         screens.await(row)
         screens.click(row)
-        screens.awaitText(R.string.detail_section_overview)
+        // The dropped-marker banner is the detail's first item and stays at the top; assert it first, then scroll to the
+        // Overview section, which this banner and the tall headline push below the fold on the small API 31 screen.
         screens.await(hasText(E2e.context.resources.getQuantityString(R.plurals.detail_markers_dropped, 1, 1)))
         result["detail_markers_dropped_banner"] = true
         save()
+        screens.awaitTextInList(R.string.detail_section_overview)
         screens.shotFull("22-session-detail-marker-dropped")
         screens.back()
         screens.await(row)
