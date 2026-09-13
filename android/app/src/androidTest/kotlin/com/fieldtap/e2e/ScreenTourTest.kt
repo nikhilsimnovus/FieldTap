@@ -64,7 +64,8 @@ class ScreenTourTest {
         val cancel = E2e.string(R.string.action_cancel)
         screens.click((hasText(cancel) or hasContentDescription(cancel)) and hasClickAction() and hasAnyAncestor(isDialog()))
 
-        screens.click(hasContentDescription(E2e.string(R.string.live_action_sessions)) and hasClickAction())
+        // Sessions tab: the recorded walk and its detail.
+        screens.openTab(R.string.nav_sessions)
         val row = hasText(sessionName) and hasClickAction()
         screens.await(row)
         screens.shotFull("04-sessions")
@@ -73,32 +74,39 @@ class ScreenTourTest {
         screens.shotFull("05-session-detail")
         screens.back()
         screens.await(row)
-        screens.back()
-        screens.awaitLive()
 
-        visit(screens, R.string.live_menu_readiness, R.string.readiness_checks_title, "06-readiness")
+        // Settings tab, and every screen it reaches: the readiness check, the test targets and About.
+        screens.openTab(R.string.nav_settings)
+        screens.awaitText(R.string.settings_section_measurement)
+        screens.shotFull("08-settings")
+        visitFromSettings(screens, R.string.settings_readiness, R.string.readiness_checks_title, "06-readiness")
+        visitFromSettings(screens, R.string.settings_test_targets, R.string.settings_ping_heading, "08b-test-targets")
+        visitFromSettings(screens, R.string.settings_about, R.string.about_account_title, "09-about")
+
+        // Diagnostics tab: the capability probe and its root check.
+        screens.openTab(R.string.nav_diagnostics)
         visitProbe(screens)
-        visitSettings(screens)
-        visit(screens, R.string.live_menu_about, R.string.about_account_title, "09-about")
     }
 
-    /** Opens [menuItem] from Live, waits for [shows], takes [shot] at every scroll position and returns to Live. */
-    private fun visit(screens: Screens, @StringRes menuItem: Int, @StringRes shows: Int, shot: String) {
-        screens.openMenuItem(menuItem)
+    /** From the Settings root, scrolls to [rowLabel] and opens it, waits for [shows], shots [shot] full length, then returns to Settings. */
+    private fun visitFromSettings(screens: Screens, @StringRes rowLabel: Int, @StringRes shows: Int, shot: String) {
+        val row = hasText(E2e.string(rowLabel)) and hasClickAction()
+        screens.scrollTo(row)
+        screens.click(row)
         screens.awaitText(shows)
         screens.shotFull(shot)
         screens.back()
-        screens.awaitLive()
+        screens.awaitText(R.string.settings_title)
     }
 
     /**
-     * The Capability screen at every scroll position, then its explicit read-only "Check with root" run. The check
-     * gains no root and never hangs (a hard timeout in the runner); on the CI emulator it settles quickly, and the
-     * SELinux/`/dev/diag`/kernel-config rows it fills in appear whatever `su` allowed. Both looks are captured full
-     * length, so the artifact shows the honest per-phone verdict the panel reaches.
+     * The Capability screen (the Diagnostics tab) at every scroll position, then its explicit read-only "Check with
+     * root" run. The check gains no root and never hangs (a hard timeout in the runner); on the CI emulator it settles
+     * quickly, and the SELinux/`/dev/diag`/kernel-config rows it fills in appear whatever `su` allowed. Both looks are
+     * captured full length, so the artifact shows the honest per-phone verdict the panel reaches. The Diagnostics tab
+     * is already open.
      */
     private fun visitProbe(screens: Screens) {
-        screens.openMenuItem(R.string.live_menu_probe)
         screens.awaitText(R.string.probe_run)
         // Wait for the passive capability read at the top of the screen (its verdict chip replaces "Reading this
         // phone…"), so the Root & diagnostics card below the fold is composed by the time we scroll to it.
@@ -113,24 +121,6 @@ class ScreenTourTest {
         // The result rows (SELinux, Diag device, Kernel diag support) render once the check has settled.
         screens.awaitText(R.string.probe_root_selinux, timeoutMs = ROOT_CHECK_MS)
         screens.shotFull("07c-probe-root-check")
-        screens.back()
-        screens.awaitLive()
-    }
-
-    /** Settings, then the Test targets screen its tests card opens, each at every scroll position. */
-    private fun visitSettings(screens: Screens) {
-        screens.openMenuItem(R.string.live_menu_settings)
-        screens.awaitText(R.string.settings_section_measurement)
-        screens.shotFull("08-settings")
-        val targets = hasText(E2e.string(R.string.settings_test_targets)) and hasClickAction()
-        screens.scrollTo(targets)
-        screens.click(targets)
-        screens.awaitText(R.string.settings_ping_heading)
-        screens.shotFull("08b-test-targets")
-        screens.back()
-        screens.awaitText(R.string.settings_title)
-        screens.back()
-        screens.awaitLive()
     }
 
     private companion object {

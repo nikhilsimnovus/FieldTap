@@ -504,11 +504,8 @@ fun LiveScreen(
     viewModel: LiveViewModel,
     onOpenSessions: () -> Unit,
     onOpenReadiness: () -> Unit,
-    onOpenProbe: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenAbout: () -> Unit,
+    onOpenDisclosure: () -> Unit,
     modifier: Modifier = Modifier,
-    onOpenDisclosure: () -> Unit = onOpenSettings,
     onOpenSession: (String) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -527,9 +524,6 @@ fun LiveScreen(
         onConsumeMessage = viewModel::consumeMessage,
         onOpenSessions = onOpenSessions,
         onOpenReadiness = onOpenReadiness,
-        onOpenProbe = onOpenProbe,
-        onOpenSettings = onOpenSettings,
-        onOpenAbout = onOpenAbout,
         onOpenDisclosure = onOpenDisclosure,
         onOpenSession = onOpenSession,
         nowWallMs = viewModel::nowWallMs,
@@ -653,9 +647,6 @@ private data class LiveActions(
     val onConsumeMessage: (Long) -> Unit,
     val onOpenSessions: () -> Unit,
     val onOpenReadiness: () -> Unit,
-    val onOpenProbe: () -> Unit,
-    val onOpenSettings: () -> Unit,
-    val onOpenAbout: () -> Unit,
     val onOpenDisclosure: () -> Unit,
     val onOpenSession: (String) -> Unit,
     val nowWallMs: () -> Long,
@@ -825,8 +816,9 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
 }
 
 /**
- * Walk mode as an on-off icon, Sessions and the overflow menu: in the top bar upright, at the top of the action rail in
- * landscape. Walk mode sat in a card above the trend, where its explanation took the trend's place on the first screen.
+ * Walk mode as an on-off icon and a small overflow with "How walk mode works": in the top bar upright, at the top of the
+ * action rail in landscape. Sessions, Diagnostics, Settings and About are reached from the bottom tab bar now, so the top
+ * bar keeps only Live's own controls. Walk mode sat in a card above the trend, where its explanation took the trend's place.
  */
 @Composable
 private fun LiveBarActions(state: LiveUiState, actions: LiveActions, onWalkModeDetails: () -> Unit) {
@@ -837,16 +829,11 @@ private fun LiveBarActions(state: LiveUiState, actions: LiveActions, onWalkModeD
         onCheckedChange = actions.onWalkModeChange,
         stateDescription = stringResource(if (state.walkMode) R.string.live_walk_mode_on else R.string.live_walk_mode_off),
     )
-    TopBarAction(
-        icon = FieldTapIcons.Sessions,
-        contentDescription = stringResource(R.string.live_action_sessions),
-        onClick = actions.onOpenSessions,
-    )
-    LiveOverflowMenu(actions, onWalkModeDetails)
+    LiveOverflowMenu(onWalkModeDetails)
 }
 
 @Composable
-private fun LiveOverflowMenu(actions: LiveActions, onWalkModeDetails: () -> Unit) {
+private fun LiveOverflowMenu(onWalkModeDetails: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         TopBarAction(
@@ -855,25 +842,9 @@ private fun LiveOverflowMenu(actions: LiveActions, onWalkModeDetails: () -> Unit
             onClick = { expanded = true },
         )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            OverflowItem(R.string.live_menu_readiness, FieldTapIcons.CheckCircle) {
-                expanded = false
-                actions.onOpenReadiness()
-            }
-            OverflowItem(R.string.live_menu_probe, FieldTapIcons.Search) {
-                expanded = false
-                actions.onOpenProbe()
-            }
             OverflowItem(R.string.live_walk_mode_details_action, FieldTapIcons.Walk) {
                 expanded = false
                 onWalkModeDetails()
-            }
-            OverflowItem(R.string.live_menu_settings, FieldTapIcons.Tune) {
-                expanded = false
-                actions.onOpenSettings()
-            }
-            OverflowItem(R.string.live_menu_about, FieldTapIcons.Info) {
-                expanded = false
-                actions.onOpenAbout()
             }
         }
     }
@@ -2346,9 +2317,6 @@ private val PreviewActions = LiveActions(
     onConsumeMessage = {},
     onOpenSessions = {},
     onOpenReadiness = {},
-    onOpenProbe = {},
-    onOpenSettings = {},
-    onOpenAbout = {},
     onOpenDisclosure = {},
     onOpenSession = {},
     nowWallMs = { 1_789_050_600_000L },

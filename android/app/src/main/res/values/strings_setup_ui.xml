@@ -402,6 +402,13 @@
     <string name="settings_consent_withdraw_confirm">Withdraw</string>
     <string name="settings_consent_withdrawn">Consent withdrawn</string>
 
+    <!-- About & help section: rows that open the Readiness check and the About screen. -->
+    <string name="settings_section_help">About &amp; help</string>
+    <string name="settings_readiness">Readiness check</string>
+    <string name="settings_readiness_supporting">Check this phone is ready to record a walk.</string>
+    <string name="settings_about">About 5gto6G FieldTap</string>
+    <string name="settings_about_supporting">Version, account and what FieldTap reads.</string>
+
     <!-- About. -->
     <string name="about_title">About</string>
     <!-- %1$s is the version name and %2$d the version code. -->

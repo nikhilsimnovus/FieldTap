@@ -484,9 +484,9 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
         click(hasContentDescription(E2e.string(R.string.action_back)) and hasClickAction())
     }
 
-    /** Waits for Live by its Sessions action, which is in the top bar upright and in the action rail in landscape, where Live has no title. */
+    /** Waits for Live by its Start button, which is present on Live in both orientations (as "Start session" or, in the landscape rail, "Start" described "Start session"). */
     fun awaitLive(timeoutMs: Long = WAIT_MS) {
-        await(hasContentDescription(E2e.string(R.string.live_action_sessions)) and hasClickAction(), timeoutMs)
+        await(E2e.startButton(), timeoutMs)
     }
 
     /**
@@ -511,9 +511,14 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
         assertTrue(message, bounds.top >= list.top && bounds.bottom <= list.bottom)
     }
 
-    /** Opens [label] from the Live screen's overflow menu. */
+    /** Opens [label] from the Live screen's overflow menu (only "How walk mode works" lives there now). */
     fun openMenuItem(@StringRes label: Int) {
         click(hasContentDescription(E2e.string(R.string.live_action_more)) and hasClickAction())
+        click(hasText(E2e.string(label)) and hasClickAction())
+    }
+
+    /** Taps a bottom-navigation tab by its label (Live, Sessions, Diagnostics, Settings). */
+    fun openTab(@StringRes label: Int) {
         click(hasText(E2e.string(label)) and hasClickAction())
     }
 

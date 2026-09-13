@@ -187,7 +187,7 @@ class SessionsViewModel(private val graph: AppGraph) : ViewModel() {
 fun SessionsScreen(
     viewModel: SessionsViewModel,
     onOpenSession: (dirName: String) -> Unit,
-    onBack: () -> Unit,
+    onGoToLive: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -196,7 +196,7 @@ fun SessionsScreen(
         state = state,
         nowUtcMs = viewModel.nowWallMs(),
         onOpenSession = onOpenSession,
-        onBack = onBack,
+        onGoToLive = onGoToLive,
         onRefresh = viewModel::refresh,
         modifier = modifier,
     )
@@ -382,7 +382,7 @@ private fun SessionsContent(
     state: SessionsUiState,
     nowUtcMs: Long,
     onOpenSession: (String) -> Unit,
-    onBack: () -> Unit,
+    onGoToLive: () -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -391,11 +391,10 @@ private fun SessionsContent(
     Scaffold(
         modifier = modifier.nestedScroll(topBarScroll.connection),
         topBar = {
+            // A tab root: no Back arrow — the bottom tab bar is how you leave.
             FieldTapTopBar(
                 scroll = topBarScroll,
                 title = stringResource(R.string.sessions_title),
-                onNavigateUp = onBack,
-                navigateUpContentDescription = stringResource(R.string.action_back),
                 actions = {
                     TopBarAction(
                         icon = FieldTapIcons.Refresh,
@@ -429,7 +428,7 @@ private fun SessionsContent(
                         message = stringResource(R.string.sessions_empty_message),
                         icon = FieldTapIcons.Sessions,
                         actionLabel = stringResource(R.string.sessions_empty_action),
-                        onAction = onBack,
+                        onAction = onGoToLive,
                     )
                 }
                 else -> SessionsList(state = state, nowUtcMs = nowUtcMs, onOpenSession = onOpenSession)
@@ -1188,7 +1187,7 @@ private fun SessionsContentPreview() {
             ),
             nowUtcMs = started + 3_600_000,
             onOpenSession = {},
-            onBack = {},
+            onGoToLive = {},
             onRefresh = {},
         )
     }
@@ -1202,7 +1201,7 @@ private fun SessionsEmptyPreview() {
             state = SessionsUiState(loading = false, sessions = emptyList(), storage = null),
             nowUtcMs = 1_789_050_600_000L,
             onOpenSession = {},
-            onBack = {},
+            onGoToLive = {},
             onRefresh = {},
         )
     }

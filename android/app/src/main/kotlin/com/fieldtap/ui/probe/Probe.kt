@@ -366,8 +366,8 @@ class ProbeViewModel(private val graph: AppGraph) : ViewModel() {
 @Composable
 fun ProbeScreen(
     viewModel: ProbeViewModel,
-    onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val problem by viewModel.problem.collectAsStateWithLifecycle()
@@ -451,7 +451,7 @@ internal fun ProbeContent(
     state: ProbeUiState,
     problem: ProbeProblem?,
     exporting: Boolean,
-    onBack: () -> Unit,
+    onBack: (() -> Unit)? = null,
     onRun: () -> Unit,
     onStop: () -> Unit,
     onExport: () -> Unit,

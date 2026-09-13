@@ -286,8 +286,9 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel,
-    onBack: () -> Unit,
     onOpenTestTargets: () -> Unit,
+    onOpenReadiness: () -> Unit,
+    onOpenAbout: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -348,9 +349,10 @@ fun SettingsScreen(
         loadFailed = loadFailed,
         phone = phoneUi,
         preciseLocation = phone.preciseLocation,
-        onBack = onBack,
         onRetryLoad = viewModel::retryLoad,
         onOpenTestTargets = onOpenTestTargets,
+        onOpenReadiness = onOpenReadiness,
+        onOpenAbout = onOpenAbout,
         onTestsDefaultOnChange = viewModel::setTestsDefaultOn,
         onWalkModeDefaultChange = viewModel::setWalkModeDefault,
         onInstantUpdatesChange = { turnOn ->
@@ -466,9 +468,10 @@ internal fun SettingsContent(
     loadFailed: Boolean,
     phone: PermissionUi,
     preciseLocation: Boolean,
-    onBack: () -> Unit,
     onRetryLoad: () -> Unit,
     onOpenTestTargets: () -> Unit,
+    onOpenReadiness: () -> Unit,
+    onOpenAbout: () -> Unit,
     onTestsDefaultOnChange: (Boolean) -> Unit,
     onWalkModeDefaultChange: (Boolean) -> Unit,
     onInstantUpdatesChange: (Boolean) -> Unit,
@@ -485,7 +488,8 @@ internal fun SettingsContent(
     val loadFailedText = stringResource(R.string.settings_load_failed)
     val tryAgainText = stringResource(R.string.setup_try_again)
     val settings = state.settings
-    SetupScreenScaffold(title = titleText, modifier = modifier, onBack = onBack, snackbarHostState = snackbarHostState) {
+    // Settings is a tab root, so SetupScreenScaffold shows no Back arrow (onBack left at its null default).
+    SetupScreenScaffold(title = titleText, modifier = modifier, snackbarHostState = snackbarHostState) {
         if (settings == null) {
             item(key = "loading") {
                 if (loadFailed) {
@@ -536,7 +540,29 @@ internal fun SettingsContent(
             item(key = "consent") {
                 ConsentCard(consent = settings.consent, onWithdraw = onWithdrawConsent, modifier = Modifier.setupContentWidth())
             }
+            item(key = "help") {
+                HelpCard(onOpenReadiness = onOpenReadiness, onOpenAbout = onOpenAbout, modifier = Modifier.setupContentWidth())
+            }
         }
+    }
+}
+
+/** The Readiness check and About, each a row opening a screen of its own. About and Readiness were reached from Live's overflow before the tabs. */
+@Composable
+private fun HelpCard(onOpenReadiness: () -> Unit, onOpenAbout: () -> Unit, modifier: Modifier) {
+    SectionCard(title = stringResource(R.string.settings_section_help), icon = FieldTapIcons.Info, modifier = modifier) {
+        NavigationRow(
+            title = stringResource(R.string.settings_readiness),
+            onClick = onOpenReadiness,
+            supportingText = stringResource(R.string.settings_readiness_supporting),
+            icon = FieldTapIcons.CheckCircle,
+        )
+        NavigationRow(
+            title = stringResource(R.string.settings_about),
+            onClick = onOpenAbout,
+            supportingText = stringResource(R.string.settings_about_supporting),
+            icon = FieldTapIcons.Info,
+        )
     }
 }
 
@@ -923,9 +949,10 @@ private fun SettingsPreview() {
             loadFailed = false,
             phone = PermissionUi(PermissionStatus.NOT_REQUESTED, PermissionAction.REQUEST),
             preciseLocation = true,
-            onBack = {},
             onRetryLoad = {},
             onOpenTestTargets = {},
+            onOpenReadiness = {},
+            onOpenAbout = {},
             onTestsDefaultOnChange = {},
             onWalkModeDefaultChange = {},
             onInstantUpdatesChange = {},

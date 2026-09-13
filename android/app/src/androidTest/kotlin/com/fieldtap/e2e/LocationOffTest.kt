@@ -141,7 +141,7 @@ class LocationOffTest {
         result["outcome_markers_dropped"] = outcome.markersDropped
         save()
 
-        screens.click(hasContentDescription(E2e.string(R.string.live_action_sessions)) and hasClickAction())
+        screens.openTab(R.string.nav_sessions)
         val row = hasText(SESSION_NAME) and hasClickAction()
         screens.await(row)
         screens.click(row)
@@ -152,7 +152,8 @@ class LocationOffTest {
         screens.shotFull("22-session-detail-marker-dropped")
         screens.back()
         screens.await(row)
-        screens.back()
+        // Sessions is a tab root now: leave it by the Live tab, not a Back arrow.
+        screens.openTab(R.string.nav_live)
         screens.awaitText(R.string.live_title)
     }
 

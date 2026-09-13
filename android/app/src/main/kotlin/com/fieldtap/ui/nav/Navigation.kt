@@ -1,9 +1,20 @@
 package com.fieldtap.ui.nav
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -11,15 +22,27 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.dropUnlessResumed
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavDestination
+import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.navigation.navigation
+import com.fieldtap.R
 import com.fieldtap.app.AppGraph
 import com.fieldtap.core.privacy.Consent
 import com.fieldtap.platform.Permissions
@@ -41,16 +64,27 @@ import com.fieldtap.ui.sessions.SessionsViewModel
 import com.fieldtap.ui.settings.SettingsScreen
 import com.fieldtap.ui.settings.SettingsViewModel
 import com.fieldtap.ui.settings.TestTargetsScreen
+import com.fieldtap.ui.theme.FieldTapIcons
+import com.fieldtap.ui.theme.Sizes
 import kotlinx.coroutines.CancellationException
 
 /**
  * Routes. Directory names are `[A-Za-z0-9._-]` only, so they go into a route unescaped.
+ *
+ * The app is a four-tab shell (a Material bottom [NavigationBar], [TopTab]): Live, Sessions, Diagnostics and
+ * Settings. Each tab is a nested graph with its own start and its own back stack; detail screens push on top
+ * within their tab. Onboarding ([DISCLOSURE], [PERMISSIONS]) and the disclosure-declined About
+ * ([ABOUT_ONBOARDING]) are top-level, with no bottom bar.
  *
  * Owner: workstream `ui-session`.
  */
 object Routes {
     const val DISCLOSURE: String = "disclosure"
     const val PERMISSIONS: String = "permissions"
+
+    /** The disclosure-declined About: the one screen usable before consent, so it carries no bottom bar. */
+    const val ABOUT_ONBOARDING: String = "about_onboarding"
+
     const val LIVE: String = "live"
     const val SESSIONS: String = "sessions"
     const val SESSION_DETAIL: String = "sessions/{dirName}"
@@ -62,9 +96,39 @@ object Routes {
     const val TEST_TARGETS: String = "settings/tests"
     const val ABOUT: String = "about"
 
+    /** The nested graph that holds each tab's root and its detail screens. */
+    const val LIVE_GRAPH: String = "live_graph"
+    const val SESSIONS_GRAPH: String = "sessions_graph"
+    const val DIAGNOSTICS_GRAPH: String = "diagnostics_graph"
+    const val SETTINGS_GRAPH: String = "settings_graph"
+
     const val ARG_DIR_NAME: String = "dirName"
 
     fun sessionDetail(dirName: String): String = "sessions/$dirName"
+}
+
+/**
+ * The four top-level tabs, in bar order: Live (the serving cell), Sessions (recorded walks), Diagnostics
+ * (the capability probe) and Settings. Each names the nested [graph] it selects, the [root] destination it
+ * pops to when re-tapped, its [icon] and its [label].
+ *
+ * Owner: workstream `ui-session`.
+ */
+enum class TopTab(
+    val graph: String,
+    val root: String,
+    val icon: ImageVector,
+    @StringRes val label: Int,
+) {
+    LIVE(Routes.LIVE_GRAPH, Routes.LIVE, FieldTapIcons.SignalBars, R.string.nav_live),
+    SESSIONS(Routes.SESSIONS_GRAPH, Routes.SESSIONS, FieldTapIcons.Sessions, R.string.nav_sessions),
+    DIAGNOSTICS(Routes.DIAGNOSTICS_GRAPH, Routes.PROBE, FieldTapIcons.Pulse, R.string.nav_diagnostics),
+    SETTINGS(Routes.SETTINGS_GRAPH, Routes.SETTINGS, FieldTapIcons.Tune, R.string.nav_settings),
+    ;
+
+    companion object {
+        val graphRoutes: Set<String> = entries.map { it.graph }.toSet()
+    }
 }
 
 /**
@@ -86,20 +150,21 @@ object StartDestination {
 }
 
 /**
- * The whole navigation graph. Start destination: [Routes.DISCLOSURE] until consent is current
- * (`Consent.isCurrent(settings.consent)`), then [Routes.PERMISSIONS] until precise location is granted,
- * then [Routes.LIVE]. Readiness never refuses a start (decision 7): Live runs the checks itself and opens
- * [Routes.READINESS] only when the user asks for it.
- * Screens of workstream `ui-setup` are called here with the signatures in their files.
+ * The whole navigation graph, hosted under a [Scaffold] whose bottom bar is the four-tab [FieldTapBottomBar].
+ * Start destination: [Routes.DISCLOSURE] until consent is current (`Consent.isCurrent(settings.consent)`),
+ * then [Routes.PERMISSIONS] until precise location is granted, then the Live tab. Readiness never refuses a
+ * start (decision 7): Live runs the checks itself and opens [Routes.READINESS] only when the user asks for it.
  *
- * - The start destination is decided once, from settings read off the main thread, and survives
- *   recreation; until it is known the screen shows only the background, so no location prompt can appear
- *   before the disclosure.
+ * - The start destination is decided once, from settings read off the main thread, and survives recreation;
+ *   until it is known the screen shows only the background, so no location prompt can appear before the
+ *   disclosure.
+ * - The bottom bar shows on the four tab graphs (roots and their detail screens) and hides on onboarding, so
+ *   a declined disclosure leaves only the [Routes.ABOUT_ONBOARDING] screen usable.
+ * - Tapping a tab switches to its root and preserves that tab's back stack (`saveState`/`restoreState`);
+ *   re-tapping the current tab pops it to its root. Live is the back-stack base, so system Back walks a tab's
+ *   own stack, then returns to Live, then exits.
  * - Onboarding steps opened from Live (review consent, allow location) return to Live when done instead of
- *   stacking a second Live.
- * - Every navigation callback is dropped unless its screen is resumed, so a double tap during a
- *   transition cannot push a screen twice or pop past it.
- * - Declining the disclosure leaves the app usable for About only.
+ *   stacking a second Live; every navigation callback is dropped unless its screen is resumed.
  *
  * Owner: workstream `ui-session`.
  */
@@ -129,80 +194,208 @@ fun FieldTapNavHost(
         Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
         return
     }
+    // The Live start route resolves inside the Live tab graph.
+    val navStart = if (start == Routes.LIVE) Routes.LIVE_GRAPH else start
 
-    NavHost(navController = navController, startDestination = start, modifier = modifier) {
-        composable(Routes.DISCLOSURE) {
-            val viewModel: OnboardingViewModel = viewModel(factory = graphViewModelFactory(graph) { OnboardingViewModel(it) })
-            DisclosureScreen(
-                viewModel = viewModel,
-                onAccepted = dropUnlessResumed {
-                    val next = StartDestination.afterDisclosure(Permissions.preciseLocationGranted(context))
-                    navController.completeOnboardingStep(Routes.DISCLOSURE, next)
+    val currentEntry by navController.currentBackStackEntryAsState()
+    val currentDestination = currentEntry?.destination
+    val showBottomBar = currentDestination.isInTabGraph()
+
+    Scaffold(
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.background,
+        // The tabs and each screen's top bar / floating action bar own the system-bar insets themselves.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        bottomBar = {
+            if (showBottomBar) {
+                FieldTapBottomBar(
+                    currentDestination = currentDestination,
+                    onSelectTab = { tab -> navController.selectTab(tab) },
+                )
+            }
+        },
+    ) { innerPadding ->
+        NavHost(
+            navController = navController,
+            startDestination = navStart,
+            // Pad for the bottom bar and mark its insets consumed, so a screen's own navigationBarsPadding
+            // (the floating action bar) does not add it twice and docks directly above the bar.
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding),
+        ) {
+            composable(Routes.DISCLOSURE) {
+                val viewModel: OnboardingViewModel = viewModel(factory = graphViewModelFactory(graph) { OnboardingViewModel(it) })
+                DisclosureScreen(
+                    viewModel = viewModel,
+                    onAccepted = dropUnlessResumed {
+                        val next = StartDestination.afterDisclosure(Permissions.preciseLocationGranted(context))
+                        navController.completeOnboardingStep(Routes.DISCLOSURE, next)
+                    },
+                    onDeclined = dropUnlessResumed { navController.navigate(Routes.ABOUT_ONBOARDING) { launchSingleTop = true } },
+                )
+            }
+            composable(Routes.PERMISSIONS) {
+                PermissionsScreen(
+                    onDone = dropUnlessResumed { navController.completeOnboardingStep(Routes.PERMISSIONS, Routes.LIVE) },
+                )
+            }
+            composable(Routes.ABOUT_ONBOARDING) {
+                AboutScreen(appInfo = graph.appInfo, onBack = dropUnlessResumed { navController.popBackStack() })
+            }
+
+            navigation(startDestination = Routes.LIVE, route = Routes.LIVE_GRAPH) {
+                composable(Routes.LIVE) {
+                    val viewModel: LiveViewModel = viewModel(factory = graphViewModelFactory(graph) { LiveViewModel(it) })
+                    LiveScreen(
+                        viewModel = viewModel,
+                        onOpenSessions = dropUnlessResumed { navController.selectTab(TopTab.SESSIONS) },
+                        onOpenReadiness = dropUnlessResumed { navController.navigate(Routes.READINESS) { launchSingleTop = true } },
+                        onOpenDisclosure = dropUnlessResumed { navController.navigate(Routes.DISCLOSURE) { launchSingleTop = true } },
+                        onOpenSession = { dirName ->
+                            navController.selectTab(TopTab.SESSIONS)
+                            navController.navigate(Routes.sessionDetail(dirName)) { launchSingleTop = true }
+                        },
+                    )
+                }
+            }
+
+            navigation(startDestination = Routes.SESSIONS, route = Routes.SESSIONS_GRAPH) {
+                composable(Routes.SESSIONS) {
+                    val viewModel: SessionsViewModel = viewModel(factory = graphViewModelFactory(graph) { SessionsViewModel(it) })
+                    SessionsScreen(
+                        viewModel = viewModel,
+                        onOpenSession = { dirName -> navController.openSessionDetail(dirName) },
+                        // Sessions is a tab root, so this is not a Back arrow: it is the empty state's "start a walk".
+                        onGoToLive = dropUnlessResumed { navController.selectTab(TopTab.LIVE) },
+                    )
+                }
+                composable(
+                    route = Routes.SESSION_DETAIL,
+                    arguments = listOf(navArgument(Routes.ARG_DIR_NAME) { type = NavType.StringType }),
+                ) { entry ->
+                    val dirName = entry.arguments?.getString(Routes.ARG_DIR_NAME).orEmpty()
+                    val viewModel: SessionDetailViewModel =
+                        viewModel(factory = graphViewModelFactory(graph) { SessionDetailViewModel(it, dirName) })
+                    SessionDetailScreen(
+                        viewModel = viewModel,
+                        onBack = dropUnlessResumed { navController.popBackStack() },
+                    )
+                }
+            }
+
+            navigation(startDestination = Routes.PROBE, route = Routes.DIAGNOSTICS_GRAPH) {
+                composable(Routes.PROBE) {
+                    val viewModel: ProbeViewModel = viewModel(factory = graphViewModelFactory(graph) { ProbeViewModel(it) })
+                    ProbeScreen(viewModel = viewModel)
+                }
+            }
+
+            navigation(startDestination = Routes.SETTINGS, route = Routes.SETTINGS_GRAPH) {
+                composable(Routes.SETTINGS) {
+                    val viewModel: SettingsViewModel = viewModel(factory = graphViewModelFactory(graph) { SettingsViewModel(it) })
+                    SettingsScreen(
+                        viewModel = viewModel,
+                        onOpenTestTargets = dropUnlessResumed { navController.navigate(Routes.TEST_TARGETS) { launchSingleTop = true } },
+                        onOpenReadiness = dropUnlessResumed { navController.navigate(Routes.READINESS) { launchSingleTop = true } },
+                        onOpenAbout = dropUnlessResumed { navController.navigate(Routes.ABOUT) { launchSingleTop = true } },
+                    )
+                }
+                composable(Routes.TEST_TARGETS) {
+                    val viewModel: SettingsViewModel = viewModel(factory = graphViewModelFactory(graph) { SettingsViewModel(it) })
+                    TestTargetsScreen(viewModel = viewModel, onBack = dropUnlessResumed { navController.popBackStack() })
+                }
+                composable(Routes.READINESS) {
+                    val viewModel: ReadinessViewModel = viewModel(factory = graphViewModelFactory(graph) { ReadinessViewModel(it) })
+                    ReadinessScreen(viewModel = viewModel, onBack = dropUnlessResumed { navController.popBackStack() })
+                }
+                composable(Routes.ABOUT) {
+                    AboutScreen(appInfo = graph.appInfo, onBack = dropUnlessResumed { navController.popBackStack() })
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The Momentum bottom bar: the four [TopTab]s over the Momentum surface with a soft top hairline, the
+ * selected item in the indigo `primaryContainer` indicator pill. The label always shows, in Hanken, and each
+ * item announces its name and selected state to TalkBack (the [NavigationBarItem]'s own role and selection).
+ */
+@Composable
+private fun FieldTapBottomBar(currentDestination: NavDestination?, onSelectTab: (TopTab) -> Unit) {
+    val hairline = MaterialTheme.colorScheme.outlineVariant
+    NavigationBar(
+        modifier = Modifier.drawBehind {
+            val stroke = Sizes.HairlineWidth.toPx()
+            drawLine(
+                color = hairline,
+                start = Offset(0f, stroke / 2f),
+                end = Offset(size.width, stroke / 2f),
+                strokeWidth = stroke,
+            )
+        },
+        // The Momentum surface (white in light, the elevated card in dark); no accent tint on chrome.
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        tonalElevation = 0.dp, // Depth is the hairline, not a tint (tonalElevation is 0 everywhere).
+        windowInsets = WindowInsets.navigationBars,
+    ) {
+        val selected = currentDestination.selectedTab()
+        TopTab.entries.forEach { tab ->
+            val isSelected = selected == tab
+            NavigationBarItem(
+                selected = isSelected,
+                onClick = { onSelectTab(tab) },
+                icon = { Icon(imageVector = tab.icon, contentDescription = null) },
+                label = {
+                    Text(
+                        text = stringResource(tab.label),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                    )
                 },
-                onDeclined = dropUnlessResumed { navController.navigate(Routes.ABOUT) { launchSingleTop = true } },
+                alwaysShowLabel = true,
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
             )
         }
-        composable(Routes.PERMISSIONS) {
-            PermissionsScreen(
-                onDone = dropUnlessResumed { navController.completeOnboardingStep(Routes.PERMISSIONS, Routes.LIVE) },
-            )
-        }
-        composable(Routes.LIVE) {
-            val viewModel: LiveViewModel = viewModel(factory = graphViewModelFactory(graph) { LiveViewModel(it) })
-            LiveScreen(
-                viewModel = viewModel,
-                onOpenSessions = dropUnlessResumed { navController.navigate(Routes.SESSIONS) { launchSingleTop = true } },
-                onOpenReadiness = dropUnlessResumed { navController.navigate(Routes.READINESS) { launchSingleTop = true } },
-                onOpenProbe = dropUnlessResumed { navController.navigate(Routes.PROBE) { launchSingleTop = true } },
-                onOpenSettings = dropUnlessResumed { navController.navigate(Routes.SETTINGS) { launchSingleTop = true } },
-                onOpenAbout = dropUnlessResumed { navController.navigate(Routes.ABOUT) { launchSingleTop = true } },
-                onOpenDisclosure = dropUnlessResumed { navController.navigate(Routes.DISCLOSURE) { launchSingleTop = true } },
-                onOpenSession = { dirName -> navController.navigate(Routes.sessionDetail(dirName)) { launchSingleTop = true } },
-            )
-        }
-        composable(Routes.SESSIONS) {
-            val viewModel: SessionsViewModel = viewModel(factory = graphViewModelFactory(graph) { SessionsViewModel(it) })
-            SessionsScreen(
-                viewModel = viewModel,
-                onOpenSession = { dirName -> navController.openSessionDetail(dirName) },
-                onBack = dropUnlessResumed { navController.popBackStack() },
-            )
-        }
-        composable(
-            route = Routes.SESSION_DETAIL,
-            arguments = listOf(navArgument(Routes.ARG_DIR_NAME) { type = NavType.StringType }),
-        ) { entry ->
-            val dirName = entry.arguments?.getString(Routes.ARG_DIR_NAME).orEmpty()
-            val viewModel: SessionDetailViewModel =
-                viewModel(factory = graphViewModelFactory(graph) { SessionDetailViewModel(it, dirName) })
-            SessionDetailScreen(
-                viewModel = viewModel,
-                onBack = dropUnlessResumed { navController.popBackStack() },
-            )
-        }
-        composable(Routes.READINESS) {
-            val viewModel: ReadinessViewModel = viewModel(factory = graphViewModelFactory(graph) { ReadinessViewModel(it) })
-            ReadinessScreen(viewModel = viewModel, onBack = dropUnlessResumed { navController.popBackStack() })
-        }
-        composable(Routes.PROBE) {
-            val viewModel: ProbeViewModel = viewModel(factory = graphViewModelFactory(graph) { ProbeViewModel(it) })
-            ProbeScreen(viewModel = viewModel, onBack = dropUnlessResumed { navController.popBackStack() })
-        }
-        composable(Routes.SETTINGS) {
-            val viewModel: SettingsViewModel = viewModel(factory = graphViewModelFactory(graph) { SettingsViewModel(it) })
-            SettingsScreen(
-                viewModel = viewModel,
-                onBack = dropUnlessResumed { navController.popBackStack() },
-                onOpenTestTargets = dropUnlessResumed { navController.navigate(Routes.TEST_TARGETS) { launchSingleTop = true } },
-            )
-        }
-        composable(Routes.TEST_TARGETS) {
-            val viewModel: SettingsViewModel = viewModel(factory = graphViewModelFactory(graph) { SettingsViewModel(it) })
-            TestTargetsScreen(viewModel = viewModel, onBack = dropUnlessResumed { navController.popBackStack() })
-        }
-        composable(Routes.ABOUT) {
-            AboutScreen(appInfo = graph.appInfo, onBack = dropUnlessResumed { navController.popBackStack() })
-        }
+    }
+}
+
+/** True when [this] destination belongs to one of the four tab graphs (a root or a detail within a tab). */
+private fun NavDestination?.isInTabGraph(): Boolean =
+    this?.hierarchy?.any { it.route in TopTab.graphRoutes } == true
+
+/** The tab whose graph contains [this] destination, or null when it is an onboarding screen. */
+private fun NavDestination?.selectedTab(): TopTab? {
+    val routes = this?.hierarchy?.mapNotNull { it.route }?.toSet() ?: return null
+    return TopTab.entries.firstOrNull { it.graph in routes }
+}
+
+/**
+ * Selects [tab]. When it is already the current tab, pops that tab to its root; otherwise switches to it,
+ * saving the tab being left and restoring [tab]'s own back stack, with Live kept as the back-stack base.
+ */
+private fun NavHostController.selectTab(tab: TopTab) {
+    val current = currentBackStackEntry?.destination.selectedTab()
+    if (current == tab) {
+        popBackStack(tab.root, inclusive = false)
+        return
+    }
+    // Live is the base of the tabbed back stack: popping up to it (saving what is left) keeps system Back
+    // walking a tab's own stack, then returning to Live, then exiting.
+    navigate(tab.graph) {
+        popUpTo(Routes.LIVE) { saveState = true }
+        launchSingleTop = true
+        restoreState = true
     }
 }
 
