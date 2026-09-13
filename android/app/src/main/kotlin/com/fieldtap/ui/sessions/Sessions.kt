@@ -845,45 +845,46 @@ private fun HeadlineStats(meta: SessionMeta, signal: SignalSummary?, modifier: M
     } else {
         stringResource(R.string.detail_row_median_rsrp_unknown)
     }
-    MetricGrid(modifier = modifier.fillMaxWidth(), minCellWidth = Sizes.TileCompactMinWidth, maxColumns = HEADLINE_COLUMNS) {
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Spacing.Md)) {
+        // The session's verdict is the one hero number (numeric.hero): a full-width open block the eye lands on first,
+        // with the level beside its label; the three supporting stats step down to compact tiles below.
         MetricTile(
             label = medianLabel,
             value = signal?.medianRsrpDbm?.toString(),
             unit = if (signal != null) dbm else null,
-            emphasis = MetricEmphasis.COMPACT,
-            contentDescription = if (signal != null) listOf(medianLabel, "${signal.medianRsrpDbm} $dbm", labels.of(quality)).joinToString(", ") else null,
-            // The level under the value: beside the label, in a half-width tile, it left the label no room.
-            footer = if (signal != null) {
-                { SignalQualityChip(quality = quality, label = labels.of(quality)) }
-            } else {
-                null
-            },
+            emphasis = MetricEmphasis.HERO,
+            quality = quality,
+            qualityLabel = if (signal != null) labels.of(quality) else null,
+            modifier = Modifier.fillMaxWidth(),
         )
-        MetricTile(
-            label = stringResource(R.string.detail_row_below_fair),
-            value = signal?.let { DisplayTime.percent(it.belowFairPct) }?.let { stringResource(R.string.percent_value, it) },
-            emphasis = MetricEmphasis.COMPACT,
-            valueTone = signal?.let { SessionsPresentation.belowFairTone(it.belowFairPct) },
-        )
-        MetricTile(
-            label = stringResource(R.string.detail_row_duration),
-            value = StopReasons.durationMs(meta.startedUtcMs, meta.stoppedUtcMs)?.let { Formats.elapsed(it) },
-            emphasis = MetricEmphasis.COMPACT,
-        )
-        MetricTile(
-            label = stringResource(R.string.detail_section_gaps),
-            value = gaps.toString(),
-            emphasis = MetricEmphasis.COMPACT,
-            valueTone = SessionsPresentation.gapsTone(gaps),
-        )
+        MetricGrid(minCellWidth = Sizes.TileCompactMinWidth, maxColumns = SECONDARY_STAT_COLUMNS) {
+            MetricTile(
+                label = stringResource(R.string.detail_row_below_fair),
+                value = signal?.let { DisplayTime.percent(it.belowFairPct) }?.let { stringResource(R.string.percent_value, it) },
+                emphasis = MetricEmphasis.COMPACT,
+                valueTone = signal?.let { SessionsPresentation.belowFairTone(it.belowFairPct) },
+            )
+            MetricTile(
+                label = stringResource(R.string.detail_row_duration),
+                value = StopReasons.durationMs(meta.startedUtcMs, meta.stoppedUtcMs)?.let { Formats.elapsed(it) },
+                emphasis = MetricEmphasis.COMPACT,
+            )
+            MetricTile(
+                label = stringResource(R.string.detail_section_gaps),
+                value = gaps.toString(),
+                emphasis = MetricEmphasis.COMPACT,
+                valueTone = SessionsPresentation.gapsTone(gaps),
+            )
+        }
     }
 }
 
 /**
- * Four headline tiles of at least [Sizes.TileCompactMinWidth] each: two columns on a phone at any font scale up to 1.3, one
- * row in landscape or on a tablet. At 148 dp a tile at font scale 1.3 needed 192 dp, so a phone showed one tile a row.
+ * The three supporting stats under the hero, each at least [Sizes.TileCompactMinWidth]: one row in landscape or on a
+ * tablet, two columns on a phone at any font scale up to 1.3. At 148 dp a tile at font scale 1.3 needed 192 dp, so a
+ * phone showed one tile a row.
  */
-private const val HEADLINE_COLUMNS: Int = 4
+private const val SECONDARY_STAT_COLUMNS: Int = 3
 
 @Composable
 private fun OverviewCard(detail: SessionDetail, meta: SessionMeta, modifier: Modifier = Modifier) {

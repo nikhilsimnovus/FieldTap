@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -587,6 +588,8 @@ private fun VerdictBlock(
                     text = ProbePresentation.tier1Detail(verdict),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface,
+                    // A wide window (landscape, tablet) caps prose at a readable measure rather than one long line.
+                    modifier = Modifier.widthIn(max = Sizes.MaxTextWidth),
                 )
             }
             capability.loadFailed -> {
@@ -605,15 +608,18 @@ private fun VerdictBlock(
 
 @Composable
 private fun RunControls(running: Boolean, progress: String?, hasReport: Boolean, onRun: () -> Unit, onStop: () -> Unit) {
+    // A wide window (landscape, tablet) caps prose and the primary button at a readable measure so neither
+    // stretches the full content width; on a phone the cap is wider than the content, so nothing changes.
+    val proseWidth = Modifier.widthIn(max = Sizes.MaxTextWidth)
     when {
         running -> {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            LinearProgressIndicator(modifier = proseWidth.fillMaxWidth())
             Text(
                 text = progress ?: stringResource(R.string.probe_starting),
                 style = MaterialTheme.typography.bodyLarge.tabular(),
                 color = MaterialTheme.colorScheme.onSurface,
             )
-            SetupParagraph(text = stringResource(R.string.probe_keep_open))
+            SetupParagraph(text = stringResource(R.string.probe_keep_open), modifier = proseWidth)
             OutlinedButton(
                 onClick = onStop,
                 shape = ShapeRoles.Control,
@@ -632,12 +638,12 @@ private fun RunControls(running: Boolean, progress: String?, hasReport: Boolean,
             }
         }
         else -> {
-            SetupParagraph(text = stringResource(R.string.probe_intro))
-            SetupParagraph(text = stringResource(R.string.probe_keep_open))
+            SetupParagraph(text = stringResource(R.string.probe_intro), modifier = proseWidth)
+            SetupParagraph(text = stringResource(R.string.probe_keep_open), modifier = proseWidth)
             Button(
                 onClick = onRun,
                 shape = ShapeRoles.Control,
-                modifier = Modifier
+                modifier = proseWidth
                     .fillMaxWidth()
                     .heightIn(min = Sizes.PrimaryButtonHeight),
             ) {

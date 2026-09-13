@@ -296,7 +296,7 @@
     <string name="prestart_blocked_message">Fix the required items to start a session.</string>
     <string name="prestart_start_anyway">Start anyway</string>
     <string name="prestart_tag_required">Required</string>
-    <string name="prestart_tag_recommended">Recommended</string>
+    <string name="prestart_tag_recommended">Worth fixing</string>
 
     <string name="issue_no_consent_title">Consent is needed</string>
     <string name="issue_no_consent_detail">Sessions start only after you agree to the current recording notice.</string>

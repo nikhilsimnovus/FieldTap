@@ -83,7 +83,7 @@
     <string name="readiness_checked_at">Checked at %1$s</string>
     <string name="readiness_checks_title">Checks</string>
     <string name="readiness_level_ok">OK</string>
-    <string name="readiness_level_advice">Recommended</string>
+    <string name="readiness_level_advice">Worth fixing</string>
     <string name="readiness_level_blocker">Required</string>
     <string name="readiness_check_precise_location">Precise location</string>
     <string name="readiness_check_location_enabled">Location</string>

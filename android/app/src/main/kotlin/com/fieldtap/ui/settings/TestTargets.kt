@@ -49,6 +49,7 @@ import com.fieldtap.ui.setup.SetupScreenScaffold
 import com.fieldtap.ui.setup.SetupSubheading
 import com.fieldtap.ui.setup.setupContentWidth
 import com.fieldtap.ui.theme.FieldTapIcons
+import com.fieldtap.ui.theme.ShapeRoles
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
 import com.fieldtap.ui.theme.StatusTone
@@ -307,7 +308,7 @@ private fun TestTargetsSaveBar(unsaved: Boolean, canSave: Boolean, onSave: () ->
             } else {
                 Spacer(modifier = Modifier.weight(1f))
             }
-            Button(onClick = onSave, enabled = canSave, modifier = Modifier.heightIn(min = Sizes.MinTouchTarget)) {
+            Button(onClick = onSave, enabled = canSave, shape = ShapeRoles.Control, modifier = Modifier.heightIn(min = Sizes.MinTouchTarget)) {
                 Text(text = stringResource(R.string.settings_tests_save))
             }
         }

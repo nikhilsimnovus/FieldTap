@@ -54,6 +54,7 @@ import com.fieldtap.ui.setup.setupContentWidth
 import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.FieldTapIcons
 import com.fieldtap.ui.theme.Formats
+import com.fieldtap.ui.theme.ShapeRoles
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
 import com.fieldtap.ui.theme.StatusTone
@@ -476,6 +477,7 @@ private fun SoakCard(
                 Button(
                     onClick = onStart,
                     enabled = blockedReason == null,
+                    shape = ShapeRoles.Control,
                     modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
                 ) {
                     Text(text = stringResource(R.string.soak_start))
@@ -490,7 +492,7 @@ private fun SoakCard(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 SetupParagraph(text = stringResource(R.string.soak_running_instruction))
-                OutlinedButton(onClick = onCancel, modifier = Modifier.heightIn(min = Sizes.MinTouchTarget)) {
+                OutlinedButton(onClick = onCancel, shape = ShapeRoles.Control, modifier = Modifier.heightIn(min = Sizes.MinTouchTarget)) {
                     Text(text = stringResource(R.string.soak_stop))
                 }
             }
@@ -501,6 +503,7 @@ private fun SoakCard(
                 Button(
                     onClick = onStart,
                     enabled = blockedReason == null,
+                    shape = ShapeRoles.Control,
                     modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
                 ) {
                     Text(text = stringResource(R.string.soak_run_again))

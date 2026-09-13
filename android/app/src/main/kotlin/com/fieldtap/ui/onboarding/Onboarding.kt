@@ -760,6 +760,9 @@ internal fun PermissionsContent(
             }
         }
         item(key = "location") {
+            // The blocking permission: its Allow is the screen's one accent primary while Continue is still
+            // disabled, and its "Required" badge carries the attention tone until it is granted.
+            val locationSatisfied = location.status == PermissionStatus.GRANTED
             PermissionRationale(
                 icon = FieldTapIcons.Location,
                 title = locationTitle,
@@ -767,8 +770,10 @@ internal fun PermissionsContent(
                 status = location.status,
                 statusText = locationStatusText,
                 tagText = requiredTag,
+                tagTone = if (locationSatisfied) StatusTone.NEUTRAL else StatusTone.WARNING,
                 actionLabel = locationActionText,
                 onAction = onLocationAction,
+                emphasizeAction = !locationSatisfied,
                 modifier = Modifier.setupContentWidth(),
             )
         }
@@ -843,7 +848,7 @@ private fun PermissionsContinueBar(enabled: Boolean, onContinue: () -> Unit) {
             } else {
                 Spacer(modifier = Modifier.weight(1f))
             }
-            Button(onClick = onContinue, enabled = enabled, modifier = Modifier.heightIn(min = Sizes.MinTouchTarget)) {
+            Button(onClick = onContinue, enabled = enabled, shape = ShapeRoles.Control, modifier = Modifier.heightIn(min = Sizes.MinTouchTarget)) {
                 Text(text = stringResource(R.string.permissions_continue))
             }
         }

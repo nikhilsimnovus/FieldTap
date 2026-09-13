@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -29,6 +30,7 @@ import com.fieldtap.ui.theme.FieldTapIcons
 import com.fieldtap.ui.theme.ShapeRoles
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
+import com.fieldtap.ui.theme.StatusTone
 
 /** Where a runtime permission stands. */
 enum class PermissionStatus {
@@ -48,13 +50,18 @@ enum class PermissionStatus {
  * One permission on the Permissions screen (and in Settings for "Instant cell updates"): what it is,
  * one sentence on why FieldTap needs it, where it stands, and the button that fixes it.
  *
- * - NOT_REQUESTED: a tonal button, for example "Allow".
- * - DENIED: an outlined button, for example "Ask again".
- * - DENIED_PERMANENTLY: an outlined button with the open-in-new icon, for example "Open app settings".
+ * - NOT_REQUESTED: a tonal button, for example "Allow" (the accent filled button when [emphasizeAction]).
+ * - DENIED: an outlined button, for example "Ask again" (the accent filled button when [emphasizeAction]).
+ * - DENIED_PERMANENTLY: an outlined button with the open-in-new icon, for example "Open app settings"
+ *   (the accent filled button, icon kept, when [emphasizeAction]).
  * - GRANTED: no button; the status line says so with a check.
  *
  * @param tagText "Required" or "Optional".
  * @param statusText "Allowed", "Not allowed yet", "Refused".
+ * @param tagTone the tone of the [tagText] pill: NEUTRAL by default; pass WARNING so a mandatory,
+ *   not-yet-satisfied permission's "Required" badge reads as an attention tag.
+ * @param emphasizeAction promotes the fix button to the screen's one accent filled primary (design §3),
+ *   for the blocking permission that gates the flow. The optional permission stays a tonal button.
  */
 @Composable
 fun PermissionRationale(
@@ -65,10 +72,13 @@ fun PermissionRationale(
     statusText: String,
     modifier: Modifier = Modifier,
     tagText: String? = null,
+    tagTone: StatusTone = StatusTone.NEUTRAL,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    emphasizeAction: Boolean = false,
 ) {
     val colors = FieldTapDesign.colors
+    val tagColors = colors.status(tagTone)
     val (statusIcon, statusColor) = when (status) {
         PermissionStatus.GRANTED -> FieldTapIcons.CheckCircle to colors.success.color
         PermissionStatus.NOT_REQUESTED -> FieldTapIcons.Info to MaterialTheme.colorScheme.onSurfaceVariant
@@ -109,7 +119,7 @@ fun PermissionRationale(
                             .semantics { heading() },
                     )
                     if (tagText != null) {
-                        Surface(shape = ShapeRoles.Pill, color = colors.neutral.container, contentColor = colors.neutral.onContainer) {
+                        Surface(shape = ShapeRoles.Pill, color = tagColors.container, contentColor = tagColors.onContainer) {
                             Text(
                                 text = tagText,
                                 style = MaterialTheme.typography.labelSmall,
@@ -131,19 +141,36 @@ fun PermissionRationale(
                     val buttonModifier = Modifier
                         .padding(top = Spacing.Xs)
                         .heightIn(min = Sizes.MinTouchTarget)
-                    if (status == PermissionStatus.NOT_REQUESTED) {
-                        FilledTonalButton(onClick = onAction, shape = ShapeRoles.Control, modifier = buttonModifier) {
+                    val showOpenIcon = status == PermissionStatus.DENIED_PERMANENTLY
+                    when {
+                        // The blocking permission's fix is the one accent filled primary, so the eye lands on it.
+                        emphasizeAction -> Button(
+                            onClick = onAction,
+                            shape = ShapeRoles.Control,
+                            modifier = buttonModifier,
+                            contentPadding = if (showOpenIcon) ButtonDefaults.ButtonWithIconContentPadding else ButtonDefaults.ContentPadding,
+                        ) {
+                            if (showOpenIcon) {
+                                Icon(
+                                    imageVector = FieldTapIcons.OpenInNew,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(ButtonDefaults.IconSize),
+                                )
+                                Box(modifier = Modifier.size(ButtonDefaults.IconSpacing))
+                            }
                             Text(text = actionLabel)
                         }
-                    } else {
-                        OutlinedButton(
+                        status == PermissionStatus.NOT_REQUESTED -> FilledTonalButton(onClick = onAction, shape = ShapeRoles.Control, modifier = buttonModifier) {
+                            Text(text = actionLabel)
+                        }
+                        else -> OutlinedButton(
                             onClick = onAction,
                             shape = ShapeRoles.Control,
                             modifier = buttonModifier,
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                             contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
                         ) {
-                            if (status == PermissionStatus.DENIED_PERMANENTLY) {
+                            if (showOpenIcon) {
                                 Icon(
                                     imageVector = FieldTapIcons.OpenInNew,
                                     contentDescription = null,
@@ -211,8 +238,10 @@ private fun PermissionRationalePreview() {
             status = PermissionStatus.NOT_REQUESTED,
             statusText = "Not allowed yet",
             tagText = "Required",
+            tagTone = StatusTone.WARNING,
             actionLabel = "Allow",
             onAction = {},
+            emphasizeAction = true,
         )
         PermissionRationale(
             icon = FieldTapIcons.Notifications,

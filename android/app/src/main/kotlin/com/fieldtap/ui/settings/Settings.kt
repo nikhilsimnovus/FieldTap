@@ -643,6 +643,7 @@ private fun ZonesCard(
         ) {
             FilledTonalButton(
                 onClick = onAddZoneHere,
+                shape = ShapeRoles.Control,
                 contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
                 modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
             ) {
@@ -650,7 +651,7 @@ private fun ZonesCard(
                 Spacer(modifier = Modifier.width(ButtonDefaults.IconSpacing))
                 Text(text = stringResource(R.string.settings_zone_add_here))
             }
-            OutlinedButton(onClick = onAddZoneByCoordinates, modifier = Modifier.heightIn(min = Sizes.MinTouchTarget)) {
+            OutlinedButton(onClick = onAddZoneByCoordinates, shape = ShapeRoles.Control, modifier = Modifier.heightIn(min = Sizes.MinTouchTarget)) {
                 Text(text = stringResource(R.string.settings_zone_add_coordinates))
             }
         }
@@ -707,6 +708,7 @@ private fun ConsentCard(consent: ConsentRecord?, onWithdraw: () -> Unit, modifie
             SetupParagraph(text = stringResource(R.string.settings_consent_given, SetupFormats.date(consent.grantedUtcMs)))
             OutlinedButton(
                 onClick = onWithdraw,
+                shape = ShapeRoles.Control,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                 modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
             ) {
