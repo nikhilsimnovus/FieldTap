@@ -361,8 +361,6 @@
     <string name="settings_instant_updates_needs_location">It also needs precise location.</string>
     <string name="settings_instant_updates_off_title">Turn off instant cell updates?</string>
     <string name="settings_instant_updates_off_body">Android lets you remove the Phone permission only in FieldTap’s app settings. FieldTap keeps working without it.</string>
-    <string name="settings_walk_mode">Walk mode on by default</string>
-    <string name="settings_walk_mode_supporting">Starts the Live screen with walk mode on.</string>
     <string name="settings_section_zones">Privacy zones</string>
     <string name="settings_zones_intro">In new sessions, logging pauses inside a zone: nothing is written there except that logging paused and resumed. Zone names stay on this phone.</string>
     <string name="settings_zones_empty">No privacy zones yet.</string>
@@ -405,7 +403,7 @@
     <!-- About & help section: rows that open the Readiness check and the About screen. -->
     <string name="settings_section_help">About &amp; help</string>
     <string name="settings_readiness">Readiness check</string>
-    <string name="settings_readiness_supporting">Check this phone is ready to record a walk.</string>
+    <string name="settings_readiness_supporting">Check this phone is ready to record a session.</string>
     <string name="settings_about">About 5gto6G FieldTap</string>
     <string name="settings_about_supporting">Version, account and what FieldTap reads.</string>
 

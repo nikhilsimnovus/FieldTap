@@ -46,13 +46,15 @@ class LivePresentationTest {
     }
 
     @Test
-    fun walkModePromptsOnlyWhenWifiForcesTheLongInterval() {
+    fun theWifiPromptShowsOnlyWhileRecordingAndOnlyWhenWifiForcesTheLongInterval() {
         val wifiOnBattery = DeviceConditions(screenOn = true, charging = false, wifiConnected = true)
-        assertTrue(LivePresentation.showWalkModeWifiPrompt(walkMode = true, conditions = wifiOnBattery))
-        assertFalse(LivePresentation.showWalkModeWifiPrompt(walkMode = false, conditions = wifiOnBattery))
-        assertFalse(LivePresentation.showWalkModeWifiPrompt(walkMode = true, conditions = wifiOnBattery.copy(charging = true)))
-        assertFalse(LivePresentation.showWalkModeWifiPrompt(walkMode = true, conditions = wifiOnBattery.copy(wifiConnected = false)))
-        assertFalse(LivePresentation.showWalkModeWifiPrompt(walkMode = true, conditions = null))
+        assertTrue(LivePresentation.showWifiCadencePrompt(recording = true, conditions = wifiOnBattery))
+        assertFalse("nothing is being recorded, so the cadence costs nothing",
+            LivePresentation.showWifiCadencePrompt(recording = false, conditions = wifiOnBattery))
+        assertFalse("charging restores the 2 s interval",
+            LivePresentation.showWifiCadencePrompt(recording = true, conditions = wifiOnBattery.copy(charging = true)))
+        assertFalse(LivePresentation.showWifiCadencePrompt(recording = true, conditions = wifiOnBattery.copy(wifiConnected = false)))
+        assertFalse(LivePresentation.showWifiCadencePrompt(recording = true, conditions = null))
     }
 
     @Test

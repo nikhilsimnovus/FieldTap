@@ -177,7 +177,6 @@ import kotlinx.coroutines.launch
 data class LiveUiState(
     val live: LiveState,
     val status: SessionStatus,
-    val walkMode: Boolean,
     val testsDefaultOn: Boolean,
     /** The last refusal, until dismissed. */
     val refusal: StartRefusal?,
@@ -238,7 +237,6 @@ data class LiveMessageEvent(val id: Long, val message: LiveMessage)
  * Owner: workstream `ui-session`.
  */
 class LiveViewModel(private val graph: AppGraph) : ViewModel() {
-    private val walkModeChoice = MutableStateFlow<Boolean?>(null)
     private val refusal = MutableStateFlow<StartRefusal?>(null)
     private val prestart = MutableStateFlow<PrestartState>(PrestartState.None)
     private val message = MutableStateFlow<LiveMessageEvent?>(null)
@@ -250,14 +248,13 @@ class LiveViewModel(private val graph: AppGraph) : ViewModel() {
         .catch { emit(null) }
 
     private val screenLocal: Flow<ScreenLocal> =
-        combine(walkModeChoice, refusal, prestart, message) { walk, refused, flow, event -> ScreenLocal(walk, refused, flow, event) }
+        combine(refusal, prestart, message) { refused, flow, event -> ScreenLocal(refused, flow, event) }
 
     val state: StateFlow<LiveUiState> =
         combine(graph.live.state, graph.sessionControl.status, storedSettings, screenLocal, graph.recovery.closed) { live, status, settings, local, recovered ->
             LiveUiState(
                 live = live,
                 status = status,
-                walkMode = local.walkModeChoice ?: settings?.walkModeDefault ?: false,
                 testsDefaultOn = settings?.testsDefaultOn ?: false,
                 refusal = local.refusal,
                 recovered = recovered,
@@ -271,7 +268,6 @@ class LiveViewModel(private val graph: AppGraph) : ViewModel() {
             initialValue = LiveUiState(
                 live = graph.live.state.value,
                 status = graph.sessionControl.status.value,
-                walkMode = false,
                 testsDefaultOn = false,
                 refusal = null,
                 recovered = graph.recovery.closed.value,
@@ -300,11 +296,6 @@ class LiveViewModel(private val graph: AppGraph) : ViewModel() {
         viewModelScope.launch {
             graph.sessionControl.lastOutcome.collect { outcome -> if (outcome != null) onMarkersDropped(outcome.dirName, outcome.markersDropped) }
         }
-    }
-
-    /** Turns walk mode on or off for this screen; until then it follows the Settings default. */
-    fun setWalkMode(on: Boolean) {
-        walkModeChoice.value = on
     }
 
     /** Called from the Start dialog while the screen is visible. */
@@ -466,7 +457,6 @@ class LiveViewModel(private val graph: AppGraph) : ViewModel() {
     }
 
     private data class ScreenLocal(
-        val walkModeChoice: Boolean?,
         val refusal: StartRefusal?,
         val prestart: PrestartState,
         val message: LiveMessageEvent?,
@@ -490,7 +480,7 @@ private suspend fun <T> attempt(block: suspend () -> T): T? = try {
  * The Live screen: serving tile (RAT, PCI, ARFCN, band, RSRP/RSRQ/SINR, PLMN) with its age badge; the
  * NSA NR leg; neighbours; the 5-minute RSRP and SINR chart; the cadence indicator ("2 s cadence" or
  * "10 s cadence", with the reason: screen off, Wi-Fi on while not charging); service, data and 5G icon
- * state; GPS state; the walk-mode toggle; Start (with name, note, place and tests opt-in), Mark (with a
+ * state; GPS state; Start (with name, note, place and tests opt-in), Mark (with a
  * note) and Stop; a line when a listener was refused ("Phone permission not granted: no push updates").
  * With the screen off on battery, signal-strength fill stops, and pocket mode says so.
  * Language never implies decoding or signalling.
@@ -511,7 +501,7 @@ fun LiveScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.recheckReadiness() }
-    WalkModeEffect(enabled = state.walkMode)
+    KeepScreenOnEffect(enabled = state.status !is SessionStatus.Idle)
     val actions = LiveActions(
         onStart = viewModel::start,
         onStartAnyway = viewModel::startAnyway,
@@ -519,7 +509,6 @@ fun LiveScreen(
         onRecheck = viewModel::recheckReadiness,
         onMark = viewModel::mark,
         onStop = viewModel::stop,
-        onWalkModeChange = viewModel::setWalkMode,
         onDismissRefusal = viewModel::dismissRefusal,
         onAcknowledgeRecovered = viewModel::acknowledgeRecovered,
         onConsumeMessage = viewModel::consumeMessage,
@@ -529,8 +518,7 @@ fun LiveScreen(
         onOpenSession = onOpenSession,
         nowWallMs = viewModel::nowWallMs,
     )
-    // Walk mode forces the dark surface; otherwise this follows the system like the activity's theme.
-    FieldTapTheme(darkTheme = state.walkMode || isSystemInDarkTheme()) {
+    FieldTapTheme {
         LiveContent(state = state, actions = actions, modifier = modifier)
     }
 }
@@ -602,20 +590,23 @@ fun SignalChart(
 }
 
 /**
- * Walk mode: while [enabled], keeps the screen on (`FLAG_KEEP_SCREEN_ON`) with a dark surface, and prompts to turn
- * Wi-Fi off or plug in so Android's 2 s interval applies. Clears the flag on dispose. No wake lock.
+ * Keeps the screen on (`FLAG_KEEP_SCREEN_ON`) while a session is recording, and clears the flag on
+ * dispose. No wake lock.
  *
- * It never sets the window brightness. A window brightness overrides adaptive brightness and the user's own slider,
- * so a fixed low level would leave the numbers unreadable in daylight, where walks happen; the dark surface is what
- * saves power on a screen that stays on.
+ * This is not a preference. Android refreshes cell information every 2 s only while the display is
+ * on, and every 10 s once it sleeps, so a session whose screen slept would quietly record a quarter
+ * of the samples it reported being able to take. The flag is held for exactly as long as the
+ * recording, and never outside one.
  *
- * This effect owns the window flag; the dark surface and the Wi-Fi prompt are drawn by [LiveScreen]. Outside an
- * activity (previews) it does nothing.
+ * It never sets the window brightness: a window brightness overrides adaptive brightness and the
+ * user's own slider, which would leave the numbers unreadable in daylight, where drive tests happen.
+ *
+ * Outside an activity (previews) it does nothing.
  *
  * Owner: workstream `ui-session`.
  */
 @Composable
-fun WalkModeEffect(enabled: Boolean) {
+fun KeepScreenOnEffect(enabled: Boolean) {
     val activity = LocalActivity.current
     DisposableEffect(activity, enabled) {
         val window = activity?.window
@@ -642,7 +633,6 @@ private data class LiveActions(
     val onRecheck: () -> Unit,
     val onMark: (String?) -> Unit,
     val onStop: () -> Unit,
-    val onWalkModeChange: (Boolean) -> Unit,
     val onDismissRefusal: () -> Unit,
     val onAcknowledgeRecovered: (String) -> Unit,
     val onConsumeMessage: (Long) -> Unit,
@@ -660,7 +650,6 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
     var startDialogOpen by rememberSaveable { mutableStateOf(false) }
     var markDialogOpen by rememberSaveable { mutableStateOf(false) }
     var stopDialogOpen by rememberSaveable { mutableStateOf(false) }
-    var walkModeDetailsOpen by rememberSaveable { mutableStateOf(false) }
     val buttonState = LivePresentation.buttonState(state.status, state.prestart)
 
     val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -692,7 +681,6 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
     }
 
     val liveTitle = stringResource(R.string.live_title)
-    val openWalkModeDetails = { walkModeDetailsOpen = true }
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
@@ -719,7 +707,7 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
                         FieldTapTopBar(
                             scroll = topBarScroll,
                             title = liveTitle,
-                            actions = { LiveBarActions(state, actions, openWalkModeDetails) },
+                            actions = { LiveBarActions() },
                         )
                     }
                     // Pinned under the bar while a session runs: whether it is collecting stays in view however far the list scrolls.
@@ -754,7 +742,6 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
                             onStart = { startDialogOpen = true },
                             onStop = { stopDialogOpen = true },
                             onMark = { markDialogOpen = true },
-                            onWalkModeDetails = openWalkModeDetails,
                         )
                     }
                 } else {
@@ -769,7 +756,6 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
         StartSessionDialog(
             tests = state.tests,
             testsDefaultOn = state.testsDefaultOn,
-            walkMode = state.walkMode,
             nowWallMs = actions.nowWallMs,
             fullScreen = LivePresentation.actionsBesideContent(window.width, window.height),
             onDismiss = { startDialogOpen = false },
@@ -797,58 +783,16 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
             },
         )
     }
-    if (walkModeDetailsOpen) {
-        AlertDialog(
-            onDismissRequest = { walkModeDetailsOpen = false },
-            confirmButton = {
-                TextButton(onClick = { walkModeDetailsOpen = false }) {
-                    Text(text = stringResource(R.string.live_walk_mode_details_close))
-                }
-            },
-            icon = { Icon(imageVector = FieldTapIcons.Walk, contentDescription = null) },
-            title = { Text(text = stringResource(R.string.live_walk_mode)) },
-            text = { Text(text = stringResource(R.string.live_walk_mode_details)) },
-        )
-    }
     val review = state.prestart as? PrestartState.Review
     if (review != null) {
         PrestartSheet(review = review, actions = actions, requestPreciseLocation = requestPreciseLocation)
     }
 }
 
-/**
- * Walk mode as an on-off icon and a small overflow with "How walk mode works": in the top bar upright, at the top of the
- * action rail in landscape. Sessions, Diagnostics, Settings and About are reached from the bottom tab bar now, so the top
- * bar keeps only Live's own controls. Walk mode sat in a card above the trend, where its explanation took the trend's place.
- */
 @Composable
-private fun LiveBarActions(state: LiveUiState, actions: LiveActions, onWalkModeDetails: () -> Unit) {
-    TopBarToggleAction(
-        icon = FieldTapIcons.Walk,
-        contentDescription = stringResource(R.string.live_walk_mode),
-        checked = state.walkMode,
-        onCheckedChange = actions.onWalkModeChange,
-        stateDescription = stringResource(if (state.walkMode) R.string.live_walk_mode_on else R.string.live_walk_mode_off),
-    )
-    LiveOverflowMenu(onWalkModeDetails)
-}
-
-@Composable
-private fun LiveOverflowMenu(onWalkModeDetails: () -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        TopBarAction(
-            icon = FieldTapIcons.MoreVert,
-            contentDescription = stringResource(R.string.live_action_more),
-            onClick = { expanded = true },
-        )
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            OverflowItem(R.string.live_walk_mode_details_action, FieldTapIcons.Walk) {
-                expanded = false
-                onWalkModeDetails()
-            }
-        }
-    }
+private fun LiveBarActions() {
+    // Sessions, Diagnostics, Settings and About are reached from the bottom tab bar; Live has no
+    // controls of its own in the bar since walk mode went.
 }
 
 @Composable
@@ -1065,10 +1009,10 @@ private fun LazyListScope.bannerItems(parts: LiveParts) {
             )
         }
     }
-    if (LivePresentation.showWalkModeWifiPrompt(state.walkMode, state.live.conditions)) {
-        item(key = "walk-wifi") {
+    if (LivePresentation.showWifiCadencePrompt(state.status !is SessionStatus.Idle, state.live.conditions)) {
+        item(key = "wifi-cadence") {
             StatusBanner(
-                message = stringResource(R.string.live_walk_wifi_prompt),
+                message = stringResource(R.string.live_wifi_cadence_prompt),
                 tone = StatusTone.WARNING,
                 icon = FieldTapIcons.Wifi,
                 actionLabel = stringResource(R.string.live_action_wifi_settings),
@@ -1563,7 +1507,7 @@ private fun LiveActionBar(
 }
 
 /**
- * The rail beside the content in a short, wide window: walk mode, Sessions and the menu at its top, where the top bar would
+ * The rail beside the content in a short, wide window: Live's bar actions at its top, where the top bar would
  * have held them, and the session buttons at its bottom, the Start button's label on one line under its icon.
  */
 @Composable
@@ -1574,12 +1518,11 @@ private fun LiveActionRail(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onMark: () -> Unit,
-    onWalkModeDetails: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
         CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                LiveBarActions(state, actions, onWalkModeDetails)
+                LiveBarActions()
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
@@ -1657,7 +1600,6 @@ private fun LiveMarkButton(state: LiveUiState, onMark: () -> Unit, modifier: Mod
 private fun StartSessionDialog(
     tests: TestSettings?,
     testsDefaultOn: Boolean,
-    walkMode: Boolean,
     nowWallMs: () -> Long,
     fullScreen: Boolean,
     onDismiss: () -> Unit,
@@ -1677,7 +1619,6 @@ private fun StartSessionDialog(
                 note = note.trim().ifEmpty { null },
                 location = place.trim().ifEmpty { null },
                 testsEnabled = testsEnabled,
-                walkMode = walkMode,
             ),
         )
     }
@@ -2342,7 +2283,7 @@ private fun LiveContentRecordingPreview() {
                 ),
                 status = SessionStatus.Recording(
                     RecorderSnapshot(
-                        dirName = "20260910-143000_Walk-14-30",
+                        dirName = "20260910-143000_Session-14-30",
                         startedUtcMs = 1_789_050_600_000L,
                         elapsedMs = 754_000,
                         servingRat = ServingRat.LTE,
@@ -2357,7 +2298,6 @@ private fun LiveContentRecordingPreview() {
                         stopping = false,
                     ),
                 ),
-                walkMode = false,
                 testsDefaultOn = false,
                 refusal = null,
                 recovered = emptyList(),
@@ -2375,7 +2315,6 @@ private fun LiveContentWaitingPreview() {
             state = LiveUiState(
                 live = LiveState(),
                 status = SessionStatus.Idle,
-                walkMode = false,
                 testsDefaultOn = false,
                 refusal = null,
                 recovered = listOf(SessionOutcome("20260909-180200_Car-park", 1_789_000_000_000L, 1_789_000_370_000L, "low_memory", true, 180)),
@@ -2392,7 +2331,6 @@ private val PreviewActions = LiveActions(
     onRecheck = {},
     onMark = {},
     onStop = {},
-    onWalkModeChange = {},
     onDismissRefusal = {},
     onAcknowledgeRecovered = {},
     onConsumeMessage = {},

@@ -537,7 +537,7 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
         assertTrue(message, bounds.top >= list.top && bounds.bottom <= list.bottom)
     }
 
-    /** Opens [label] from the Live screen's overflow menu (only "How walk mode works" lives there now). */
+    /** Opens [label] from an overflow menu. */
     fun openMenuItem(@StringRes label: Int) {
         click(hasContentDescription(E2e.string(R.string.live_action_more)) and hasClickAction())
         click(hasText(E2e.string(label)) and hasClickAction())

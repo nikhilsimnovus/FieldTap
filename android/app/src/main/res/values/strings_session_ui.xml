@@ -153,15 +153,8 @@
     <string name="live_cadence_screen_on">Screen on, Wi-Fi off</string>
     <string name="live_row_measured_interval">Time between fresh samples</string>
     <string name="live_row_cadence_reason">Why this cadence</string>
-    <string name="live_walk_mode">Walk mode</string>
-    <!-- The walk mode icon's state for TalkBack. -->
-    <string name="live_walk_mode_on">On</string>
-    <string name="live_walk_mode_off">Off</string>
-    <string name="live_walk_mode_details_action">How walk mode works</string>
-    <string name="live_walk_mode_details">Walk mode keeps the screen on with a dark surface, so Android can refresh cell information every 2 s. Brightness follows your phone, and no wake lock is used. In a pocket with the screen off, Android refreshes only every 10 s and, on battery, sends no signal-strength updates.</string>
-    <string name="live_walk_mode_details_close">Close</string>
     <string name="live_section_cadence_details">Cadence details</string>
-    <string name="live_walk_wifi_prompt">Wi-Fi is connected and the phone is not charging, so Android refreshes cell info only every 10 s. Turn Wi-Fi off for 2 s updates. A charger helps only once Android counts the phone as charging, which can take 15 minutes.</string>
+    <string name="live_wifi_cadence_prompt">Wi-Fi is connected and the phone is not charging, so Android refreshes cell info only every 10 s. Turn Wi-Fi off for 2 s updates. A charger helps only once Android counts the phone as charging, which can take 15 minutes.</string>
     <string name="live_action_wifi_settings">Wi-Fi settings</string>
 
     <string name="live_note_push_missing">Phone permission not granted: no push updates. Requests every second still run.</string>
@@ -286,7 +279,7 @@
     <string name="live_tests_targets_download">Uses mobile data: downloads from %1$s, as set in Settings. Ping is off.</string>
     <string name="live_tests_targets_none">Both tests are off in Settings.</string>
     <!-- %1$s is the local time, e.g. 14:30. -->
-    <string name="live_default_name">Walk %1$s</string>
+    <string name="live_default_name">Session %1$s</string>
     <string name="live_start_confirm">Start</string>
 
     <string name="live_mark_dialog_title">Add a marker</string>

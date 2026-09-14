@@ -181,8 +181,14 @@ object LivePresentation {
     }
 
     /** Walk mode prompts to turn Wi-Fi off or plug in exactly when Wi-Fi forces the 10 s interval. */
-    fun showWalkModeWifiPrompt(walkMode: Boolean, conditions: DeviceConditions?): Boolean =
-        walkMode && conditions != null && conditions.wifiConnected && !conditions.charging
+    /**
+     * Whether to warn that Wi-Fi is costing samples. Android refreshes cell information every 2 s
+     * only while the display is on and the phone is either off Wi-Fi or charging; on Wi-Fi and on
+     * battery it refreshes every 10 s. Shown only while recording, because that is the only time
+     * the cadence changes what lands in the files.
+     */
+    fun showWifiCadencePrompt(recording: Boolean, conditions: DeviceConditions?): Boolean =
+        recording && conditions != null && conditions.wifiConnected && !conditions.charging
 
     /** Emergency-only comes from service state only, as in a session; roaming counts as in service. */
     fun serviceChip(service: ServiceStateSnapshot?): ServiceChip = when {

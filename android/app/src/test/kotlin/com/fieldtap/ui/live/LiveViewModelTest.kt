@@ -350,18 +350,14 @@ class LiveViewModelTest {
     }
 
     @Test
-    fun walkModeFollowsTheSettingUntilToggled() = runTest(main.dispatcher) {
-        graph.settings.stored.value = TestData.settings(walkModeDefault = true, testsDefaultOn = true)
+    fun theTestsDefaultFollowsTheSetting() = runTest(main.dispatcher) {
+        graph.settings.stored.value = TestData.settings(testsDefaultOn = true)
         val viewModel = collected()
         runCurrent()
-        assertTrue(viewModel.state.value.walkMode)
         assertTrue(viewModel.state.value.testsDefaultOn)
 
-        viewModel.setWalkMode(false)
-        graph.settings.stored.value = TestData.settings(walkModeDefault = true, testsDefaultOn = false)
+        graph.settings.stored.value = TestData.settings(testsDefaultOn = false)
         runCurrent()
-
-        assertFalse(viewModel.state.value.walkMode)
         assertFalse(viewModel.state.value.testsDefaultOn)
     }
 
@@ -372,7 +368,6 @@ class LiveViewModelTest {
         graph.live.state.value = LiveState(nowElapsedMs = 42)
         runCurrent()
 
-        assertFalse(viewModel.state.value.walkMode)
         assertFalse(viewModel.state.value.testsDefaultOn)
         assertEquals(42L, viewModel.state.value.live.nowElapsedMs)
     }
