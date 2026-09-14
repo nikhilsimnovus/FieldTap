@@ -139,6 +139,8 @@
     <string name="live_network_nr_sa">5G NR standalone</string>
     <string name="live_network_other">Not LTE or NR</string>
     <string name="live_nsa_leg">5G NR leg</string>
+    <!-- A carrier the phone is aggregating beside the serving cell (carrier aggregation). -->
+    <string name="live_aggregated_leg">Aggregated carrier</string>
 
     <!-- How often Android refreshes cell info; docs/APP-PLAN.md labels pocket mode "10 s cadence". -->
     <string name="live_cadence_short">2 s cadence</string>

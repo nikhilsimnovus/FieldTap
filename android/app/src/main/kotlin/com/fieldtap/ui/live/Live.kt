@@ -1318,6 +1318,21 @@ private fun ServingCard(live: LiveState, labels: SignalQualityLabels, modifier: 
                 placeholder = UNKNOWN_VALUE,
             )
         }
+        // Carriers this phone is aggregating. They belong beside the serving cell because they are
+        // being used; the neighbour list is for cells we are not on.
+        live.aggregatedLegs.forEach { aggregated ->
+            val quality = SignalScale.quality(SignalMetric.RSRP, aggregated.rsrp)
+            SectionDivider()
+            CellSignalRow(
+                title = stringResource(R.string.live_aggregated_leg),
+                valueText = aggregated.rsrp?.toString(),
+                unit = stringResource(R.string.unit_dbm),
+                quality = quality,
+                qualityLabel = labels.of(quality),
+                supportingText = cellIdentity(aggregated),
+                placeholder = UNKNOWN_VALUE,
+            )
+        }
     }
 }
 
