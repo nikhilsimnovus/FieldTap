@@ -18,6 +18,7 @@ import com.fieldtap.core.live.LiveCell
 import com.fieldtap.core.live.LiveState
 import com.fieldtap.core.live.LiveStateReducer
 import com.fieldtap.core.radio.NetworkTypeNames
+import com.fieldtap.core.radio.PciPlanning
 import com.fieldtap.core.radio.ServingCellSelector
 import com.fieldtap.format.Rat
 import com.fieldtap.ui.components.ChartMath
@@ -130,7 +131,36 @@ data class RecordingStrip(val state: RecordingState, val freshSamples: Long, val
  *
  * Owner: workstream `ui-session`.
  */
+/**
+ * A neighbour as Live draws it: the cell, which of [com.fieldtap.core.radio.PciPlanning.MODULI] it
+ * reuses with the serving cell, and how far below the serving cell it is.
+ */
+data class NeighbourRow(val cell: LiveCell, val pciReuse: Set<Int>, val marginDb: Int?)
+
 object LivePresentation {
+
+    /**
+     * [LiveState.neighbours] paired with their PCI reuse against the serving cell, in the order Live
+     * draws them. A reuse is only reported for a neighbour on the serving cell's own RAT and carrier;
+     * see [com.fieldtap.core.radio.PciPlanning].
+     */
+    fun neighbourRows(state: LiveState): List<NeighbourRow> {
+        val serving = state.serving
+        return state.neighbours.map { cell ->
+            NeighbourRow(
+                cell = cell,
+                pciReuse = PciPlanning.collisions(
+                    servingRat = serving?.rat,
+                    servingPci = serving?.pci,
+                    servingArfcn = serving?.arfcn,
+                    neighbourRat = cell.rat,
+                    neighbourPci = cell.pci,
+                    neighbourArfcn = cell.arfcn,
+                ),
+                marginDb = PciPlanning.marginDb(serving?.rsrp, cell.rsrp),
+            )
+        }
+    }
     /** A fix older than this is "GPS lost", as `GpsEventDeriver` reports it in a session. */
     const val GPS_LOST_AFTER_MS: Long = 5_000
 

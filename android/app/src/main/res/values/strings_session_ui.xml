@@ -219,6 +219,13 @@
 
     <string name="live_section_neighbours">Neighbour cells</string>
     <string name="live_neighbours_none">No neighbour cells in the newest answer.</string>
+    <!-- Neighbour cells that reuse the serving cell's PCI resources. %1$s is a list like "3, 6". -->
+    <string name="live_pci_reuse">reuses PCI mod %1$s</string>
+    <string name="live_pci_reuse_separator">", "</string>
+    <!-- How far below the serving cell a neighbour is. %1$d is always positive here. -->
+    <string name="live_margin_below">%1$d dB below serving</string>
+    <string name="live_margin_above">%1$d dB above serving</string>
+    <string name="live_margin_level">level with serving</string>
     <plurals name="live_neighbours_count">
         <item quantity="one">%1$d cell in the newest answer</item>
         <item quantity="other">%1$d cells in the newest answer</item>

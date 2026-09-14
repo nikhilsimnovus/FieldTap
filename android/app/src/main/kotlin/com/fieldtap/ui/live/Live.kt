@@ -1120,7 +1120,11 @@ private fun LazyListScope.chartItem(parts: LiveParts) {
 
 private fun LazyListScope.neighboursItem(parts: LiveParts) {
     item(key = "neighbours") {
-        NeighboursCard(neighbours = parts.state.live.neighbours, labels = parts.labels, modifier = Modifier.contentWidth())
+        NeighboursCard(
+            neighbours = LivePresentation.neighbourRows(parts.state.live),
+            labels = parts.labels,
+            modifier = Modifier.contentWidth(),
+        )
     }
 }
 
@@ -1445,7 +1449,7 @@ private fun calmChipTone(tone: StatusTone): StatusTone =
     if (tone == StatusTone.WARNING || tone == StatusTone.ERROR) tone else StatusTone.NEUTRAL
 
 @Composable
-private fun NeighboursCard(neighbours: List<LiveCell>, labels: SignalQualityLabels, modifier: Modifier = Modifier) {
+private fun NeighboursCard(neighbours: List<NeighbourRow>, labels: SignalQualityLabels, modifier: Modifier = Modifier) {
     SectionCard(
         title = stringResource(R.string.live_section_neighbours),
         subtitle = if (neighbours.isEmpty()) null else pluralStringResource(R.plurals.live_neighbours_count, neighbours.size, neighbours.size),
@@ -1458,8 +1462,9 @@ private fun NeighboursCard(neighbours: List<LiveCell>, labels: SignalQualityLabe
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            neighbours.forEachIndexed { index, cell ->
+            neighbours.forEachIndexed { index, row ->
                 if (index > 0) SectionDivider()
+                val cell = row.cell
                 val quality = SignalScale.quality(SignalMetric.RSRP, cell.rsrp)
                 CellSignalRow(
                     title = neighbourTitle(cell),
@@ -1467,7 +1472,7 @@ private fun NeighboursCard(neighbours: List<LiveCell>, labels: SignalQualityLabe
                     unit = stringResource(R.string.unit_dbm),
                     quality = quality,
                     qualityLabel = labels.of(quality),
-                    supportingText = neighbourSupporting(cell),
+                    supportingText = neighbourSupporting(row),
                     placeholder = UNKNOWN_VALUE,
                 )
             }
@@ -2219,11 +2224,24 @@ private fun neighbourTitle(cell: LiveCell): String {
     return if (parts.isEmpty()) ratName(cell.rat) else parts.joinToString(stringResource(R.string.value_separator))
 }
 
-/** "LTE · band 3". */
+/** "LTE · band 3 · reuses PCI mod 3, 6 · 5 dB below serving". */
 @Composable
-private fun neighbourSupporting(cell: LiveCell): String {
+private fun neighbourSupporting(row: NeighbourRow): String {
+    val cell = row.cell
     val parts = mutableListOf(ratName(cell.rat))
     cell.band?.let { parts += stringResource(if (cell.rat == Rat.NR) R.string.live_band_nr else R.string.live_band_lte, it) }
+    if (row.pciReuse.isNotEmpty()) {
+        val moduli = row.pciReuse.sorted().joinToString(stringResource(R.string.live_pci_reuse_separator))
+        parts += stringResource(R.string.live_pci_reuse, moduli)
+        // The margin earns its place only beside a reuse: it is what says whether the reuse matters.
+        row.marginDb?.let { margin ->
+            parts += when {
+                margin > 0 -> stringResource(R.string.live_margin_below, margin)
+                margin < 0 -> stringResource(R.string.live_margin_above, -margin)
+                else -> stringResource(R.string.live_margin_level)
+            }
+        }
+    }
     return parts.joinToString(stringResource(R.string.value_separator))
 }
 
