@@ -585,6 +585,8 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
         tiles.append(_tile("ping avg / loss", "%s ms / %s%%" % (_fmt(traffic_sum["ping"]["rtt_avg_ms"]), _fmt(traffic_sum["ping"]["loss_pct_avg"]))))
     if traffic_sum.get("download"):
         tiles.append(_tile("download avg / max", "%s / %s Mbit/s" % (_fmt(traffic_sum["download"]["mbps_avg"], 1), _fmt(traffic_sum["download"]["mbps_max"], 1))))
+    if traffic_sum.get("upload"):
+        tiles.append(_tile("upload avg / max", "%s / %s Mbit/s" % (_fmt(traffic_sum["upload"]["mbps_avg"], 1), _fmt(traffic_sum["upload"]["mbps_max"], 1))))
     if summary["gps"]["fixes"]:
         tiles.append(_tile("GPS fixes / distance", "%d / %.2f km" % (summary["gps"]["fixes"], summary["gps"]["distance_km"])))
 
