@@ -86,6 +86,12 @@ data class LiveState(
     val badge: AgeBadge = AgeBadge.NONE,
     /** From the newest answer: cells that are neither primary nor secondary serving, strongest first. */
     val neighbours: List<LiveCell> = emptyList(),
+    /**
+     * From the newest answer: carriers this phone is aggregating — cells reporting secondary serving
+     * that are not the NSA leg, strongest first. An LTE SCell beside an LTE primary, or an NR SCC on
+     * standalone NR. They are being used, so they are not neighbours.
+     */
+    val aggregatedLegs: List<LiveCell> = emptyList(),
     /** Fresh primary serving RSRP over the last 5 minutes. */
     val rsrpSeries: List<ChartPoint> = emptyList(),
     /** Fresh primary serving SINR over the last 5 minutes. */
@@ -171,10 +177,12 @@ class LiveStateReducer {
 
         val serving = servingFromAnswer?.let { LiveCell.of(it.cell) } ?: shown
         val nsaLeg = if (servingFromAnswer != null) classified.nsaSecondary?.let { LiveCell.of(it.cell) } else state.nsaLeg
-        val neighbours = classified.cells
-            .filter { it !== classified.primary && it !== classified.nsaSecondary }
-            .map { LiveCell.of(it.cell) }
-            .sortedWith(STRONGEST_FIRST)
+        val others = classified.cells.filter { it !== classified.primary && it !== classified.nsaSecondary }
+        val (aggregated, rest) = others.partition {
+            it.cell.connectionStatus == CellSnapshot.CONNECTION_SECONDARY_SERVING
+        }
+        val aggregatedLegs = aggregated.map { LiveCell.of(it.cell) }.sortedWith(STRONGEST_FIRST)
+        val neighbours = rest.map { LiveCell.of(it.cell) }.sortedWith(STRONGEST_FIRST)
 
         var rsrpSeries = state.rsrpSeries
         var sinrSeries = state.sinrSeries
@@ -189,6 +197,7 @@ class LiveStateReducer {
             serving = serving,
             nsaLeg = nsaLeg,
             neighbours = neighbours,
+            aggregatedLegs = aggregatedLegs,
             rsrpSeries = rsrpSeries,
             sinrSeries = sinrSeries,
             shortInterval = CadencePolicy.isShortInterval(answer.conditions),

@@ -317,4 +317,55 @@ class LiveStateReducerTest {
         observedWallMs = WALL0 + (elapsedMs - BOOT0),
         observedElapsedMs = elapsedMs,
     )
+
+    @Test
+    fun anLteSecondaryServingCarrierIsAnAggregatedLegNotANeighbour() {
+        val state = LiveStateReducer().reduce(
+            LiveState(),
+            answer(
+                400,
+                listOf(
+                    lte(0, pci = 212),
+                    lte(0, pci = 300, status = CellSnapshot.CONNECTION_SECONDARY_SERVING, rsrp = -95, cellId = 2),
+                    lte(0, pci = 100, status = CellSnapshot.CONNECTION_NONE, rsrp = -110, cellId = 1),
+                ),
+            ),
+        )
+        assertEquals(212, state.serving?.pci)
+        assertEquals(
+            "a carrier the phone is aggregating is not a neighbour",
+            listOf(100),
+            state.neighbours.map { it.pci },
+        )
+        assertEquals(listOf(300), state.aggregatedLegs.map { it.pci })
+    }
+
+    @Test
+    fun anNrSecondaryCarrierOnStandaloneIsAnAggregatedLegNotANeighbour() {
+        val state = LiveStateReducer().reduce(
+            LiveState(),
+            answer(
+                400,
+                listOf(
+                    nr(0, pci = 393, status = CellSnapshot.CONNECTION_PRIMARY_SERVING),
+                    nr(0, pci = 394, status = CellSnapshot.CONNECTION_SECONDARY_SERVING),
+                ),
+            ),
+        )
+        assertEquals(393, state.serving?.pci)
+        assertNull("standalone NR has no NSA leg", state.nsaLeg)
+        assertTrue(state.neighbours.isEmpty())
+        assertEquals(listOf(394), state.aggregatedLegs.map { it.pci })
+    }
+
+    @Test
+    fun theNsaLegIsNotRepeatedAmongTheAggregatedLegs() {
+        val state = LiveStateReducer().reduce(
+            LiveState(),
+            answer(400, listOf(lte(0, pci = 212), nr(0, pci = 393))),
+        )
+        assertEquals(393, state.nsaLeg?.pci)
+        assertTrue("the NSA leg is shown once, as the NSA leg", state.aggregatedLegs.isEmpty())
+        assertTrue(state.neighbours.isEmpty())
+    }
 }
