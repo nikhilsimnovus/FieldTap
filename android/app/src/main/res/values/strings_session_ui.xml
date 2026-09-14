@@ -213,6 +213,10 @@
     <string name="live_satellites_value" tools:ignore="PluralsCandidate">%1$d used of %2$d</string>
 
     <!-- The serving cells used since Live opened, newest first. -->
+    <!-- Session detail's RSRP chart. %1$s is the RAT, e.g. LTE. -->
+    <string name="detail_section_trace">%1$s RSRP over the session</string>
+    <!-- %1$d is the lowest RSRP, %2$d the highest. -->
+    <string name="detail_trace_range">%1$d to %2$d dBm</string>
     <string name="live_section_serving_history">Serving cell history</string>
     <string name="live_history_serving_now">serving now</string>
     <!-- %1$s is a duration like "2:14". -->

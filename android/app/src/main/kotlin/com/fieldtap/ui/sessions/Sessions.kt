@@ -90,6 +90,9 @@ import com.fieldtap.ui.components.MetricGrid
 import com.fieldtap.ui.components.MetricTile
 import com.fieldtap.ui.components.RadioRow
 import com.fieldtap.ui.components.RecordingChip
+import com.fieldtap.ui.components.TimeSeriesChart
+import com.fieldtap.core.live.ChartPoint
+import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.components.SectionCard
 import com.fieldtap.ui.components.SessionListRow
 import com.fieldtap.ui.components.SessionRowStatus
@@ -875,8 +878,47 @@ private fun HeadlineStats(meta: SessionMeta, signal: SignalSummary?, modifier: M
                 valueTone = SessionsPresentation.gapsTone(gaps),
             )
         }
+        if (signal != null && signal.trace.size >= MIN_TRACE_POINTS) {
+            SessionTraceCard(signal)
+        }
     }
 }
+
+/** Two points make a line; one makes a dot that says less than the median above it already does. */
+private const val MIN_TRACE_POINTS: Int = 2
+
+/**
+ * The session's RSRP against time, so a walk can be judged on the phone that recorded it. Until this,
+ * the only way to see where a session went bad was to pull it to a computer and run `fieldtap report`.
+ *
+ * The x axis is the session's own span, not a rolling window, and the points carry their real times, so
+ * a sampling gap is drawn as a gap rather than as a line through it.
+ */
+@Composable
+private fun SessionTraceCard(signal: SignalSummary, modifier: Modifier = Modifier) {
+    val points = signal.trace.map { ChartPoint(it.atMs, it.rsrpDbm) }
+    val spanMs = points.last().elapsedMs.coerceAtLeast(1)
+    val lowest = points.minOf { it.value }
+    val highest = points.maxOf { it.value }
+    SectionCard(
+        title = stringResource(R.string.detail_section_trace, ratName(signal.rat.rat)),
+        subtitle = stringResource(R.string.detail_trace_range, lowest, highest),
+        modifier = modifier,
+    ) {
+        TimeSeriesChart(
+            points = points,
+            nowElapsedMs = points.last().elapsedMs,
+            range = SignalScale.RSRP_DISPLAY_RANGE,
+            lineColor = FieldTapDesign.colors.chartRsrp,
+            windowMs = spanMs,
+            keyReference = FAIR_RSRP_DBM,
+            areaFill = true,
+        )
+    }
+}
+
+/** The -105 dBm line the report draws, and the one the "below" tile counts against. */
+private const val FAIR_RSRP_DBM: Int = -105
 
 /**
  * The three supporting stats under the hero, each at least [Sizes.TileCompactMinWidth]: one row in landscape or on a
