@@ -78,6 +78,13 @@ enum class AgeBadge {
 /** A chart point: elapsedRealtime of the measurement and its value. */
 data class ChartPoint(val elapsedMs: Long, val value: Int)
 
+/**
+ * One stay on one serving cell: the cell as it was last measured, and the measurement times of the
+ * first and most recent samples taken while it was serving. `untilMs` equals `sinceMs` for a cell
+ * seen once, so a dwell is `untilMs - sinceMs` and is zero rather than unknown.
+ */
+data class ServingVisit(val cell: LiveCell, val sinceMs: Long, val untilMs: Long)
+
 /** Everything the Live screen draws. Plain values; the screen never computes. */
 data class LiveState(
     val serving: LiveCell? = null,
@@ -86,6 +93,12 @@ data class LiveState(
     val badge: AgeBadge = AgeBadge.NONE,
     /** From the newest answer: cells that are neither primary nor secondary serving, strongest first. */
     val neighbours: List<LiveCell> = emptyList(),
+    /**
+     * The serving cells this phone has used while Live has been watching, newest first, capped at
+     * [LiveStateReducer.HISTORY_MAX]. The first entry is the cell serving now. Reselection and
+     * handover thrash is visible here and nowhere else on the screen.
+     */
+    val servingHistory: List<ServingVisit> = emptyList(),
     /**
      * From the newest answer: carriers this phone is aggregating — cells reporting secondary serving
      * that are not the NSA leg, strongest first. An LTE SCell beside an LTE primary, or an NR SCC on
@@ -198,6 +211,7 @@ class LiveStateReducer {
             nsaLeg = nsaLeg,
             neighbours = neighbours,
             aggregatedLegs = aggregatedLegs,
+            servingHistory = visited(state.servingHistory, serving),
             rsrpSeries = rsrpSeries,
             sinrSeries = sinrSeries,
             shortInterval = CadencePolicy.isShortInterval(answer.conditions),
@@ -231,6 +245,26 @@ class LiveStateReducer {
         return sorted[sorted.size / 2]
     }
 
+    /**
+     * [history] with [serving] recorded. The same cell extends the newest visit rather than opening a
+     * second one; a different cell opens one and drops the oldest past [HISTORY_MAX]. Cells are the
+     * same when their RAT, PCI and channel agree, which is all Live knows about a cell for certain.
+     */
+    private fun visited(history: List<ServingVisit>, serving: LiveCell?): List<ServingVisit> {
+        if (serving == null) return history
+        val newest = history.firstOrNull()
+        if (newest != null && isSameCell(newest.cell, serving)) {
+            // Never let a stale repeat drag the dwell backwards.
+            val until = maxOf(newest.untilMs, serving.timestampMs)
+            return listOf(newest.copy(cell = serving, untilMs = until)) + history.drop(1)
+        }
+        val visit = ServingVisit(serving, serving.timestampMs, serving.timestampMs)
+        return (listOf(visit) + history).take(HISTORY_MAX)
+    }
+
+    private fun isSameCell(a: LiveCell, b: LiveCell): Boolean =
+        a.rat == b.rat && a.pci == b.pci && a.arfcn == b.arfcn
+
     private fun aged(state: LiveState, nowElapsedMs: Long): LiveState {
         val ageMs = state.serving?.let { (nowElapsedMs - it.timestampMs).coerceAtLeast(0) }
         val cutoffMs = nowElapsedMs - WINDOW_MS
@@ -244,6 +278,9 @@ class LiveStateReducer {
     }
 
     companion object {
+        /** How many serving cells [LiveState.servingHistory] keeps. */
+        const val HISTORY_MAX: Int = 20
+
         /** The chart window: 5 minutes of elapsedRealtime. */
         const val WINDOW_MS: Long = 300_000
 

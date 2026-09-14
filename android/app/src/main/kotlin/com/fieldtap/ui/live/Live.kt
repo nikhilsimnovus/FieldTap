@@ -99,6 +99,7 @@ import com.fieldtap.core.live.AgeBadge
 import com.fieldtap.core.live.ChartPoint
 import com.fieldtap.core.live.LiveCell
 import com.fieldtap.core.live.LiveState
+import com.fieldtap.core.live.ServingVisit
 import com.fieldtap.core.live.LiveStateReducer
 import com.fieldtap.core.nettest.TestSettings
 import com.fieldtap.core.privacy.Consent
@@ -926,6 +927,7 @@ private fun LiveList(
                     servingTilesItem(parts)
                     servingCardItem(parts)
                     neighboursItem(parts)
+                    servingHistoryItem(parts)
                 }
                 LazyColumn(
                     modifier = Modifier
@@ -958,6 +960,7 @@ private fun LiveList(
                     cadenceDetailsItem(parts)
                     servingCardItem(parts)
                     neighboursItem(parts)
+                    servingHistoryItem(parts)
                     limitsItem(parts)
                 }
                 if (actionsBeside != null) ActionColumn(actionsBeside, modifier = Modifier.padding(end = gutter))
@@ -1115,6 +1118,17 @@ private fun LazyListScope.chartItem(parts: LiveParts) {
                 compact = parts.compact,
             )
         }
+    }
+}
+
+private fun LazyListScope.servingHistoryItem(parts: LiveParts) {
+    if (parts.state.live.servingHistory.size < 2) return
+    item(key = "serving-history") {
+        ServingHistoryCard(
+            history = parts.state.live.servingHistory,
+            labels = parts.labels,
+            modifier = Modifier.contentWidth(),
+        )
     }
 }
 
@@ -1462,6 +1476,40 @@ private fun StatusChips(live: LiveState, modifier: Modifier = Modifier) {
  */
 private fun calmChipTone(tone: StatusTone): StatusTone =
     if (tone == StatusTone.WARNING || tone == StatusTone.ERROR) tone else StatusTone.NEUTRAL
+
+/**
+ * The serving cells this phone has used while Live has been watching, newest first. Drawn only once
+ * there are two: a history of one cell is the serving card again, and says nothing about reselection.
+ */
+@Composable
+private fun ServingHistoryCard(history: List<ServingVisit>, labels: SignalQualityLabels, modifier: Modifier = Modifier) {
+    if (history.size < 2) return
+    SectionCard(
+        title = stringResource(R.string.live_section_serving_history),
+        subtitle = pluralStringResource(R.plurals.live_serving_history_count, history.size, history.size),
+        modifier = modifier,
+    ) {
+        history.forEachIndexed { index, visit ->
+            if (index > 0) SectionDivider()
+            val cell = visit.cell
+            val quality = SignalScale.quality(SignalMetric.RSRP, cell.rsrp)
+            val held = if (index == 0) {
+                stringResource(R.string.live_history_serving_now)
+            } else {
+                stringResource(R.string.live_history_held, Formats.elapsed(visit.untilMs - visit.sinceMs))
+            }
+            CellSignalRow(
+                title = neighbourTitle(cell),
+                valueText = cell.rsrp?.toString(),
+                unit = stringResource(R.string.unit_dbm),
+                quality = quality,
+                qualityLabel = labels.of(quality),
+                supportingText = listOf(ratName(cell.rat), held).joinToString(stringResource(R.string.value_separator)),
+                placeholder = UNKNOWN_VALUE,
+            )
+        }
+    }
+}
 
 @Composable
 private fun NeighboursCard(neighbours: List<NeighbourRow>, labels: SignalQualityLabels, modifier: Modifier = Modifier) {

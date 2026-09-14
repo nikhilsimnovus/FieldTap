@@ -219,6 +219,11 @@
     <!-- %1$d satellites used in the fix, %2$d visible. Reads the same for any count, so it is no plural. -->
     <string name="live_satellites_value" tools:ignore="PluralsCandidate">%1$d used of %2$d</string>
 
+    <!-- The serving cells used since Live opened, newest first. -->
+    <string name="live_section_serving_history">Serving cell history</string>
+    <string name="live_history_serving_now">serving now</string>
+    <!-- %1$s is a duration like "2:14". -->
+    <string name="live_history_held">held %1$s</string>
     <string name="live_section_neighbours">Neighbour cells</string>
     <string name="live_neighbours_none">No neighbour cells in the newest answer.</string>
     <!-- Neighbour cells that reuse the serving cell's PCI resources. %1$s is a list like "3, 6". -->
@@ -231,6 +236,10 @@
     <plurals name="live_neighbours_count">
         <item quantity="one">%1$d cell in the newest answer</item>
         <item quantity="other">%1$d cells in the newest answer</item>
+    </plurals>
+    <plurals name="live_serving_history_count">
+        <item quantity="one">%1$d cell</item>
+        <item quantity="other">%1$d cells</item>
     </plurals>
 
     <string name="live_limits_title">What FieldTap reads</string>

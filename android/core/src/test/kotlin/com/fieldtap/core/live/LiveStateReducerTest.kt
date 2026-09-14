@@ -368,4 +368,58 @@ class LiveStateReducerTest {
         assertTrue("the NSA leg is shown once, as the NSA leg", state.aggregatedLegs.isEmpty())
         assertTrue(state.neighbours.isEmpty())
     }
+
+    @Test
+    fun theServingCellHistoryStartsWithTheCellServingNow() {
+        val state = LiveStateReducer().reduce(LiveState(), answer(400, listOf(lte(0, pci = 212))))
+        assertEquals(listOf(212), state.servingHistory.map { it.cell.pci })
+        val visit = state.servingHistory.single()
+        assertEquals("one sample is a zero dwell, not an unknown one", visit.sinceMs, visit.untilMs)
+    }
+
+    @Test
+    fun stayingOnOneCellExtendsItsVisitRatherThanAddingAnother() {
+        val reducer = LiveStateReducer()
+        var state = reducer.reduce(LiveState(), answer(400, listOf(lte(0, pci = 212))))
+        state = reducer.reduce(state, answer(2_400, listOf(lte(2_000, pci = 212))))
+        state = reducer.reduce(state, answer(4_400, listOf(lte(4_000, pci = 212))))
+        val visit = state.servingHistory.single()
+        assertEquals(212, visit.cell.pci)
+        assertEquals(4_000L, visit.untilMs - visit.sinceMs)
+    }
+
+    @Test
+    fun movingToAnotherCellOpensAVisitAndKeepsTheOldOne() {
+        val reducer = LiveStateReducer()
+        var state = reducer.reduce(LiveState(), answer(400, listOf(lte(0, pci = 212))))
+        state = reducer.reduce(state, answer(2_400, listOf(lte(2_000, pci = 213, cellId = 9))))
+        assertEquals("newest first", listOf(213, 212), state.servingHistory.map { it.cell.pci })
+    }
+
+    @Test
+    fun theHistoryIsCappedAndDropsTheOldest() {
+        val reducer = LiveStateReducer()
+        var state = LiveState()
+        for (i in 0 until LiveStateReducer.HISTORY_MAX + 5) {
+            state = reducer.reduce(
+                state,
+                answer(400 + i * 2_000L, listOf(lte(i * 2_000L, pci = 100 + i, cellId = i.toLong()))),
+            )
+        }
+        assertEquals(LiveStateReducer.HISTORY_MAX, state.servingHistory.size)
+        assertEquals("the newest is kept", 100 + LiveStateReducer.HISTORY_MAX + 4, state.servingHistory.first().cell.pci)
+    }
+
+    @Test
+    fun returningToAnEarlierCellIsANewVisit() {
+        val reducer = LiveStateReducer()
+        var state = reducer.reduce(LiveState(), answer(400, listOf(lte(0, pci = 212))))
+        state = reducer.reduce(state, answer(2_400, listOf(lte(2_000, pci = 213, cellId = 9))))
+        state = reducer.reduce(state, answer(4_400, listOf(lte(4_000, pci = 212))))
+        assertEquals(
+            "a return is a separate stay, not a merge with the first",
+            listOf(212, 213, 212),
+            state.servingHistory.map { it.cell.pci },
+        )
+    }
 }
