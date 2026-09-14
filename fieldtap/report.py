@@ -475,6 +475,16 @@ footer{padding:10px 28px 24px;color:#777;font-size:12px}
 """
 
 
+def _hhmmss(value):
+    """The time of day out of an ISO timestamp, as the events table shows it. The date is in the
+    header, and repeating it in every row of every table buys nothing. Anything that is not an ISO
+    timestamp is passed through untouched."""
+    text = "" if value is None else str(value)
+    if len(text) >= 19 and text[10:11] == "T":
+        return text[11:23].rstrip(".")
+    return text
+
+
 def _transport_text(value):
     """The transport as a phrase. A replayed file is named, never located: the report is meant to be
     shared, and the path to it says more about the machine that read it than about the capture."""
@@ -658,8 +668,17 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
         events_html += ('<p class="muted">%d more events are not listed here; %s has all %d.</p>'
                         % (left_out, EVENTS_FILE, len(events)))
 
-    cell_rows = "".join("<tr>%s</tr>" % "".join("<td>%s</td>" % _esc(c.get(k, "")) for k in
-                                                ("first_seen_utc", "rat", "plmn", "tac", "enb_id", "sector", "pci", "band", "dl_earfcn", "dl_bw_mhz"))
+    _CELL_KEYS = ("first_seen_utc", "rat", "plmn", "tac", "enb_id", "sector", "pci", "band", "dl_earfcn", "dl_bw_mhz")
+
+    def _cell_cell(c, k):
+        value = c.get(k, "")
+        if k == "first_seen_utc":
+            return _hhmmss(value)
+        if k == "rat":
+            return str(value).upper()
+        return value
+
+    cell_rows = "".join("<tr>%s</tr>" % "".join("<td>%s</td>" % _esc(_cell_cell(c, k)) for k in _CELL_KEYS)
                         for c in cells)
     cells_html = ("<table><tr><th>first seen</th><th>RAT</th><th>PLMN</th><th>TAC</th><th>eNB</th><th>sector</th><th>PCI</th><th>band</th><th>DL EARFCN</th><th>BW MHz</th></tr>%s</table>" % cell_rows) if cells else '<p class="muted">No serving-cell records%s in this session.</p>' % (" (log code 0xB0C2)" if has_signalling else "")
 
