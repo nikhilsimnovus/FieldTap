@@ -298,6 +298,7 @@
     <string name="live_message_paused_no_fix">Marks are off until your location is known</string>
     <string name="live_message_start_failed">The session could not start. Try again.</string>
     <string name="live_message_stop_failed">The session could not be stopped. Try again.</string>
+    <string name="live_message_started_with_advice">Recording. Some things could cost samples — see Diagnostics.</string>
 
     <!-- Pre-start sheet -->
     <string name="prestart_title">Before you start</string>

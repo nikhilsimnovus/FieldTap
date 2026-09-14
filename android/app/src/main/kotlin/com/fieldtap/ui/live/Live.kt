@@ -218,6 +218,12 @@ enum class LiveMessage {
     PAUSED_NO_FIX,
     START_FAILED,
     STOP_FAILED,
+
+    /**
+     * Recording started with advice outstanding: things that could cost samples but do not stop a
+     * session. The Diagnostics tab's readiness check lists them.
+     */
+    STARTED_WITH_ADVICE,
 }
 
 /** A [LiveMessage] with an id, so the same message twice is shown twice. */
@@ -318,8 +324,13 @@ class LiveViewModel(private val graph: AppGraph) : ViewModel() {
         startJob = viewModelScope.launch {
             prestart.value = PrestartState.Checking(normalized)
             val issues = findIssues(refusal = null)
-            if (issues.isEmpty()) {
+            // Only something that actually stops a session is worth a second screen. Advice -- battery
+            // optimisation, a vendor that kills background apps -- used to open the sheet too, so the
+            // common path was a form, a wall of caveats, and a button labelled "Start anyway" for a
+            // session nothing was wrong with. Advice now starts the session and says so afterwards.
+            if (issues.none { it.blocking }) {
                 begin(normalized)
+                if (issues.isNotEmpty()) post(LiveMessage.STARTED_WITH_ADVICE)
             } else {
                 prestart.value = PrestartState.Review(normalized, issues)
             }
@@ -1171,7 +1182,10 @@ private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, modifier:
                             text = line,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
+                            // A cell's identity is short and clamps safely. With no cell this is the
+                            // sentence explaining why there is none, and cutting it mid-word leaves
+                            // the reader with the problem and not the reason.
+                            maxLines = if (serving == null) Int.MAX_VALUE else 2,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
@@ -2048,6 +2062,7 @@ private fun liveMessageText(message: LiveMessage): String = stringResource(
         LiveMessage.PAUSED_NO_FIX -> R.string.live_message_paused_no_fix
         LiveMessage.START_FAILED -> R.string.live_message_start_failed
         LiveMessage.STOP_FAILED -> R.string.live_message_stop_failed
+        LiveMessage.STARTED_WITH_ADVICE -> R.string.live_message_started_with_advice
     },
 )
 
