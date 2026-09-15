@@ -35,6 +35,7 @@ import com.fieldtap.ui.components.SectionCard
 import com.fieldtap.ui.components.SectionDivider
 import com.fieldtap.ui.components.StatusBanner
 import com.fieldtap.ui.theme.FieldTapIcons
+import com.fieldtap.ui.theme.Formats
 import com.fieldtap.ui.theme.Spacing
 import com.fieldtap.ui.theme.StatusTone
 
@@ -172,6 +173,14 @@ fun CaptureDetailScreen(
                         text = when {
                             state.loading -> stringResource(R.string.signalling_reading)
                             state.failed -> stringResource(R.string.signalling_unreadable)
+                            // A capture of a phone that is not attached is megabytes of the modem's own
+                            // debug chatter and no signalling at all. "0 messages · 0 records" over a
+                            // 7 MB file reads as a broken app; the size says plainly that it recorded.
+                            state.entries.isEmpty() && state.otherRecords == 0 -> stringResource(
+                                R.string.signalling_flow_nothing_read,
+                                Formats.decimalBytes(state.capture?.bytes ?: 0L),
+                            )
+
                             else -> stringResource(
                                 R.string.signalling_flow_subtitle,
                                 pluralStringResource(R.plurals.signalling_messages, state.entries.size, state.entries.size),

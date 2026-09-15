@@ -38,8 +38,10 @@
     <string name="signalling_cause">Cause %1$d · %2$s</string>
     <string name="signalling_reading">Reading…</string>
     <string name="signalling_unreadable">This capture could not be read.</string>
-    <string name="signalling_quiet_title">Nothing was signalling</string>
-    <string name="signalling_quiet_message">The phone stayed quiet while this ran. Export it to see what else is in the file.</string>
+    <string name="signalling_quiet_title">No signalling in this one</string>
+    <string name="signalling_quiet_message">The modem recorded, but none of it was RRC or NAS. That is what a phone that is not attached to a network sounds like — check the service state on Live. The raw file is kept either way.</string>
+    <!-- %1$s is the file size. Shown when the capture holds no log records at all. -->
+    <string name="signalling_flow_nothing_read">%1$s recorded · no RRC or NAS in it</string>
     <!-- The line under the button, pointing at the Recordings tab where the captures are listed. -->
     <plurals name="signalling_kept_line">
         <item quantity="one">%1$d capture, in Recordings</item>
