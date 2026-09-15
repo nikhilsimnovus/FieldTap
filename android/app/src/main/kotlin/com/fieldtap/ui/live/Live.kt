@@ -962,6 +962,9 @@ private fun LiveList(
                             servingCardItem(parts)
                             servingHistoryItem(parts)
                             cadenceDetailsItem(parts)
+                            // With no serving cell the Cell view would be sampling figures and nothing
+                            // else, which answers a question nobody asked. This says why it is empty.
+                            limitsItem(parts)
                         }
 
                         LiveView.NEIGHBOURS -> neighboursItem(parts)

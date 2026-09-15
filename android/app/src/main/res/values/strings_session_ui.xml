@@ -151,14 +151,14 @@
     <string name="live_cadence_wifi_on_battery">Wi-Fi on while not charging</string>
     <string name="live_cadence_charging">Charging keeps 2 s with Wi-Fi on</string>
     <string name="live_cadence_screen_on">Screen on, Wi-Fi off</string>
-    <string name="live_row_measured_interval">Time between fresh samples</string>
-    <string name="live_row_cadence_reason">Why this cadence</string>
-    <string name="live_section_cadence_details">Cadence details</string>
-    <string name="live_wifi_cadence_prompt">Wi-Fi is connected and the phone is not charging, so Android refreshes cell info only every 10 s. Turn Wi-Fi off for 2 s updates. A charger helps only once Android counts the phone as charging, which can take 15 minutes.</string>
+    <string name="live_row_measured_interval">Between fresh samples</string>
+    <string name="live_row_cadence_reason">Why</string>
+    <string name="live_section_cadence_details">How often it samples</string>
+    <string name="live_wifi_cadence_prompt">Wi-Fi is on and the phone is not charging, so Android refreshes the cell only every 10 s. Turn Wi-Fi off for 2 s updates. Plugging in helps only once Android counts the phone as charging, which can take 15 minutes.</string>
     <string name="live_action_wifi_settings">Wi-Fi settings</string>
 
     <string name="live_note_push_missing">Phone permission not granted: no push updates. Requests every second still run.</string>
-    <string name="live_note_request_missing">Precise location is not allowed, so Android returns no cell information.</string>
+    <string name="live_note_request_missing">Precise location is not allowed, so Android returns no cell.</string>
     <string name="live_action_allow_location">Allow precise location</string>
     <!-- %1$s is one of the live_listener_* names. -->
     <string name="live_note_listener_refused">Android does not allow %1$s updates on this phone.</string>
