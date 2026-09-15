@@ -6,23 +6,42 @@
   SessionStringsTest enforces that by forbidding the wording in strings_session_ui.xml; the setup
   screens have their own naming rule. This feature is neither, and hiding it inside either file
   would either break a guard or weaken it.
+
+  The strings a capture contributes to the Recordings list live here too, for the same reason.
 -->
 <resources>
+    <!-- The tab label. It lives here, not with the session strings, because those must not
+         suggest signalling: the session screens promise not to decode it. -->
+    <string name="nav_signalling">Signalling</string>
     <!-- Signalling capture (rooted phones only). -->
     <string name="signalling_title">Signalling</string>
-    <string name="signalling_capture_title">Capture</string>
-    <string name="signalling_explainer">Reads RRC and NAS from the modem through this phone’s own diagnostic logger. Needs root. Message names and reject causes are shown here; RRC bodies are ASN.1 and travel in the exported file for Wireshark.</string>
-    <string name="signalling_start">Start capture</string>
+    <string name="signalling_capture_title">Record the call flow</string>
+    <string name="signalling_explainer">Records what the phone and the network say to each other: attach, handover, and any reason the network says no. Needs root.</string>
+    <string name="signalling_start">Start</string>
     <string name="signalling_stop">Stop and read</string>
-    <string name="signalling_export">Export</string>
+    <string name="signalling_export">Export the raw file</string>
     <string name="signalling_export_subject">FieldTap signalling capture</string>
     <string name="signalling_flow_title">Call flow</string>
     <!-- %1$d NAS messages shown, %2$d records not decoded here (RRC). -->
-    <string name="signalling_flow_subtitle">%1$d NAS messages · %2$d records left for Wireshark</string>
-    <string name="signalling_empty_title">No capture yet</string>
-    <string name="signalling_empty_message">Start a capture, do something that makes the phone talk to the network, then stop it.</string>
+    <string name="signalling_flow_subtitle">%1$d messages · %2$d records left for Wireshark</string>
     <string name="signalling_uplink">phone → network</string>
     <string name="signalling_downlink">network → phone</string>
     <!-- %1$d is the 3GPP cause value, %2$s its name. -->
     <string name="signalling_cause">Cause %1$d · %2$s</string>
+    <string name="signalling_reading">Reading…</string>
+    <string name="signalling_unreadable">This capture could not be read.</string>
+    <string name="signalling_quiet_title">Nothing was signalling</string>
+    <string name="signalling_quiet_message">The phone stayed quiet while this ran. Export it to see what else is in the file.</string>
+    <!-- The line under the button, pointing at the Recordings tab where the captures are listed. -->
+    <plurals name="signalling_kept_line">
+        <item quantity="one">%1$d capture, in Recordings</item>
+        <item quantity="other">%1$d captures, in Recordings</item>
+    </plurals>
+    <!-- How a capture names itself in the Recordings list, beside the drives. -->
+    <string name="recordings_capture_kind">Call flow</string>
+    <!-- %1$d messages the network refused. -->
+    <string name="recordings_capture_rejects">%1$d rejected</string>
+    <!-- %1$d messages seen. -->
+    <string name="recordings_capture_messages">%1$d messages</string>
+    <string name="recordings_capture_quiet">Quiet</string>
 </resources>

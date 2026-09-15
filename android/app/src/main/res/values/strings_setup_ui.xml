@@ -409,6 +409,8 @@
 
     <!-- About & help section: rows that open the Readiness check and the About screen. -->
     <string name="settings_section_help">About &amp; help</string>
+    <string name="settings_probe">Capability probe</string>
+    <string name="settings_probe_supporting">What this phone can measure, and whether it can capture signalling.</string>
     <string name="settings_readiness">Readiness check</string>
     <string name="settings_readiness_supporting">Check this phone is ready to record a session.</string>
     <string name="settings_about">About 5gto6G FieldTap</string>

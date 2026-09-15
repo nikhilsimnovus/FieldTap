@@ -221,7 +221,7 @@ enum class LiveMessage {
 
     /**
      * Recording started with advice outstanding: things that could cost samples but do not stop a
-     * session. The Diagnostics tab's readiness check lists them.
+     * session. The readiness check under Setup lists them.
      */
     STARTED_WITH_ADVICE,
 }

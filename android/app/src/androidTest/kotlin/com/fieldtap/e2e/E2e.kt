@@ -565,7 +565,7 @@ class Screens(private val compose: ComposeTestRule, private val group: String) {
 
     /** The top edge, in root pixels, of the bottom navigation bar: the highest of its four tab items' tops. */
     fun navBarTopPx(): Float {
-        val labels = listOf(R.string.nav_live, R.string.nav_sessions, R.string.nav_diagnostics, R.string.nav_settings)
+        val labels = listOf(R.string.nav_live, R.string.nav_recordings, R.string.nav_signalling, R.string.nav_setup)
         val anyLabel = labels.map { hasText(E2e.string(it)) }.reduce { a, b -> a or b }
         val tabs = anyLabel and hasClickAction() and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)
         val nodes = compose.onAllNodes(tabs).fetchSemanticsNodes()

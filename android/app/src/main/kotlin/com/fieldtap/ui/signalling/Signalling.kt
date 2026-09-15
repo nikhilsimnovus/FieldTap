@@ -1,60 +1,64 @@
 package com.fieldtap.ui.signalling
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fieldtap.R
-import com.fieldtap.diag.SignallingEntry
 import com.fieldtap.ui.components.EmptyState
 import com.fieldtap.ui.components.Eyebrow
 import com.fieldtap.ui.components.FieldTapTopBar
 import com.fieldtap.ui.components.SectionCard
 import com.fieldtap.ui.components.SectionDivider
-import com.fieldtap.ui.common.FileSharer
 import com.fieldtap.ui.components.StatusBanner
 import com.fieldtap.ui.theme.FieldTapIcons
 import com.fieldtap.ui.theme.Spacing
 import com.fieldtap.ui.theme.StatusTone
 
 /**
- * The call flow, read on the phone that captured it.
+ * Signalling: one button, and what it is doing.
  *
- * What it shows is what the handset can read honestly: NAS messages, their direction, and the cause
- * when the network refuses something. RRC is ASN.1 and is not decoded here — those records are counted
- * and carried by the exported `.qmdl`, which `fieldtap report` and Wireshark read in full. The screen
- * says so rather than leaving a reader to wonder why a flow looks short.
+ * The captures themselves are not listed here. They live in Recordings with the drives, because a kept
+ * capture and a kept drive are the same thing to the person looking for one, and two lists in two tabs
+ * meant remembering which tab held which.
  *
  * Owner: workstream `diag-on-handset`.
  */
 @Composable
-fun SignallingScreen(viewModel: SignallingViewModel, modifier: Modifier = Modifier) {
+fun SignallingScreen(
+    viewModel: SignallingViewModel,
+    onOpenCapture: (String) -> Unit,
+    onOpenRecordings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    val exportSubject = stringResource(R.string.signalling_export_subject)
-    val onExport = {
-        state.captureFile?.let { file ->
-            // The raw capture, not a decode: RRC is what the phone cannot read, and it is all in here.
-            runCatching { FileSharer.share(context, file, SignallingViewModel.MIME, exportSubject, null) }
+    // A finished capture opens itself. Recording it and then hunting for it were two steps too many.
+    LaunchedEffect(state.justSaved) {
+        state.justSaved?.let { name ->
+            viewModel.consumeJustSaved()
+            onOpenCapture(name)
         }
-        Unit
     }
     Scaffold(
         modifier = modifier,
@@ -65,74 +69,137 @@ fun SignallingScreen(viewModel: SignallingViewModel, modifier: Modifier = Modifi
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = Spacing.Lg),
+                .padding(horizontal = Spacing.Lg)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
         ) {
-            SignallingControls(state, viewModel, onExport)
-            SignallingFlow(state, modifier = Modifier.fillMaxWidth())
+            Spacer(modifier = Modifier.height(Spacing.Lg))
+            CaptureCard(state, viewModel)
+            if (state.keptCount > 0) {
+                KeptLine(count = state.keptCount, onClick = onOpenRecordings)
+            }
+            Spacer(modifier = Modifier.height(Spacing.Lg))
+        }
+    }
+}
+
+/** Where the captures went: they are listed with the drives, not here. One list, one place. */
+@Composable
+private fun KeptLine(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    SectionCard(modifier = modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = pluralStringResource(R.plurals.signalling_kept_line, count, count),
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = FieldTapIcons.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
 
 @Composable
-private fun SignallingControls(state: SignallingUiState, viewModel: SignallingViewModel, onExport: () -> Unit) {
+private fun CaptureCard(state: SignallingUiState, viewModel: SignallingViewModel) {
     SectionCard(title = stringResource(R.string.signalling_capture_title)) {
         Text(
             text = stringResource(R.string.signalling_explainer),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        state.message?.let { StatusBanner(message = it, tone = state.tone, icon = FieldTapIcons.SignalBars) }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (state.capturing) {
-                Button(onClick = viewModel::stop, enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                    Text(text = stringResource(R.string.signalling_stop))
-                }
-            } else {
-                Button(onClick = viewModel::start, enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                    Text(text = stringResource(R.string.signalling_start))
-                }
+        state.message?.let {
+            StatusBanner(
+                message = it,
+                tone = if (state.failed) StatusTone.ERROR else StatusTone.INFO,
+                icon = FieldTapIcons.SignalBars,
+            )
+        }
+        if (state.capturing) {
+            Button(onClick = viewModel::stop, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+                Text(text = stringResource(R.string.signalling_stop))
             }
-            if (state.canExport) {
-                OutlinedButton(onClick = onExport, enabled = !state.busy) {
-                    Text(text = stringResource(R.string.signalling_export))
-                }
+        } else {
+            Button(onClick = viewModel::start, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+                Text(text = stringResource(R.string.signalling_start))
             }
         }
     }
 }
 
+/** The call flow of one capture, decoded from its file every time it is opened. */
 @Composable
-private fun SignallingFlow(state: SignallingUiState, modifier: Modifier = Modifier) {
-    if (state.entries.isEmpty()) {
-        EmptyState(
-            icon = FieldTapIcons.SignalBars,
-            title = stringResource(R.string.signalling_empty_title),
-            message = stringResource(R.string.signalling_empty_message),
-            modifier = modifier,
-        )
-        return
-    }
-    SectionCard(
-        title = stringResource(R.string.signalling_flow_title),
-        subtitle = stringResource(R.string.signalling_flow_subtitle, state.entries.size, state.rrcRecords),
+fun CaptureDetailScreen(
+    viewModel: CaptureDetailViewModel,
+    onBack: () -> Unit,
+    onExport: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    Scaffold(
         modifier = modifier,
-    ) {
-        LazyColumn(modifier = Modifier.heightIn(max = FLOW_MAX_HEIGHT)) {
-            items(state.entries) { entry ->
-                SignallingRow(entry)
-                SectionDivider()
+        topBar = {
+            FieldTapTopBar(
+                title = state.capture?.name ?: stringResource(R.string.signalling_title),
+                onNavigateUp = onBack,
+            )
+        },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = Spacing.Lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = Spacing.Lg),
+        ) {
+            item(key = "actions") {
+                SectionCard(title = stringResource(R.string.signalling_flow_title)) {
+                    Text(
+                        text = when {
+                            state.loading -> stringResource(R.string.signalling_reading)
+                            state.failed -> stringResource(R.string.signalling_unreadable)
+                            else -> stringResource(
+                                R.string.signalling_flow_subtitle,
+                                state.entries.size,
+                                state.otherRecords,
+                            )
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) {
+                        Text(text = stringResource(R.string.signalling_export))
+                    }
+                }
+            }
+            if (!state.loading && state.entries.isEmpty()) {
+                item(key = "quiet") {
+                    EmptyState(
+                        icon = FieldTapIcons.SignalBars,
+                        title = stringResource(R.string.signalling_quiet_title),
+                        message = stringResource(R.string.signalling_quiet_message),
+                    )
+                }
+            }
+            items(state.entries.size, key = { it }) { index ->
+                SectionCard {
+                    SignallingRow(state.entries[index])
+                }
             }
         }
     }
 }
 
 @Composable
-private fun SignallingRow(entry: SignallingEntry) {
+private fun SignallingRow(entry: com.fieldtap.diag.SignallingEntry) {
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Spacing.Xxs)) {
         Eyebrow(text = directionLabel(entry))
         Text(
@@ -140,10 +207,12 @@ private fun SignallingRow(entry: SignallingEntry) {
             style = MaterialTheme.typography.bodyLarge,
             color = if (entry.isReject) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
         )
-        val cause = entry.causeName ?: entry.cause?.toString()
+        val causeName = entry.causeName
+        val cause = entry.cause
         if (cause != null) {
+            SectionDivider()
             Text(
-                text = stringResource(R.string.signalling_cause, entry.cause ?: 0, cause),
+                text = stringResource(R.string.signalling_cause, cause, causeName ?: ""),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
             )
@@ -152,19 +221,13 @@ private fun SignallingRow(entry: SignallingEntry) {
 }
 
 @Composable
-private fun directionLabel(entry: SignallingEntry): String {
-    val rat = entry.rat.uppercase()
+private fun directionLabel(entry: com.fieldtap.diag.SignallingEntry): String {
     val arrow = when (entry.direction) {
         "ul" -> stringResource(R.string.signalling_uplink)
         "dl" -> stringResource(R.string.signalling_downlink)
         else -> ""
     }
-    return listOf(rat, entry.sublayer?.uppercase().orEmpty(), arrow).filter { it.isNotEmpty() }
+    return listOf(entry.rat.uppercase(), entry.sublayer?.uppercase().orEmpty(), arrow)
+        .filter { it.isNotEmpty() }
         .joinToString(stringResource(R.string.value_separator))
 }
-
-/** Tall enough for a flow, short enough that the controls above it stay on screen. */
-private val FLOW_MAX_HEIGHT = androidx.compose.ui.unit.Dp(460f)
-
-private val SignallingUiState.tone: StatusTone
-    get() = if (failed) StatusTone.ERROR else StatusTone.INFO

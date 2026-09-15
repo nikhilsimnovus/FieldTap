@@ -2,6 +2,8 @@ package com.fieldtap.ui.signalling
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.fieldtap.data.CaptureStore
+import com.fieldtap.data.SavedCapture
 import com.fieldtap.diag.SignallingEntry
 import com.fieldtap.diag.SignallingReader
 import com.fieldtap.platform.diag.DiagCaptureResult
@@ -21,15 +23,27 @@ data class SignallingUiState(
     val capturing: Boolean = false,
     /** A capture or a decode is in flight; the buttons wait for it. */
     val busy: Boolean = false,
-    val entries: List<SignallingEntry> = emptyList(),
-    /** Log records read that made no call-flow line, almost all of them RRC. */
-    val rrcRecords: Int = 0,
+    /** How many captures this phone has kept, for the line pointing at Recordings. */
+    val keptCount: Int = 0,
+    /**
+     * The capture just saved, until the screen has opened it. A finished capture goes straight to its call
+     * flow: reading it is the whole point of taking it, and a screen that only said "saved" made the user
+     * hunt for what they had just recorded.
+     */
+    val justSaved: String? = null,
     val message: String? = null,
     val failed: Boolean = false,
-    val captureFile: File? = null,
-) {
-    val canExport: Boolean get() = captureFile != null && !capturing
-}
+)
+
+/** One capture, opened. */
+data class CaptureDetailUiState(
+    val capture: SavedCapture? = null,
+    val entries: List<SignallingEntry> = emptyList(),
+    /** Log records that made no call-flow line, almost all of them RRC. */
+    val otherRecords: Int = 0,
+    val loading: Boolean = true,
+    val failed: Boolean = false,
+)
 
 /**
  * Drives [HandsetDiagCapture] and reads what it wrote.
@@ -42,36 +56,51 @@ data class SignallingUiState(
  *
  * Owner: workstream `diag-on-handset`.
  */
-class SignallingViewModel(private val exportsDir: File) : ViewModel() {
+class SignallingViewModel(
+    private val scratchDir: File,
+    private val store: CaptureStore,
+) : ViewModel() {
 
     private val capture = HandsetDiagCapture()
     private val _state = MutableStateFlow(SignallingUiState())
     val state: StateFlow<SignallingUiState> = _state.asStateFlow()
     private var job: Job? = null
+    private var startedUtcMs: Long = 0
+
+    init {
+        refresh()
+    }
+
+    /** Re-counts the kept captures, for example after one is saved or deleted. */
+    fun refresh() {
+        viewModelScope.launch {
+            val count = withContext(Dispatchers.IO) { store.list().size }
+            _state.value = _state.value.copy(keptCount = count)
+        }
+    }
+
+    /** The screen has opened [justSaved]; it must not open it again on the next recomposition. */
+    fun consumeJustSaved() {
+        if (_state.value.justSaved != null) _state.value = _state.value.copy(justSaved = null)
+    }
 
     fun start() {
         if (job?.isActive == true) return
         job = viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, message = null, failed = false)
             when (val result = capture.start()) {
-                is DiagCaptureResult.Started ->
+                is DiagCaptureResult.Started -> {
+                    startedUtcMs = System.currentTimeMillis()
                     _state.value = _state.value.copy(
                         capturing = true,
                         busy = false,
-                        entries = emptyList(),
-                        rrcRecords = 0,
-                        captureFile = null,
-                        message = "Recording signalling. Leave this on while the phone does something worth seeing.",
+                        message = "Recording. Make a call, or move until the phone changes cell.",
                     )
+                }
 
-                DiagCaptureResult.NoRoot -> fail(
-                    "Signalling capture needs root, and this phone did not grant it. " +
-                        "Everything else in the app works without it.",
-                )
+                DiagCaptureResult.NoRoot -> fail("Needs root. This phone did not grant it.")
 
-                DiagCaptureResult.NoLogger -> fail(
-                    "This phone has no diag_mdlog, so its modem does not expose signalling this way.",
-                )
+                DiagCaptureResult.NoLogger -> fail("This phone's modem does not expose signalling.")
 
                 is DiagCaptureResult.Failed -> fail(result.reason)
                 is DiagCaptureResult.Stopped -> fail("the logger stopped before it started")
@@ -82,43 +111,61 @@ class SignallingViewModel(private val exportsDir: File) : ViewModel() {
     fun stop() {
         if (job?.isActive == true) return
         job = viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true, message = "Reading the capture…")
+            _state.value = _state.value.copy(busy = true, message = "Reading…")
             capture.stop()
-            exportsDir.mkdirs()
-            val target = File(exportsDir, CAPTURE_NAME)
-            val file = capture.collect(target)
+            scratchDir.mkdirs()
+            val scratch = File(scratchDir, SCRATCH_NAME)
+            val file = capture.collect(scratch)
             if (file == null) {
                 _state.value = _state.value.copy(
                     capturing = false,
                     busy = false,
                     failed = true,
-                    message = "The logger wrote nothing. Nothing was captured.",
+                    message = "Nothing was captured.",
                 )
                 return@launch
             }
-            val summary = withContext(Dispatchers.IO) {
-                try {
+            val saved = withContext(Dispatchers.IO) {
+                val summary = try {
                     SignallingReader.read(file.readBytes())
                 } catch (e: IOException) {
                     null
                 }
+                if (summary == null) {
+                    null
+                } else {
+                    store.save(
+                        source = file,
+                        startedUtcMs = startedUtcMs.takeIf { it > 0 } ?: System.currentTimeMillis(),
+                        records = summary.records,
+                        messages = summary.entries.size,
+                        rejects = summary.rejects.size,
+                    )
+                }
             }
-            if (summary == null) {
+            if (saved == null) {
                 _state.value = _state.value.copy(
                     capturing = false, busy = false, failed = true,
-                    message = "The capture could not be read.",
+                    message = "Could not read the capture.",
                 )
                 return@launch
             }
-            _state.value = SignallingUiState(
+            _state.value = _state.value.copy(
                 capturing = false,
                 busy = false,
-                entries = summary.entries,
-                rrcRecords = summary.records - summary.entries.size,
-                captureFile = file,
-                message = summaryLine(summary.entries, summary.records, summary.crcErrors),
                 failed = false,
+                message = summaryLine(saved),
+                justSaved = saved.name,
+                keptCount = withContext(Dispatchers.IO) { store.list().size },
             )
+        }
+    }
+
+    /** Forgets a kept capture and its file. */
+    fun delete(name: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { store.delete(name) }
+            refresh()
         }
     }
 
@@ -126,17 +173,65 @@ class SignallingViewModel(private val exportsDir: File) : ViewModel() {
         _state.value = _state.value.copy(capturing = false, busy = false, failed = true, message = reason)
     }
 
-    private fun summaryLine(entries: List<SignallingEntry>, records: Int, crcErrors: Int): String {
-        val rejects = entries.count { it.isReject }
-        val parts = mutableListOf("$records records", "${entries.size} NAS messages")
-        if (rejects > 0) parts += "$rejects rejected"
-        if (crcErrors > 0) parts += "$crcErrors corrupt frames"
-        return parts.joinToString(" · ")
+    private fun summaryLine(saved: SavedCapture): String = when {
+        saved.rejects > 0 -> "${saved.messages} messages, ${saved.rejects} rejected"
+        saved.messages > 0 -> "${saved.messages} messages"
+        else -> "Nothing was signalling"
     }
 
     companion object {
-        /** Written under `cache/exports/` so the file provider will hand it out. */
-        const val CAPTURE_NAME: String = "signalling.qmdl"
+        /** Where a capture lands before it is kept; under `cache/exports/` so sharing works from there too. */
+        const val SCRATCH_NAME: String = "signalling.qmdl"
         const val MIME: String = "application/octet-stream"
     }
+}
+
+/**
+ * One kept capture, opened.
+ *
+ * The flow is decoded from the `.qmdl` each time rather than from anything stored beside it: the file is
+ * what goes to Wireshark, and a summary that drifted from it would be worse than a moment's wait.
+ */
+class CaptureDetailViewModel(
+    private val store: CaptureStore,
+    private val name: String,
+) : ViewModel() {
+
+    private val _state = MutableStateFlow(CaptureDetailUiState())
+    val state: StateFlow<CaptureDetailUiState> = _state.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            val capture = withContext(Dispatchers.IO) { store.find(name) }
+            val file = withContext(Dispatchers.IO) { store.qmdl(name) }
+            if (capture == null || file == null) {
+                _state.value = CaptureDetailUiState(loading = false, failed = true)
+                return@launch
+            }
+            val summary = withContext(Dispatchers.IO) {
+                try {
+                    SignallingReader.read(file.readBytes())
+                } catch (e: IOException) {
+                    null
+                } catch (e: OutOfMemoryError) {
+                    // A capture larger than the heap is a real possibility on a long recording.
+                    null
+                }
+            }
+            _state.value = if (summary == null) {
+                CaptureDetailUiState(capture = capture, loading = false, failed = true)
+            } else {
+                CaptureDetailUiState(
+                    capture = capture,
+                    entries = summary.entries,
+                    otherRecords = summary.records - summary.entries.size,
+                    loading = false,
+                    failed = false,
+                )
+            }
+        }
+    }
+
+    /** The raw capture, for sharing. */
+    fun file(): File? = store.qmdl(name)
 }

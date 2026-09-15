@@ -53,8 +53,11 @@ import com.fieldtap.ui.live.LiveViewModel
 import com.fieldtap.ui.onboarding.DisclosureScreen
 import com.fieldtap.ui.onboarding.OnboardingViewModel
 import com.fieldtap.ui.onboarding.PermissionsScreen
+import com.fieldtap.data.CaptureStore
 import com.fieldtap.ui.common.FileSharer
 import com.fieldtap.ui.probe.ProbeScreen
+import com.fieldtap.ui.signalling.CaptureDetailScreen
+import com.fieldtap.ui.signalling.CaptureDetailViewModel
 import com.fieldtap.ui.signalling.SignallingScreen
 import com.fieldtap.ui.signalling.SignallingViewModel
 import com.fieldtap.ui.probe.ProbeViewModel
@@ -74,8 +77,8 @@ import kotlinx.coroutines.CancellationException
 /**
  * Routes. Directory names are `[A-Za-z0-9._-]` only, so they go into a route unescaped.
  *
- * The app is a four-tab shell (a Material bottom [NavigationBar], [TopTab]): Live, Sessions, Diagnostics and
- * Settings. Each tab is a nested graph with its own start and its own back stack; detail screens push on top
+ * The app is a four-tab shell (a Material bottom [NavigationBar], [TopTab]): Live, Signalling, Recordings and
+ * Setup. Each tab is a nested graph with its own start and its own back stack; detail screens push on top
  * within their tab. Onboarding ([DISCLOSURE], [PERMISSIONS]) and the disclosure-declined About
  * ([ABOUT_ONBOARDING]) are top-level, with no bottom bar.
  *
@@ -94,8 +97,14 @@ object Routes {
     const val READINESS: String = "readiness"
     const val PROBE: String = "probe"
 
-    /** Signalling capture, under Diagnostics: it needs root and is not part of the normal path. */
-    const val SIGNALLING: String = "probe/signalling"
+    /** The signalling capture control: a tab of its own. */
+    const val SIGNALLING: String = "signalling"
+
+    /** One kept capture's call flow. It sits in the Recordings graph, which is the list that opens it. */
+    const val CAPTURE_DETAIL: String = "recordings/capture/{captureName}"
+    const val ARG_CAPTURE_NAME: String = "captureName"
+
+    fun capture(name: String): String = "recordings/capture/" + java.net.URLEncoder.encode(name, "UTF-8")
     const val SETTINGS: String = "settings"
 
     /** The ping and download targets, a screen of their own under Settings. */
@@ -105,7 +114,8 @@ object Routes {
     /** The nested graph that holds each tab's root and its detail screens. */
     const val LIVE_GRAPH: String = "live_graph"
     const val SESSIONS_GRAPH: String = "sessions_graph"
-    const val DIAGNOSTICS_GRAPH: String = "diagnostics_graph"
+    /** Signalling is a tab of its own now, so it needs its own graph to keep its back stack. */
+    const val SIGNALLING_GRAPH: String = "signalling_graph"
     const val SETTINGS_GRAPH: String = "settings_graph"
 
     const val ARG_DIR_NAME: String = "dirName"
@@ -127,9 +137,18 @@ enum class TopTab(
     @StringRes val label: Int,
 ) {
     LIVE(Routes.LIVE_GRAPH, Routes.LIVE, FieldTapIcons.SignalBars, R.string.nav_live),
-    SESSIONS(Routes.SESSIONS_GRAPH, Routes.SESSIONS, FieldTapIcons.Sessions, R.string.nav_sessions),
-    DIAGNOSTICS(Routes.DIAGNOSTICS_GRAPH, Routes.PROBE, FieldTapIcons.Pulse, R.string.nav_diagnostics),
-    SETTINGS(Routes.SETTINGS_GRAPH, Routes.SETTINGS, FieldTapIcons.Tune, R.string.nav_settings),
+
+    /**
+     * Signalling used to sit three taps inside Diagnostics, behind a scroll. It is the thing this app
+     * can do that its rivals in the no-root tier cannot, and it was the hardest thing in it to find.
+     */
+    SIGNALLING(Routes.SIGNALLING_GRAPH, Routes.SIGNALLING, FieldTapIcons.Pulse, R.string.nav_signalling),
+
+    /** Sessions and signalling captures are both recordings; they were two lists in two places. */
+    RECORDINGS(Routes.SESSIONS_GRAPH, Routes.SESSIONS, FieldTapIcons.Sessions, R.string.nav_recordings),
+
+    /** Everything done once and rarely: the probe, readiness, targets, consent, about. */
+    SETUP(Routes.SETTINGS_GRAPH, Routes.SETTINGS, FieldTapIcons.Tune, R.string.nav_setup),
     ;
 
     companion object {
@@ -256,11 +275,11 @@ fun FieldTapNavHost(
                     val viewModel: LiveViewModel = viewModel(factory = graphViewModelFactory(graph) { LiveViewModel(it) })
                     LiveScreen(
                         viewModel = viewModel,
-                        onOpenSessions = dropUnlessResumed { navController.selectTab(TopTab.SESSIONS) },
+                        onOpenSessions = dropUnlessResumed { navController.selectTab(TopTab.RECORDINGS) },
                         onOpenReadiness = dropUnlessResumed { navController.navigate(Routes.READINESS) { launchSingleTop = true } },
                         onOpenDisclosure = dropUnlessResumed { navController.navigate(Routes.DISCLOSURE) { launchSingleTop = true } },
                         onOpenSession = { dirName ->
-                            navController.selectTab(TopTab.SESSIONS)
+                            navController.selectTab(TopTab.RECORDINGS)
                             navController.navigate(Routes.sessionDetail(dirName)) { launchSingleTop = true }
                         },
                     )
@@ -269,11 +288,15 @@ fun FieldTapNavHost(
 
             navigation(startDestination = Routes.SESSIONS, route = Routes.SESSIONS_GRAPH) {
                 composable(Routes.SESSIONS) {
-                    val viewModel: SessionsViewModel = viewModel(factory = graphViewModelFactory(graph) { SessionsViewModel(it) })
+                    val context = LocalContext.current
+                    val store = captureStore(context)
+                    val viewModel: SessionsViewModel =
+                        viewModel(factory = graphViewModelFactory(graph) { SessionsViewModel(it, store) })
                     SessionsScreen(
                         viewModel = viewModel,
                         onOpenSession = { dirName -> navController.openSessionDetail(dirName) },
-                        // Sessions is a tab root, so this is not a Back arrow: it is the empty state's "start a walk".
+                        onOpenCapture = { name -> navController.openCaptureDetail(name) },
+                        // Recordings is a tab root, so this is not a Back arrow: it is the empty state's "record one".
                         onGoToLive = dropUnlessResumed { navController.selectTab(TopTab.LIVE) },
                     )
                 }
@@ -289,22 +312,53 @@ fun FieldTapNavHost(
                         onBack = dropUnlessResumed { navController.popBackStack() },
                     )
                 }
-            }
-
-            navigation(startDestination = Routes.PROBE, route = Routes.DIAGNOSTICS_GRAPH) {
-                composable(Routes.PROBE) {
-                    val viewModel: ProbeViewModel = viewModel(factory = graphViewModelFactory(graph) { ProbeViewModel(it) })
-                    ProbeScreen(
+                // A capture's call flow sits in the Recordings graph because that is the list it is opened
+                // from; the Signalling tab reaches it by switching tabs, the way Live opens a session.
+                composable(
+                    route = Routes.CAPTURE_DETAIL,
+                    arguments = listOf(navArgument(Routes.ARG_CAPTURE_NAME) { type = NavType.StringType }),
+                ) { entry ->
+                    val context = LocalContext.current
+                    val name = entry.arguments?.getString(Routes.ARG_CAPTURE_NAME).orEmpty()
+                    val store = captureStore(context)
+                    val viewModel: CaptureDetailViewModel =
+                        viewModel(factory = graphViewModelFactory(graph) { CaptureDetailViewModel(store, name) })
+                    val subject = stringResource(R.string.signalling_export_subject)
+                    CaptureDetailScreen(
                         viewModel = viewModel,
-                        onOpenSignalling = dropUnlessResumed { navController.navigate(Routes.SIGNALLING) { launchSingleTop = true } },
+                        onBack = dropUnlessResumed { navController.popBackStack() },
+                        onExport = {
+                            // Shared from cache/exports, which is the only place the file provider serves.
+                            viewModel.file()?.let { kept ->
+                                runCatching {
+                                    val shareable = java.io.File(scratchDir(context), kept.name)
+                                    scratchDir(context).mkdirs()
+                                    kept.copyTo(shareable, overwrite = true)
+                                    FileSharer.share(context, shareable, SignallingViewModel.MIME, subject, null)
+                                }
+                            }
+                            Unit
+                        },
                     )
                 }
+            }
+
+            navigation(startDestination = Routes.SIGNALLING, route = Routes.SIGNALLING_GRAPH) {
                 composable(Routes.SIGNALLING) {
                     val context = LocalContext.current
-                    val exports = java.io.File(context.cacheDir, FileSharer.EXPORTS_DIR)
-                    val viewModel: SignallingViewModel =
-                        viewModel(factory = graphViewModelFactory(graph) { SignallingViewModel(exports) })
-                    SignallingScreen(viewModel = viewModel)
+                    val viewModel: SignallingViewModel = viewModel(
+                        factory = graphViewModelFactory(graph) {
+                            SignallingViewModel(scratchDir(context), captureStore(context))
+                        },
+                    )
+                    SignallingScreen(
+                        viewModel = viewModel,
+                        onOpenCapture = { name ->
+                            navController.selectTab(TopTab.RECORDINGS)
+                            navController.openCaptureDetail(name)
+                        },
+                        onOpenRecordings = dropUnlessResumed { navController.selectTab(TopTab.RECORDINGS) },
+                    )
                 }
             }
 
@@ -316,6 +370,15 @@ fun FieldTapNavHost(
                         onOpenTestTargets = dropUnlessResumed { navController.navigate(Routes.TEST_TARGETS) { launchSingleTop = true } },
                         onOpenReadiness = dropUnlessResumed { navController.navigate(Routes.READINESS) { launchSingleTop = true } },
                         onOpenAbout = dropUnlessResumed { navController.navigate(Routes.ABOUT) { launchSingleTop = true } },
+                        onOpenProbe = dropUnlessResumed { navController.navigate(Routes.PROBE) { launchSingleTop = true } },
+                    )
+                }
+                // The capability probe is a setup task: run once on a new phone, read, and left alone.
+                composable(Routes.PROBE) {
+                    val viewModel: ProbeViewModel = viewModel(factory = graphViewModelFactory(graph) { ProbeViewModel(it) })
+                    ProbeScreen(
+                        viewModel = viewModel,
+                        onBack = dropUnlessResumed { navController.popBackStack() },
                     )
                 }
                 composable(Routes.TEST_TARGETS) {
@@ -433,3 +496,20 @@ private fun NavHostController.openSessionDetail(dirName: String) {
     if (currentBackStackEntry?.destination?.route != Routes.SESSIONS) return
     navigate(route) { launchSingleTop = true }
 }
+
+/**
+ * Opens a capture's call flow. Unlike a session this is not guarded on the Recordings root, because the
+ * Signalling tab opens it straight after a capture finishes, from its own destination.
+ */
+private fun NavHostController.openCaptureDetail(name: String) {
+    if (currentBackStackEntry?.destination?.route == Routes.CAPTURE_DETAIL) return
+    navigate(Routes.capture(name)) { launchSingleTop = true }
+}
+
+/** Where a capture lands before it is kept, and the only directory the file provider serves. */
+private fun scratchDir(context: android.content.Context): java.io.File =
+    java.io.File(context.cacheDir, FileSharer.EXPORTS_DIR)
+
+/** Kept captures live in the app's own files, not in a session: they hold layer-3 signalling. */
+private fun captureStore(context: android.content.Context): CaptureStore =
+    CaptureStore(java.io.File(context.filesDir, "signalling").apply { mkdirs() })

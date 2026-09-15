@@ -59,6 +59,8 @@ import com.fieldtap.app.AppGraph
 import com.fieldtap.app.SessionDetail
 import com.fieldtap.app.SessionSummary
 import com.fieldtap.core.export.ExportResult
+import com.fieldtap.data.CaptureStore
+import com.fieldtap.data.SavedCapture
 import com.fieldtap.core.session.SignalSummary
 import com.fieldtap.core.session.StoragePolicy
 import com.fieldtap.core.session.StorageStatus
@@ -104,12 +106,15 @@ import com.fieldtap.ui.theme.FieldTapIcons
 import com.fieldtap.ui.theme.Formats
 import com.fieldtap.ui.theme.ShapeRoles
 import com.fieldtap.ui.theme.SignalMetric
+import com.fieldtap.ui.theme.SignalQuality
 import com.fieldtap.ui.theme.SignalScale
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
 import com.fieldtap.ui.theme.StatusTone
 import com.fieldtap.ui.theme.tabular
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -119,22 +124,34 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class SessionsUiState(
     val loading: Boolean,
     val sessions: List<SessionSummary>,
     val storage: StorageStatus?,
+    /** Signalling captures kept on the phone; listed beside the drives, newest first. */
+    val captures: List<SavedCapture> = emptyList(),
     /** The last refresh failed; [sessions] and [storage] are what was read before it. */
     val loadFailed: Boolean = false,
 )
 
 /**
- * The Sessions list. [refresh] reads the list and storage off the main thread (inside the repository); the
- * screen calls it whenever it resumes, and the view model calls it when a session starts or ends.
+ * The Recordings list. [refresh] reads the drives, the captures and storage off the main thread; the screen
+ * calls it whenever it resumes, and the view model calls it when a session starts or ends.
+ *
+ * Drives and signalling captures are listed together because they are the same thing to the person holding
+ * the phone: something recorded earlier, worth opening again. They were two lists in two tabs, and nobody
+ * could remember which tab held which.
  *
  * Owner: workstream `ui-session`.
  */
-class SessionsViewModel(private val graph: AppGraph) : ViewModel() {
+class SessionsViewModel(
+    private val graph: AppGraph,
+    private val captures: CaptureStore,
+    /** Where the capture store is walked. Injected so a test can make the read deterministic. */
+    private val io: CoroutineDispatcher = Dispatchers.IO,
+) : ViewModel() {
     private val mutableState = MutableStateFlow(SessionsUiState(loading = true, sessions = emptyList(), storage = null))
     private var refreshJob: Job? = null
 
@@ -163,8 +180,22 @@ class SessionsViewModel(private val graph: AppGraph) : ViewModel() {
                 } catch (e: Exception) {
                     null
                 }
+                // A phone with no root has no captures and never will; an unreadable store is empty, not an error.
+                val kept = withContext(io) {
+                    try {
+                        captures.list()
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
+                }
                 mutableState.update { previous ->
-                    SessionsUiState(loading = false, sessions = sessions, storage = storage ?: previous.storage, loadFailed = false)
+                    SessionsUiState(
+                        loading = false,
+                        sessions = sessions,
+                        storage = storage ?: previous.storage,
+                        captures = kept,
+                        loadFailed = false,
+                    )
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -190,6 +221,7 @@ class SessionsViewModel(private val graph: AppGraph) : ViewModel() {
 fun SessionsScreen(
     viewModel: SessionsViewModel,
     onOpenSession: (dirName: String) -> Unit,
+    onOpenCapture: (name: String) -> Unit,
     onGoToLive: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -199,10 +231,34 @@ fun SessionsScreen(
         state = state,
         nowUtcMs = viewModel.nowWallMs(),
         onOpenSession = onOpenSession,
+        onOpenCapture = onOpenCapture,
         onGoToLive = onGoToLive,
         onRefresh = viewModel::refresh,
         modifier = modifier,
     )
+}
+
+/**
+ * One row of the Recordings list: a drive or a signalling capture. They sort together by when they started,
+ * which is the only order anyone looks for them in.
+ */
+internal sealed interface Recording {
+    val startedUtcMs: Long
+
+    data class Drive(val summary: SessionSummary, override val startedUtcMs: Long) : Recording
+
+    data class Capture(val capture: SavedCapture) : Recording {
+        override val startedUtcMs: Long get() = capture.startedUtcMs
+    }
+}
+
+/**
+ * The two kinds merged, newest first. A drive with no start time in its `session.json` has nothing to sort
+ * by, so it keeps its place at the front rather than sinking to 1970.
+ */
+internal fun recordingsOf(state: SessionsUiState): List<Recording> {
+    val drives = state.sessions.map { Recording.Drive(it, it.startedUtcMs ?: Long.MAX_VALUE) }
+    return (drives + state.captures.map { Recording.Capture(it) }).sortedByDescending { it.startedUtcMs }
 }
 
 sealed interface ExportState {
@@ -385,11 +441,13 @@ private fun SessionsContent(
     state: SessionsUiState,
     nowUtcMs: Long,
     onOpenSession: (String) -> Unit,
+    onOpenCapture: (String) -> Unit,
     onGoToLive: () -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val showLoading = rememberDelayedVisibility(state.loading && state.sessions.isEmpty())
+    val recordings = recordingsOf(state)
+    val showLoading = rememberDelayedVisibility(state.loading && recordings.isEmpty())
     val topBarScroll = rememberTopBarScroll()
     Scaffold(
         modifier = modifier.nestedScroll(topBarScroll.connection),
@@ -412,10 +470,10 @@ private fun SessionsContent(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
-                state.sessions.isEmpty() && state.loading -> if (showLoading) {
+                recordings.isEmpty() && state.loading -> if (showLoading) {
                     CenteredContent { LoadingState(message = stringResource(R.string.sessions_loading)) }
                 }
-                state.sessions.isEmpty() && state.loadFailed -> CenteredContent {
+                recordings.isEmpty() && state.loadFailed -> CenteredContent {
                     EmptyState(
                         title = stringResource(R.string.sessions_error_title),
                         message = stringResource(R.string.sessions_error_message),
@@ -425,7 +483,7 @@ private fun SessionsContent(
                         onAction = onRefresh,
                     )
                 }
-                state.sessions.isEmpty() -> CenteredContent {
+                recordings.isEmpty() -> CenteredContent {
                     EmptyState(
                         title = stringResource(R.string.sessions_empty_title),
                         message = stringResource(R.string.sessions_empty_message),
@@ -434,14 +492,26 @@ private fun SessionsContent(
                         onAction = onGoToLive,
                     )
                 }
-                else -> SessionsList(state = state, nowUtcMs = nowUtcMs, onOpenSession = onOpenSession)
+                else -> SessionsList(
+                    state = state,
+                    recordings = recordings,
+                    nowUtcMs = nowUtcMs,
+                    onOpenSession = onOpenSession,
+                    onOpenCapture = onOpenCapture,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun SessionsList(state: SessionsUiState, nowUtcMs: Long, onOpenSession: (String) -> Unit) {
+private fun SessionsList(
+    state: SessionsUiState,
+    recordings: List<Recording>,
+    nowUtcMs: Long,
+    onOpenSession: (String) -> Unit,
+    onOpenCapture: (String) -> Unit,
+) {
     val storage = state.storage
     val labels = signalQualityLabels()
     // The full card with its bar only when storage needs attention; otherwise a compact meter under the header, so the
@@ -479,23 +549,76 @@ private fun SessionsList(state: SessionsUiState, nowUtcMs: Long, onOpenSession: 
         }
         item(key = "list-header") {
             Eyebrow(
-                text = pluralStringResource(R.plurals.sessions_count, state.sessions.size, state.sessions.size),
+                text = pluralStringResource(R.plurals.sessions_count, recordings.size, recordings.size),
                 heading = true,
                 modifier = Modifier
                     .contentWidth()
                     .padding(top = Spacing.Xs),
             )
         }
-        items(state.sessions, key = { it.dirName }) { summary ->
-            SessionRow(
-                summary = summary,
-                nowUtcMs = nowUtcMs,
-                labels = labels,
-                onOpen = { onOpenSession(summary.dirName) },
-                modifier = Modifier.contentWidth(),
-            )
+        items(recordings, key = { it.key() }) { recording ->
+            when (recording) {
+                is Recording.Drive -> SessionRow(
+                    summary = recording.summary,
+                    nowUtcMs = nowUtcMs,
+                    labels = labels,
+                    onOpen = { onOpenSession(recording.summary.dirName) },
+                    modifier = Modifier.contentWidth(),
+                )
+
+                is Recording.Capture -> CaptureRow(
+                    capture = recording.capture,
+                    nowUtcMs = nowUtcMs,
+                    onOpen = { onOpenCapture(recording.capture.name) },
+                    modifier = Modifier.contentWidth(),
+                )
+            }
         }
     }
+}
+
+/** A directory name is unique within its own store, but a drive and a capture could share one. */
+internal fun Recording.key(): String = when (this) {
+    is Recording.Drive -> "drive:" + summary.dirName
+    is Recording.Capture -> "capture:" + capture.name
+}
+
+/**
+ * One signalling capture in the Recordings list, wearing the same row as a drive so the list reads as one
+ * list. What it says instead of a signal quality is what was in it: the NAS messages, and in the error
+ * colour when the network refused something, because a reject is the reason anyone opens a capture at all.
+ */
+@Composable
+private fun CaptureRow(
+    capture: SavedCapture,
+    nowUtcMs: Long,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val startedText = startedWords(capture.startedUtcMs, nowUtcMs)
+    val sizeText = Formats.decimalBytes(capture.bytes)
+    val kind = stringResource(R.string.recordings_capture_kind)
+    val chip = when {
+        capture.rejects > 0 -> stringResource(R.string.recordings_capture_rejects, capture.rejects)
+        capture.hasSignalling -> stringResource(R.string.recordings_capture_messages, capture.messages)
+        else -> stringResource(R.string.recordings_capture_quiet)
+    }
+    SessionListRow(
+        title = kind,
+        startedText = startedText,
+        separator = stringResource(R.string.value_separator),
+        onClick = onOpen,
+        modifier = modifier,
+        status = SessionRowStatus.COMPLETED,
+        sizeText = sizeText,
+        contentDescription = listOf(kind, startedText, sizeText, chip).joinToString(", "),
+        trailing = {
+            SignalQualityChip(
+                quality = if (capture.rejects > 0) SignalQuality.POOR else null,
+                label = chip,
+            )
+        },
+    )
 }
 
 /**
@@ -1226,9 +1349,14 @@ private fun SessionsContentPreview() {
                     SessionSummary("20260908-101500_Test", null, started - 160_000_000, null, null, false, false, null, emptyList(), null, 12_000),
                 ),
                 storage = StorageStatus(usedBytes = 5_112_000, freeBytes = 38_000_000_000, policy = StoragePolicy()),
+                captures = listOf(
+                    SavedCapture("20260910-1120", started - 11_000_000, 7_100_000, 1_904, 169, 26),
+                    SavedCapture("20260909-2014", started - 80_000_000, 412_000, 88, 4, 0),
+                ),
             ),
             nowUtcMs = started + 3_600_000,
             onOpenSession = {},
+            onOpenCapture = {},
             onGoToLive = {},
             onRefresh = {},
         )
@@ -1243,6 +1371,7 @@ private fun SessionsEmptyPreview() {
             state = SessionsUiState(loading = false, sessions = emptyList(), storage = null),
             nowUtcMs = 1_789_050_600_000L,
             onOpenSession = {},
+            onOpenCapture = {},
             onGoToLive = {},
             onRefresh = {},
         )

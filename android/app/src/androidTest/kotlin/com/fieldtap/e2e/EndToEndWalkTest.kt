@@ -159,7 +159,7 @@ class EndToEndWalkTest {
     }
 
     private fun saveTestSettings() {
-        screens.openTab(R.string.nav_settings)
+        screens.openTab(R.string.nav_setup)
         screens.awaitText(R.string.settings_section_measurement)
         // The targets are a screen of their own, opened from the tests card's row.
         val targets = hasText(E2e.string(R.string.settings_test_targets)) and hasClickAction()
@@ -418,7 +418,7 @@ class EndToEndWalkTest {
     }
 
     private fun exportAndShare(dirName: String) {
-        screens.openTab(R.string.nav_sessions)
+        screens.openTab(R.string.nav_recordings)
         val row = hasText(SESSION_NAME) and hasClickAction()
         screens.await(row)
         screens.shot("12-sessions")

@@ -285,6 +285,7 @@ fun SettingsScreen(
     onOpenTestTargets: () -> Unit,
     onOpenReadiness: () -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenProbe: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -349,6 +350,7 @@ fun SettingsScreen(
         onOpenTestTargets = onOpenTestTargets,
         onOpenReadiness = onOpenReadiness,
         onOpenAbout = onOpenAbout,
+        onOpenProbe = onOpenProbe,
         onTestsDefaultOnChange = viewModel::setTestsDefaultOn,
         onInstantUpdatesChange = { turnOn ->
             if (turnOn) {
@@ -467,6 +469,7 @@ internal fun SettingsContent(
     onOpenTestTargets: () -> Unit,
     onOpenReadiness: () -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenProbe: () -> Unit,
     onTestsDefaultOnChange: (Boolean) -> Unit,
     onInstantUpdatesChange: (Boolean) -> Unit,
     onAddZoneHere: () -> Unit,
@@ -533,7 +536,12 @@ internal fun SettingsContent(
                 ConsentCard(consent = settings.consent, onWithdraw = onWithdrawConsent, modifier = Modifier.setupContentWidth())
             }
             item(key = "help") {
-                HelpCard(onOpenReadiness = onOpenReadiness, onOpenAbout = onOpenAbout, modifier = Modifier.setupContentWidth())
+                HelpCard(
+                    onOpenReadiness = onOpenReadiness,
+                    onOpenAbout = onOpenAbout,
+                    onOpenProbe = onOpenProbe,
+                    modifier = Modifier.setupContentWidth(),
+                )
             }
         }
     }
@@ -541,8 +549,21 @@ internal fun SettingsContent(
 
 /** The Readiness check and About, each a row opening a screen of its own. About and Readiness were reached from Live's overflow before the tabs. */
 @Composable
-private fun HelpCard(onOpenReadiness: () -> Unit, onOpenAbout: () -> Unit, modifier: Modifier) {
+private fun HelpCard(
+    onOpenReadiness: () -> Unit,
+    onOpenAbout: () -> Unit,
+    onOpenProbe: () -> Unit,
+    modifier: Modifier,
+) {
     SectionCard(title = stringResource(R.string.settings_section_help), icon = FieldTapIcons.Info, modifier = modifier) {
+        // The capability probe was a tab of its own, which put a once-per-phone task beside the two
+        // screens used every day. It belongs with the other setup tasks.
+        NavigationRow(
+            title = stringResource(R.string.settings_probe),
+            onClick = onOpenProbe,
+            supportingText = stringResource(R.string.settings_probe_supporting),
+            icon = FieldTapIcons.Pulse,
+        )
         NavigationRow(
             title = stringResource(R.string.settings_readiness),
             onClick = onOpenReadiness,
@@ -936,6 +957,7 @@ private fun SettingsPreview() {
             onOpenTestTargets = {},
             onOpenReadiness = {},
             onOpenAbout = {},
+            onOpenProbe = {},
             onTestsDefaultOnChange = {},
             onInstantUpdatesChange = {},
             onAddZoneHere = {},
