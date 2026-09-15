@@ -141,7 +141,7 @@ class LocationOffTest {
         result["outcome_markers_dropped"] = outcome.markersDropped
         save()
 
-        screens.openTab(R.string.nav_sessions)
+        screens.openTab(R.string.nav_recordings)
         val row = hasText(SESSION_NAME) and hasClickAction()
         screens.await(row)
         screens.click(row)
