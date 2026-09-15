@@ -48,7 +48,18 @@ sealed interface DiagCaptureResult {
  *
  * Owner: workstream `diag-on-handset`.
  */
-class HandsetDiagCapture(private val timeoutMs: Long = 10_000) {
+class HandsetDiagCapture(
+    private val timeoutMs: Long = 10_000,
+    /**
+     * The wait for the very first `su`, which is the one that raises the superuser prompt.
+     *
+     * A person has to notice the prompt, read it and tap Grant. Killing the process on the ordinary
+     * timeout while they are still deciding is recorded by the superuser app as a denial, and the
+     * next attempt is refused without asking — so a timeout that is merely generous for a command is
+     * a trap for a human.
+     */
+    private val grantTimeoutMs: Long = 90_000,
+) {
 
     /** Where the logger writes on the handset; readable by the app, removed after [collect]. */
     private val outputDir = "/sdcard/diag_logs"
@@ -120,10 +131,10 @@ class HandsetDiagCapture(private val timeoutMs: Long = 10_000) {
 
     private fun running(): Boolean = run("pidof diag_mdlog").trim().isNotEmpty()
 
-    private fun hasRoot(): Boolean = run("id").contains("uid=0")
+    private fun hasRoot(): Boolean = run("id", grantTimeoutMs).contains("uid=0")
 
     /** One `su -c` command, its combined output, or "" when su is absent or the wait ran out. */
-    private fun run(command: String): String {
+    private fun run(command: String, waitMs: Long = timeoutMs): String {
         val process = try {
             ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
         } catch (e: IOException) {
@@ -131,7 +142,7 @@ class HandsetDiagCapture(private val timeoutMs: Long = 10_000) {
         }
         return try {
             val output = process.inputStream.bufferedReader().use { it.readText() }
-            if (!process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) process.destroy()
+            if (!process.waitFor(waitMs, TimeUnit.MILLISECONDS)) process.destroy()
             output
         } catch (e: IOException) {
             ""

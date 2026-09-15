@@ -53,7 +53,10 @@ import com.fieldtap.ui.live.LiveViewModel
 import com.fieldtap.ui.onboarding.DisclosureScreen
 import com.fieldtap.ui.onboarding.OnboardingViewModel
 import com.fieldtap.ui.onboarding.PermissionsScreen
+import com.fieldtap.ui.common.FileSharer
 import com.fieldtap.ui.probe.ProbeScreen
+import com.fieldtap.ui.signalling.SignallingScreen
+import com.fieldtap.ui.signalling.SignallingViewModel
 import com.fieldtap.ui.probe.ProbeViewModel
 import com.fieldtap.ui.readiness.ReadinessScreen
 import com.fieldtap.ui.readiness.ReadinessViewModel
@@ -90,6 +93,9 @@ object Routes {
     const val SESSION_DETAIL: String = "sessions/{dirName}"
     const val READINESS: String = "readiness"
     const val PROBE: String = "probe"
+
+    /** Signalling capture, under Diagnostics: it needs root and is not part of the normal path. */
+    const val SIGNALLING: String = "probe/signalling"
     const val SETTINGS: String = "settings"
 
     /** The ping and download targets, a screen of their own under Settings. */
@@ -288,7 +294,17 @@ fun FieldTapNavHost(
             navigation(startDestination = Routes.PROBE, route = Routes.DIAGNOSTICS_GRAPH) {
                 composable(Routes.PROBE) {
                     val viewModel: ProbeViewModel = viewModel(factory = graphViewModelFactory(graph) { ProbeViewModel(it) })
-                    ProbeScreen(viewModel = viewModel)
+                    ProbeScreen(
+                        viewModel = viewModel,
+                        onOpenSignalling = dropUnlessResumed { navController.navigate(Routes.SIGNALLING) { launchSingleTop = true } },
+                    )
+                }
+                composable(Routes.SIGNALLING) {
+                    val context = LocalContext.current
+                    val exports = java.io.File(context.cacheDir, FileSharer.EXPORTS_DIR)
+                    val viewModel: SignallingViewModel =
+                        viewModel(factory = graphViewModelFactory(graph) { SignallingViewModel(exports) })
+                    SignallingScreen(viewModel = viewModel)
                 }
             }
 

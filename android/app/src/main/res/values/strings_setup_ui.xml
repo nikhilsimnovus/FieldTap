@@ -327,6 +327,8 @@
     <string name="settings_download_heading">Download</string>
     <string name="settings_download_url">HTTPS address</string>
     <string name="settings_download_url_supporting">Leave empty to turn the download off.</string>
+    <string name="probe_open_signalling">Capture signalling</string>
+    <string name="probe_signalling_blurb">With root, this phone can record RRC and NAS from its own modem. FieldTap shows the NAS messages and any reject cause; the rest is exported for Wireshark.</string>
     <string name="settings_upload_heading">Upload</string>
     <string name="settings_upload_url">HTTPS address</string>
     <string name="settings_upload_url_supporting">Leave empty to turn the upload off. Uploads use your mobile data in the direction that is usually slower and dearer, so this starts off.</string>

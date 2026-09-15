@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Signalling capture: the rooted-only screen that reads RRC and NAS off the modem.
+
+  Its own file on purpose. The session screens promise not to decode signalling and
+  SessionStringsTest enforces that by forbidding the wording in strings_session_ui.xml; the setup
+  screens have their own naming rule. This feature is neither, and hiding it inside either file
+  would either break a guard or weaken it.
+-->
+<resources>
+    <!-- Signalling capture (rooted phones only). -->
+    <string name="signalling_title">Signalling</string>
+    <string name="signalling_capture_title">Capture</string>
+    <string name="signalling_explainer">Reads RRC and NAS from the modem through this phone’s own diagnostic logger. Needs root. Message names and reject causes are shown here; RRC bodies are ASN.1 and travel in the exported file for Wireshark.</string>
+    <string name="signalling_start">Start capture</string>
+    <string name="signalling_stop">Stop and read</string>
+    <string name="signalling_export">Export</string>
+    <string name="signalling_export_subject">FieldTap signalling capture</string>
+    <string name="signalling_flow_title">Call flow</string>
+    <!-- %1$d NAS messages shown, %2$d records not decoded here (RRC). -->
+    <string name="signalling_flow_subtitle">%1$d NAS messages · %2$d records left for Wireshark</string>
+    <string name="signalling_empty_title">No capture yet</string>
+    <string name="signalling_empty_message">Start a capture, do something that makes the phone talk to the network, then stop it.</string>
+    <string name="signalling_uplink">phone → network</string>
+    <string name="signalling_downlink">network → phone</string>
+    <!-- %1$d is the 3GPP cause value, %2$s its name. -->
+    <string name="signalling_cause">Cause %1$d · %2$s</string>
+</resources>
