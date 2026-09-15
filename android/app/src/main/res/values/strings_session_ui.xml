@@ -347,6 +347,11 @@
     <string name="issue_check_failed_title">The readiness check could not run</string>
     <string name="issue_check_failed_detail">Some settings could not be read. The session may still record normally.</string>
 
+    <!-- The Live screen's view switcher: three views of the same cell. -->
+    <string name="live_view_signal">Signal</string>
+    <string name="live_view_cell">Cell</string>
+    <string name="live_view_neighbours">Neighbours</string>
+
     <!-- Sessions list -->
     <string name="sessions_title">Recordings</string>
     <!-- The list's section header, e.g. "3 recordings"; %1$d is the count. -->

@@ -19,6 +19,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,6 +27,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fieldtap.R
+import com.fieldtap.ui.common.startedWords
 import com.fieldtap.ui.components.EmptyState
 import com.fieldtap.ui.components.Eyebrow
 import com.fieldtap.ui.components.FieldTapTopBar
@@ -142,11 +144,15 @@ fun CaptureDetailScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val nowUtcMs = remember { System.currentTimeMillis() }
     Scaffold(
         modifier = modifier,
         topBar = {
+            // The directory name is a UTC stamp — "20260915-130400" tells the user nothing they were
+            // looking for. The title says what it is and when, in their own clock.
             FieldTapTopBar(
-                title = state.capture?.name ?: stringResource(R.string.signalling_title),
+                title = state.capture?.let { startedWords(it.startedUtcMs, nowUtcMs) }
+                    ?: stringResource(R.string.recordings_capture_kind),
                 onNavigateUp = onBack,
             )
         },
@@ -168,8 +174,8 @@ fun CaptureDetailScreen(
                             state.failed -> stringResource(R.string.signalling_unreadable)
                             else -> stringResource(
                                 R.string.signalling_flow_subtitle,
-                                state.entries.size,
-                                state.otherRecords,
+                                pluralStringResource(R.plurals.signalling_messages, state.entries.size, state.entries.size),
+                                pluralStringResource(R.plurals.signalling_records, state.otherRecords, state.otherRecords),
                             )
                         },
                         style = MaterialTheme.typography.bodyMedium,

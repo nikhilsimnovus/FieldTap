@@ -22,8 +22,16 @@
     <string name="signalling_export">Export the raw file</string>
     <string name="signalling_export_subject">FieldTap signalling capture</string>
     <string name="signalling_flow_title">Call flow</string>
-    <!-- %1$d NAS messages shown, %2$d records not decoded here (RRC). -->
-    <string name="signalling_flow_subtitle">%1$d messages · %2$d records left for Wireshark</string>
+    <!-- %1$s the NAS messages shown, %2$s the records not decoded here (RRC). -->
+    <string name="signalling_flow_subtitle">%1$s · %2$s left for Wireshark</string>
+    <plurals name="signalling_messages">
+        <item quantity="one">%1$d message</item>
+        <item quantity="other">%1$d messages</item>
+    </plurals>
+    <plurals name="signalling_records">
+        <item quantity="one">%1$d record</item>
+        <item quantity="other">%1$d records</item>
+    </plurals>
     <string name="signalling_uplink">phone → network</string>
     <string name="signalling_downlink">network → phone</string>
     <!-- %1$d is the 3GPP cause value, %2$s its name. -->

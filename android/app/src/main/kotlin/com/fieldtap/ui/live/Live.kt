@@ -141,6 +141,7 @@ import com.fieldtap.ui.components.SignalDonutHero
 import com.fieldtap.ui.components.SignalHistoryChart
 import com.fieldtap.ui.components.SignalQualityLabels
 import com.fieldtap.ui.components.StatusBanner
+import com.fieldtap.ui.components.ViewSwitcher
 import com.fieldtap.ui.components.StatusChip
 import com.fieldtap.ui.components.TopBarAction
 import com.fieldtap.ui.components.TopBarToggleAction
@@ -637,6 +638,26 @@ private const val MAX_TEXT_LENGTH: Int = 120
 private const val UNKNOWN_VALUE: String = "—"
 
 /** Everything the Live content can ask for, so the stateless content can be previewed. */
+/**
+ * Which view of the serving cell the phone layout shows, in switcher order.
+ *
+ * Live knows nine cards' worth about the cell. All nine in one scroll was the app's own filing order, not
+ * anybody's reading order: three named views put the glanceable half first and leave the rest one tap away
+ * rather than nine scrolls down.
+ *
+ * Owner: workstream `ui-session`.
+ */
+enum class LiveView(@StringRes val label: Int) {
+    /** What you look at while walking: the serving tiles, the trend, the state chips. */
+    SIGNAL(R.string.live_view_signal),
+
+    /** Which cell this is, which cells it has been, and how often it is being sampled. */
+    CELL(R.string.live_view_cell),
+
+    /** Everything else the phone can see from here, and the carriers aggregated with the serving cell. */
+    NEIGHBOURS(R.string.live_view_neighbours),
+}
+
 private data class LiveActions(
     val onStart: (StartRequest) -> Unit,
     val onStartAnyway: () -> Unit,
@@ -661,6 +682,9 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
     var startDialogOpen by rememberSaveable { mutableStateOf(false) }
     var markDialogOpen by rememberSaveable { mutableStateOf(false) }
     var stopDialogOpen by rememberSaveable { mutableStateOf(false) }
+    // Which view of the cell the phone layout is showing. Saved, so it survives rotation and process death:
+    // someone watching neighbours who turns the phone should still be watching neighbours.
+    var view by rememberSaveable { mutableStateOf(LiveView.SIGNAL) }
     val buttonState = LivePresentation.buttonState(state.status, state.prestart)
 
     val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -743,6 +767,8 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
                 state = state,
                 actions = actions,
                 requestPreciseLocation = requestPreciseLocation,
+                view = view,
+                onSelectView = { view = it },
                 modifier = Modifier.padding(padding),
                 actionsBeside = if (actionsBeside) {
                     {
@@ -831,10 +857,12 @@ private class LiveParts(
 )
 
 /**
- * Upright on a phone: the serving cell (its RSRQ and SINR in one row, or one line in the hero when the cell reports
- * neither), then the cadence, service, data, 5G and GPS chips, then the 5-minute trend, so what an engineer glances at
- * while walking is on the first screen at font scale 1.0 on a Pixel 7, as ScreenTourTest asserts; the cadence details,
- * the cell details and neighbours follow. From [Sizes.WideLayoutMinWidth] (landscape phones, tablets) two panes: the
+ * Upright on a phone: any banner, then a [ViewSwitcher] over three views of the same cell — Signal (the serving
+ * tiles, the 5-minute trend, the cadence/service/data/5G/GPS chips), Cell (its details, the cells it has sat on,
+ * the cadence detail) and Neighbours. Nine cards in one scroll was everything the app knows stacked in the order
+ * it was written; what an engineer glances at while walking is the first view, on the first screen at font scale
+ * 1.0 on a Pixel 7, as ScreenTourTest asserts. From [Sizes.WideLayoutMinWidth] (landscape phones, tablets) there is
+ * room for all of it at once, so the wide layout keeps both panes and shows no switcher: two panes, the
  * serving cell and its details on one side, the trend first on the other, then the chips and cadence details.
  * [actionsBeside], in a short wide window, is the rail at the end: the bar's actions at its top, the session buttons at
  * its bottom.
@@ -844,6 +872,8 @@ private fun LiveList(
     state: LiveUiState,
     actions: LiveActions,
     requestPreciseLocation: () -> Unit,
+    view: LiveView,
+    onSelectView: (LiveView) -> Unit,
     modifier: Modifier = Modifier,
     actionsBeside: (@Composable () -> Unit)? = null,
 ) {
@@ -908,15 +938,34 @@ private fun LiveList(
                     verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    // Banners sit above the switcher: they are why the screen is not showing what it should,
+                    // and hiding one behind an unchosen view would be hiding the answer.
                     bannerItems(parts)
-                    servingTilesItem(parts)
-                    statusChipsItem(parts)
-                    chartItem(parts)
-                    cadenceDetailsItem(parts)
-                    servingCardItem(parts)
-                    neighboursItem(parts)
-                    servingHistoryItem(parts)
-                    limitsItem(parts)
+                    item(key = "view-switcher") {
+                        ViewSwitcher(
+                            options = LiveView.entries,
+                            selected = view,
+                            label = { stringResource(it.label) },
+                            onSelect = onSelectView,
+                            modifier = Modifier.contentWidth(),
+                        )
+                    }
+                    when (view) {
+                        LiveView.SIGNAL -> {
+                            servingTilesItem(parts)
+                            chartItem(parts)
+                            statusChipsItem(parts)
+                            limitsItem(parts)
+                        }
+
+                        LiveView.CELL -> {
+                            servingCardItem(parts)
+                            servingHistoryItem(parts)
+                            cadenceDetailsItem(parts)
+                        }
+
+                        LiveView.NEIGHBOURS -> neighboursItem(parts)
+                    }
                 }
                 if (actionsBeside != null) ActionColumn(actionsBeside, modifier = Modifier.padding(end = gutter))
             }

@@ -69,8 +69,8 @@ import com.fieldtap.format.LocationPrecision
 import com.fieldtap.format.SessionFile
 import com.fieldtap.format.SessionMeta
 import com.fieldtap.ui.FieldTapTheme
-import com.fieldtap.ui.common.DayDistance
 import com.fieldtap.ui.common.DisplayTime
+import com.fieldtap.ui.common.startedWords
 import com.fieldtap.ui.common.FileSharer
 import com.fieldtap.ui.common.StopKind
 import com.fieldtap.ui.common.StopReasons
@@ -612,6 +612,9 @@ private fun CaptureRow(
         status = SessionRowStatus.COMPLETED,
         sizeText = sizeText,
         contentDescription = listOf(kind, startedText, sizeText, chip).joinToString(", "),
+        // The waveform, the same mark the Signalling tab wears: a capture and a drive are one list, but
+        // they are not the same thing, and the badge is where that shows.
+        icon = FieldTapIcons.Pulse,
         trailing = {
             SignalQualityChip(
                 quality = if (capture.rejects > 0) SignalQuality.POOR else null,
@@ -740,16 +743,6 @@ private fun SessionRow(
             }
         },
     )
-}
-
-/** "Today 6:19 PM", "Yesterday 9:12 AM", "Wed 6:02 PM", "Sep 9", or "Sep 9, 2025" from another year: one line of a row. */
-@Composable
-private fun startedWords(utcMs: Long, nowUtcMs: Long): String = when (DisplayTime.dayDistance(utcMs, nowUtcMs)) {
-    DayDistance.TODAY -> stringResource(R.string.sessions_when_today, DisplayTime.time(utcMs))
-    DayDistance.YESTERDAY -> stringResource(R.string.sessions_when_yesterday, DisplayTime.time(utcMs))
-    DayDistance.THIS_WEEK -> stringResource(R.string.sessions_when_weekday, DisplayTime.weekday(utcMs), DisplayTime.time(utcMs))
-    DayDistance.THIS_YEAR -> DisplayTime.monthDay(utcMs)
-    DayDistance.EARLIER -> DisplayTime.date(utcMs)
 }
 
 @Composable
